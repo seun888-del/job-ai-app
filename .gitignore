@@ -1,0 +1,11 @@
+node_modules/
+dist/
+playwright-browsers/
+_tmp_*/
+*.db
+*.log
+.admin_secret.txt
+.env
+.env.*
+screenshots/
+logs/

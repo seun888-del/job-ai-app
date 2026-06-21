@@ -1,0 +1,69 @@
+{
+  "name": "job-bot-app",
+  "version": "0.1.0",
+  "description": "Desktop app for automated job search and application",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "dist:mac": "electron-builder --mac"
+  },
+  "dependencies": {
+    "pdf-parse": "^1.1.4",
+    "pdfkit": "^0.15.0",
+    "playwright": "^1.48.0",
+    "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.femimerit.jobbotapp",
+    "productName": "JobBot",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!dist",
+      "!playwright-browsers",
+      "!_tmp_*"
+    ],
+    "extraResources": [
+      {
+        "from": "playwright-browsers",
+        "to": "playwright-browsers"
+      }
+    ],
+    "win": {
+      "target": [{"target": "nsis", "arch": ["x64"]}],
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [{"target": "dmg", "arch": ["x64", "arm64"]}],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "JobBot",
+      "contents": [
+        {"x": 130, "y": 220},
+        {"x": 410, "y": 220, "type": "link", "path": "/Applications"}
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "JobBot"
+    }
+  }
+}
