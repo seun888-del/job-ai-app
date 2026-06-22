@@ -361,7 +361,7 @@ function buildTextareaAnswer(label, job) {
   const lbl = (label || '').toLowerCase();
 
   if (/cover letter|covering letter|cover note/i.test(lbl)) {
-    return `I am writing to express my strong interest in the ${title} position at ${company}. With ${yearsText} experience in ${domain}, I have developed a proven ability to deliver results in fast-paced environments. I am confident in my ability to contribute effectively from day one and look forward to the opportunity to discuss my application further.`;
+    return (job && job.coverLetter) || `I am writing to express my strong interest in the ${title} position at ${company}. With ${yearsText} experience in ${domain}, I have developed a proven ability to deliver results in fast-paced environments. I am confident in my ability to contribute effectively from day one and look forward to the opportunity to discuss my application further.`;
   }
   if (/notice period|availability|available to start|when can you start/i.test(lbl)) {
     return 'I am immediately available and can start at short notice.';

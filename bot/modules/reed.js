@@ -411,7 +411,7 @@ async function applyToJob(page, job, resumePath) {
   await page.screenshot({ path: `${SSDIR}/reed_after_cv_upload.png` });
 
   await answerScreeningQuestions(page);
-  await fillCoverLetter(page);
+  await fillCoverLetter(page, job);
 
   await page.screenshot({ path: `${SSDIR}/reed_pre_submit.png` });
 
@@ -519,7 +519,7 @@ async function uploadResume(page, resumePath) {
   }
 }
 
-async function fillCoverLetter(page) {
+async function fillCoverLetter(page, job) {
   try {
     const textareas = await page.$$('textarea');
     for (const ta of textareas) {
@@ -535,7 +535,7 @@ async function fillCoverLetter(page) {
 
       let text = '';
       if (/cover letter/i.test(ctx)) {
-        text = 'I am excited about this opportunity and believe my background in IT support, service desk operations and technical troubleshooting aligns well with your requirements. I have a strong track record of resolving incidents efficiently, supporting end users across a range of hardware and software issues, and contributing to continuous service improvement. I look forward to bringing these skills to your team.';
+        text = (job && job.coverLetter) || 'I am enthusiastic about this opportunity and believe my experience aligns well with your requirements. Please see my CV for a comprehensive overview of my background. I look forward to discussing my application further.';
       } else if (/additional|tell us|message|why|anything else|motivat/i.test(ctx)) {
         text = 'Please see my CV for a comprehensive overview of my relevant experience and qualifications. I am enthusiastic about this role and available for interview at your earliest convenience.';
       } else {

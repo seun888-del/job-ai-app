@@ -23,6 +23,16 @@ async function init(userDataPath) {
   const buffer = fs.existsSync(dbPath) ? fs.readFileSync(dbPath) : undefined;
   const db = new SQL.Database(buffer);
   db.run(schema); // idempotent — creates tables if missing
+
+  // Migration: add cover_letter column if not present
+  const colStmt = db.prepare('PRAGMA table_info(queue)');
+  const cols = [];
+  while (colStmt.step()) cols.push(colStmt.getAsObject().name);
+  colStmt.free();
+  if (!cols.includes('cover_letter')) {
+    db.run('ALTER TABLE queue ADD COLUMN cover_letter TEXT');
+  }
+
   fs.writeFileSync(dbPath, Buffer.from(db.export()));
   db.close();
 }
@@ -53,6 +63,7 @@ function rowToJob(row) {
     cvName: row.cv_name,
     cvScore: row.cv_score,
     cvPath: row.cv_path,
+    coverLetter: row.cover_letter,
     error: row.error,
     addedAt: row.added_at,
     updatedAt: row.updated_at,
@@ -78,8 +89,8 @@ function add(job) {
     if (exists) return;
 
     db.run(`INSERT INTO queue
-      (job_id, title, company, url, source, description, status, reason, work_type, cv_name, cv_score, cv_path, error)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+      (job_id, title, company, url, source, description, status, reason, work_type, cv_name, cv_score, cv_path, cover_letter, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
       job.jobId,
       job.title ?? null,
       job.company ?? null,
@@ -92,6 +103,7 @@ function add(job) {
       job.cvName ?? null,
       job.cvScore ?? null,
       job.cvPath ?? null,
+      job.coverLetter ?? null,
       job.error ?? null,
     ]);
     markMutated();
@@ -102,7 +114,7 @@ const FIELD_MAP = {
   title: 'title', company: 'company', url: 'url', source: 'source',
   description: 'description', status: 'status', reason: 'reason',
   workType: 'work_type', cvName: 'cv_name', cvScore: 'cv_score',
-  cvPath: 'cv_path', error: 'error',
+  cvPath: 'cv_path', coverLetter: 'cover_letter', error: 'error',
 };
 
 // Update fields on a job entry

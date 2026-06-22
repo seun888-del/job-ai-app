@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS queue (
   cv_name TEXT,
   cv_score INTEGER,
   cv_path TEXT,
+  cover_letter TEXT,
   error TEXT,
   added_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT

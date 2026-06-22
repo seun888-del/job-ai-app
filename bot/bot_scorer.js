@@ -25,6 +25,7 @@ const queue      = require('./modules/queue_manager');
 const { cleanText }            = require('./modules/cv_cleaner');
 const { writePDF, buildPaths } = require('./modules/cv_pdf_writer');
 const { tailorCV }             = require('./modules/cv_tailor');
+const { generateCoverLetter }  = require('./modules/cover_letter');
 const { llmAvailable, isHosted, mode: llmMode } = require('../src/services/llm');
 
 const MAX_BOOST_ATTEMPTS = 4;   // max keyword-inject rounds per CV
@@ -152,11 +153,22 @@ async function processJob(job) {
     await writePDF(bestCvText, paths.upload);
     const flag = bestScore >= BOOST_TARGET ? '✓' : '~';
     console.log(`  [Scorer Bot] ${flag} ${bestCvName} → ${bestScore}% | PDF: ${paths.saved}`);
+
+    // Generate tailored cover letter
+    let coverLetter = null;
+    try {
+      coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, bestCvText);
+      if (coverLetter) console.log(`  [Scorer Bot] ✓ Cover letter generated (${coverLetter.length} chars)`);
+    } catch (err) {
+      console.warn(`  [Scorer Bot] Cover letter generation failed: ${err.message}`);
+    }
+
     queue.update(job.jobId, {
-      status:  'cv_ready',
-      cvPath:  paths.saved,
-      cvScore: bestScore,
-      cvName:  bestCvName,
+      status:      'cv_ready',
+      cvPath:      paths.saved,
+      cvScore:     bestScore,
+      cvName:      bestCvName,
+      coverLetter: coverLetter,
     });
     return;
   }
