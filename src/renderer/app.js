@@ -19,26 +19,54 @@ function showStatus(el, msg, type = 'success') {
 }
 
 async function render(view) {
+  let fn;
   switch (view) {
-    case 'personal':   return renderPersonal();
-    case 'login':      return renderLogin();
-    case 'cvs':        return renderCVs();
-    case 'search':     return renderSearch();
-    case 'license':    return renderLicense();
-    case 'dashboard':  return renderDashboard();
-    case 'help':       return renderHelp();
-    default:           return renderPersonal();
+    case 'personal':   fn = renderPersonal; break;
+    case 'login':      fn = renderLogin; break;
+    case 'cvs':        fn = renderCVs; break;
+    case 'search':     fn = renderSearch; break;
+    case 'license':    fn = renderLicense; break;
+    case 'dashboard':  fn = renderDashboard; break;
+    case 'help':       fn = renderHelp; break;
+    default:           fn = renderPersonal;
+  }
+  await fn();
+  // Wrap the rendered content in a fluid max-width container so it stretches
+  // proportionally at any window size rather than being pinned to a fixed width.
+  if (!content.querySelector('.page-content')) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'page-content';
+    wrapper.append(...Array.from(content.childNodes));
+    content.appendChild(wrapper);
   }
 }
 
 // ── 1. Personal Details ─────────────────────────────────────────────────
 async function renderPersonal() {
   const p = await window.api.profile.get();
+  const country = p.country || 'United Kingdom';
+  const empTypes = (p.employment_type || '').split(',').filter(Boolean);
 
   content.innerHTML = `
     <div class="page-header">
       <h2>Personal Details</h2>
       <p>This information is used to pre-fill job applications.</p>
+    </div>
+
+    <div class="card">
+      <h3>Your Region</h3>
+      <p class="card-hint">Determines which job sites are available and how employer screening questions are answered.</p>
+      <div class="country-picker">
+        <button class="country-btn${country === 'United Kingdom' ? ' active' : ''}" data-country="United Kingdom">
+          <span class="country-flag">🇬🇧</span>
+          <span class="country-name">United Kingdom</span>
+        </button>
+        <button class="country-btn${country === 'United States' ? ' active' : ''}" data-country="United States">
+          <span class="country-flag">🇺🇸</span>
+          <span class="country-name">United States</span>
+        </button>
+      </div>
+      <input type="hidden" id="country" value="${country}">
     </div>
 
     <div class="card">
@@ -51,14 +79,14 @@ async function renderPersonal() {
         <div class="field"><label>Phone</label><input id="phone" value="${p.phone || ''}"></div>
         <div class="field"><label>Email</label><input id="email" value="${p.email || ''}"></div>
       </div>
-      <div class="field"><label>Location</label><input id="location" value="${p.location || ''}"></div>
+      <div class="field"><label>Location (city, state/county)</label><input id="location" value="${p.location || ''}"></div>
       <div class="field"><label>LinkedIn URL</label><input id="linkedin_url" value="${p.linkedin_url || ''}"></div>
     </div>
 
     <div class="card">
       <h3>Work Eligibility</h3>
       <div class="field"><label>Years of experience</label><input id="years_experience" type="number" min="0" value="${p.years_experience ?? 0}"></div>
-      <div class="field"><label>Salary expectation (e.g. 35000 or £35,000–£40,000)</label><input id="salary_expectation" value="${p.salary_expectation || ''}"></div>
+      <div class="field"><label>Salary expectation (e.g. 45000 or $45,000–$55,000)</label><input id="salary_expectation" value="${p.salary_expectation || ''}"></div>
       <div class="field">
         <label>Countries I am eligible to work in (hold Ctrl/Cmd to select multiple)</label>
         ${(() => {
@@ -78,15 +106,114 @@ async function renderPersonal() {
       </div>
       <div class="checkbox-field">
         <input id="driving_licence" type="checkbox" ${p.driving_licence ? 'checked' : ''}>
-        <label for="driving_licence">I have a valid driving licence</label>
+        <label for="driving_licence">I have a valid driving licence / driver's license</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Job Preferences</h3>
+      <p class="card-hint">Used by the bot to filter jobs and answer screening questions accurately.</p>
+      <div class="field">
+        <label>Experience level</label>
+        <select id="experience_level">
+          <option value="" ${!p.experience_level ? 'selected' : ''}>Not specified</option>
+          <option value="entry" ${p.experience_level === 'entry' ? 'selected' : ''}>Entry-level</option>
+          <option value="junior" ${p.experience_level === 'junior' ? 'selected' : ''}>Junior</option>
+          <option value="mid" ${p.experience_level === 'mid' ? 'selected' : ''}>Mid-level</option>
+          <option value="senior" ${p.experience_level === 'senior' ? 'selected' : ''}>Senior</option>
+          <option value="lead" ${p.experience_level === 'lead' ? 'selected' : ''}>Lead</option>
+          <option value="director" ${p.experience_level === 'director' ? 'selected' : ''}>Director</option>
+          <option value="executive" ${p.experience_level === 'executive' ? 'selected' : ''}>Executive</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Employment type</label>
+        <div class="checkbox-group">
+          <label class="checkbox-label"><input type="checkbox" name="employment_type" value="full_time" ${empTypes.includes('full_time') ? 'checked' : ''}> Full-time</label>
+          <label class="checkbox-label"><input type="checkbox" name="employment_type" value="part_time" ${empTypes.includes('part_time') ? 'checked' : ''}> Part-time</label>
+          <label class="checkbox-label"><input type="checkbox" name="employment_type" value="contract" ${empTypes.includes('contract') ? 'checked' : ''}> Contract / Freelance</label>
+        </div>
+      </div>
+      <div class="field">
+        <label>Availability / notice period</label>
+        <select id="availability">
+          <option value="immediately" ${(p.availability || 'immediately') === 'immediately' ? 'selected' : ''}>Immediately available</option>
+          <option value="1week" ${p.availability === '1week' ? 'selected' : ''}>1 week notice</option>
+          <option value="2weeks" ${p.availability === '2weeks' ? 'selected' : ''}>2 weeks notice</option>
+          <option value="1month" ${p.availability === '1month' ? 'selected' : ''}>1 month notice</option>
+          <option value="2months" ${p.availability === '2months' ? 'selected' : ''}>2 months notice</option>
+          <option value="3months" ${p.availability === '3months' ? 'selected' : ''}>3 months notice</option>
+        </select>
+      </div>
+      <div class="checkbox-field">
+        <input id="willing_to_relocate" type="checkbox" ${p.willing_to_relocate ? 'checked' : ''}>
+        <label for="willing_to_relocate">I am willing to relocate</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Equal Opportunities</h3>
+      <p class="card-hint">Optional. Used to auto-fill employer diversity and inclusion forms. US employers are legally required to collect this information.</p>
+      <div class="field-row">
+        <div class="field">
+          <label>Gender</label>
+          <select id="eeo_gender">
+            <option value="" ${!p.eeo_gender ? 'selected' : ''}>Prefer not to say</option>
+            <option value="male" ${p.eeo_gender === 'male' ? 'selected' : ''}>Male</option>
+            <option value="female" ${p.eeo_gender === 'female' ? 'selected' : ''}>Female</option>
+            <option value="nonbinary" ${p.eeo_gender === 'nonbinary' ? 'selected' : ''}>Non-binary</option>
+            <option value="other" ${p.eeo_gender === 'other' ? 'selected' : ''}>Other / Self-describe</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Ethnicity</label>
+          <select id="eeo_ethnicity">
+            <option value="" ${!p.eeo_ethnicity ? 'selected' : ''}>Prefer not to say</option>
+            <option value="white" ${p.eeo_ethnicity === 'white' ? 'selected' : ''}>White</option>
+            <option value="black" ${p.eeo_ethnicity === 'black' ? 'selected' : ''}>Black or African American</option>
+            <option value="asian" ${p.eeo_ethnicity === 'asian' ? 'selected' : ''}>Asian or Asian British</option>
+            <option value="hispanic" ${p.eeo_ethnicity === 'hispanic' ? 'selected' : ''}>Hispanic or Latino</option>
+            <option value="mixed" ${p.eeo_ethnicity === 'mixed' ? 'selected' : ''}>Mixed / Multiple ethnic groups</option>
+            <option value="mena" ${p.eeo_ethnicity === 'mena' ? 'selected' : ''}>Middle Eastern or North African</option>
+            <option value="other" ${p.eeo_ethnicity === 'other' ? 'selected' : ''}>Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Disability status</label>
+          <select id="eeo_disability">
+            <option value="" ${!p.eeo_disability ? 'selected' : ''}>Prefer not to say</option>
+            <option value="no" ${p.eeo_disability === 'no' ? 'selected' : ''}>No</option>
+            <option value="yes" ${p.eeo_disability === 'yes' ? 'selected' : ''}>Yes</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Veteran status <span class="field-note">(US applications)</span></label>
+          <select id="eeo_veteran">
+            <option value="" ${!p.eeo_veteran ? 'selected' : ''}>Prefer not to say</option>
+            <option value="no" ${p.eeo_veteran === 'no' ? 'selected' : ''}>Not a veteran</option>
+            <option value="yes" ${p.eeo_veteran === 'yes' ? 'selected' : ''}>Protected veteran</option>
+          </select>
+        </div>
       </div>
       <button class="primary" id="save">Save & Continue</button>
       <div class="status-msg" id="status"></div>
     </div>
   `;
 
+  content.querySelectorAll('.country-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      content.querySelectorAll('.country-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('country').value = btn.dataset.country;
+    });
+  });
+
   document.getElementById('save').addEventListener('click', async () => {
+    const selectedEmpTypes = Array.from(document.querySelectorAll('input[name="employment_type"]:checked')).map(cb => cb.value).join(',');
     await window.api.profile.save({
+      country: document.getElementById('country').value,
       first_name: document.getElementById('first_name').value,
       last_name: document.getElementById('last_name').value,
       phone: document.getElementById('phone').value,
@@ -98,6 +225,14 @@ async function renderPersonal() {
       right_to_work_countries: Array.from(document.getElementById('right_to_work_countries').selectedOptions).map(o => o.value).join(','),
       requires_sponsorship: Number(document.getElementById('requires_sponsorship').value),
       driving_licence: document.getElementById('driving_licence').checked ? 1 : 0,
+      experience_level: document.getElementById('experience_level').value,
+      employment_type: selectedEmpTypes,
+      availability: document.getElementById('availability').value,
+      willing_to_relocate: document.getElementById('willing_to_relocate').checked ? 1 : 0,
+      eeo_gender: document.getElementById('eeo_gender').value,
+      eeo_ethnicity: document.getElementById('eeo_ethnicity').value,
+      eeo_disability: document.getElementById('eeo_disability').value,
+      eeo_veteran: document.getElementById('eeo_veteran').value,
     });
     showStatus(document.getElementById('status'), 'Saved');
   });
@@ -105,9 +240,11 @@ async function renderPersonal() {
 
 // ── 2. Job Site Login ────────────────────────────────────────────────────
 async function renderLogin() {
-  const [reedCred, liCred] = await Promise.all([
+  const [reedCred, liCred, indeedCred, gdCred] = await Promise.all([
     window.api.credentials.get('reed'),
     window.api.credentials.get('linkedin'),
+    window.api.credentials.get('indeed'),
+    window.api.credentials.get('glassdoor'),
   ]);
 
   content.innerHTML = `
@@ -131,43 +268,44 @@ async function renderLogin() {
       <button class="primary" id="save-li">Save LinkedIn Login</button>
       <div class="status-msg" id="status-li"></div>
     </div>
+
+    <div class="card">
+      <h3>Indeed</h3>
+      <div class="field"><label>Email</label><input id="indeed_email" value="${indeedCred?.username || ''}"></div>
+      <div class="field"><label>Password</label><input id="indeed_pass" type="password" value=""></div>
+      <button class="primary" id="save-indeed">Save Indeed Login</button>
+      <div class="status-msg" id="status-indeed"></div>
+    </div>
+
+    <div class="card">
+      <h3>Glassdoor</h3>
+      <div class="field"><label>Email</label><input id="gd_email" value="${gdCred?.username || ''}"></div>
+      <div class="field"><label>Password</label><input id="gd_pass" type="password" value=""></div>
+      <button class="primary" id="save-gd">Save Glassdoor Login</button>
+      <div class="status-msg" id="status-gd"></div>
+    </div>
   `;
 
-  document.getElementById('save-reed').addEventListener('click', async () => {
-    const username = document.getElementById('reed_email').value.trim();
-    const password = document.getElementById('reed_pass').value;
-    const statusEl = document.getElementById('status-reed');
-
-    if (!username || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
-      showStatus(statusEl, 'Enter a valid email address', 'error');
-      return;
-    }
+  const saveCredential = async (site, usernameId, passwordId, statusId, successMsg) => {
+    const username = document.getElementById(usernameId).value.trim();
+    const password = document.getElementById(passwordId).value;
+    const statusEl = document.getElementById(statusId);
+    if (!username) { showStatus(statusEl, 'Enter a value', 'error'); return; }
     if (!password || password.length < 6) {
-      showStatus(statusEl, 'Password must be at least 6 characters', 'error');
-      return;
+      showStatus(statusEl, 'Password must be at least 6 characters', 'error'); return;
     }
+    await window.api.credentials.save(site, username, password);
+    showStatus(statusEl, successMsg);
+  };
 
-    await window.api.credentials.save('reed', username, password);
-    showStatus(statusEl, 'Saved — Reed Bot will open a login window on first start to verify');
-  });
-
-  document.getElementById('save-li').addEventListener('click', async () => {
-    const username = document.getElementById('li_email').value.trim();
-    const password = document.getElementById('li_pass').value;
-    const statusEl = document.getElementById('status-li');
-
-    if (!username || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
-      showStatus(statusEl, 'Enter a valid email address', 'error');
-      return;
-    }
-    if (!password || password.length < 6) {
-      showStatus(statusEl, 'Password must be at least 6 characters', 'error');
-      return;
-    }
-
-    await window.api.credentials.save('linkedin', username, password);
-    showStatus(statusEl, 'Saved — LinkedIn Bot will open a browser window on first start');
-  });
+  document.getElementById('save-reed').addEventListener('click', () =>
+    saveCredential('reed', 'reed_email', 'reed_pass', 'status-reed', 'Saved — Reed Bot will open a login window on first start to verify'));
+  document.getElementById('save-li').addEventListener('click', () =>
+    saveCredential('linkedin', 'li_email', 'li_pass', 'status-li', 'Saved — LinkedIn Bot will open a browser window on first start'));
+  document.getElementById('save-indeed').addEventListener('click', () =>
+    saveCredential('indeed', 'indeed_email', 'indeed_pass', 'status-indeed', 'Saved — Indeed Bot will open a browser window on first start to verify'));
+  document.getElementById('save-gd').addEventListener('click', () =>
+    saveCredential('glassdoor', 'gd_email', 'gd_pass', 'status-gd', 'Saved — Glassdoor Bot will open a browser window on first start'));
 }
 
 // ── 3. CVs ──────────────────────────────────────────────────────────────
@@ -533,7 +671,7 @@ async function renderLicense() {
 }
 
 // ── Dashboard ────────────────────────────────────────────────────────────
-const BOT_LABELS = { reed: 'Reed Bot', scorer: 'Scorer Bot', linkedin: 'LinkedIn Bot' };
+const BOT_LABELS = { reed: 'Reed Bot', scorer: 'Scorer Bot (AI)', linkedin: 'LinkedIn Bot', indeed: 'Indeed Bot', glassdoor: 'Glassdoor Bot' };
 
 let botLogUnsub = null;
 let botStatusUnsub = null;
@@ -553,6 +691,50 @@ function setBotControlsState(botName, status) {
   if (stopBtn) stopBtn.disabled = status !== 'running';
 }
 
+function buildApplicationsGraph(dailyApps) {
+  if (!dailyApps || dailyApps.length === 0) {
+    return '<div class="graph-empty">No applications recorded yet</div>';
+  }
+  const W = 560, H = 80, PAD = 4;
+  const maxCount = Math.max(...dailyApps.map(d => d.count), 1);
+  const barW = Math.floor((W - PAD * 2) / 14);
+  // Build a 14-day window with zeroes for missing days
+  const days = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000);
+    const key = d.toISOString().slice(0, 10);
+    const found = dailyApps.find(r => r.day === key);
+    days.push({ key, count: found ? found.count : 0, label: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) });
+  }
+  const bars = days.map((d, i) => {
+    const barH = Math.max(2, Math.round((d.count / maxCount) * (H - 20)));
+    const x = PAD + i * barW;
+    const y = H - barH - 16;
+    const isToday = i === 13;
+    return `<rect x="${x}" y="${y}" width="${barW - 2}" height="${barH}" class="graph-bar${isToday ? ' graph-bar-today' : ''}" rx="2">
+      <title>${d.label}: ${d.count} application${d.count !== 1 ? 's' : ''}</title></rect>
+      ${d.count > 0 ? `<text x="${x + (barW - 2) / 2}" y="${y - 2}" class="graph-label" text-anchor="middle">${d.count}</text>` : ''}`;
+  });
+  const labels = [days[0], days[6], days[13]].map(d => {
+    const i = days.indexOf(d);
+    return `<text x="${PAD + i * barW + (barW - 2) / 2}" y="${H}" class="graph-date" text-anchor="middle">${d.label}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H + 4}" class="applications-graph" xmlns="http://www.w3.org/2000/svg">${bars.join('')}${labels.join('')}</svg>`;
+}
+
+function buildPreflightWarning(profile) {
+  const missing = [];
+  if (!profile?.first_name) missing.push('First name');
+  if (!profile?.last_name) missing.push('Last name');
+  if (!profile?.email) missing.push('Email');
+  if (!profile?.phone) missing.push('Phone');
+  if (!missing.length) return '';
+  return `<div class="preflight-warning">
+    ⚠ Your profile is incomplete — the bots may fail on contact fields. Please fill in: <strong>${missing.join(', ')}</strong>
+    <button class="preflight-link" data-view="personal">Complete Profile →</button>
+  </div>`;
+}
+
 function statusBadgeClass(status) {
   switch (status) {
     case 'applied': return 'badge-success';
@@ -563,12 +745,15 @@ function statusBadgeClass(status) {
 }
 
 async function renderDashboard() {
-  const [summary, recent, status, license] = await Promise.all([
+  const [summary, recent, status, license, profile, dailyApps] = await Promise.all([
     window.api.queue.summary(),
     window.api.queue.recent(20),
     window.api.bot.status(),
     window.api.license.get(),
+    window.api.profile.get(),
+    window.api.queue.dailyApplications(14),
   ]);
+  const isUS = (profile?.country || 'United Kingdom') === 'United States';
   dashboardHasLicense = !!(license?.license_key && (!license.expires_at || new Date(license.expires_at) > Date.now()));
 
   const counts = {};
@@ -586,8 +771,10 @@ async function renderDashboard() {
       <button class="no-license-cta" data-view="license">Activate license →</button>
     </div>` : ''}
 
+    ${buildPreflightWarning(profile)}
+
     <div class="bot-controls">
-      ${Object.entries(BOT_LABELS).map(([key, label]) => `
+      ${Object.entries(BOT_LABELS).filter(([key]) => !(isUS && key === 'reed')).map(([key, label]) => `
         <div class="card bot-card${status[key] === 'running' ? ' bot-card-running' : ''}" id="bot-card-${key}">
           <div class="bot-card-header">
             <strong>${label}</strong>
@@ -624,6 +811,11 @@ async function renderDashboard() {
     </div>
 
     <div class="card card-wide">
+      <h3>Applications — Last 14 Days</h3>
+      ${buildApplicationsGraph(dailyApps)}
+    </div>
+
+    <div class="card card-wide">
       <h3>Recent Activity</h3>
       <table class="data-table">
         <thead>
@@ -646,6 +838,9 @@ async function renderDashboard() {
 
   const noLicenseCta = content.querySelector('.no-license-cta');
   if (noLicenseCta) noLicenseCta.addEventListener('click', () => render('license'));
+
+  const preflightLink = content.querySelector('.preflight-link');
+  if (preflightLink) preflightLink.addEventListener('click', () => render(preflightLink.dataset.view));
 
   content.querySelectorAll('.view-cv-btn').forEach(btn => {
     btn.addEventListener('click', () => window.api.shell.openPath(btn.dataset.path));
@@ -686,6 +881,14 @@ async function renderDashboard() {
       } else if (bot === 'linkedin' && text.includes('Security check')) {
         document.getElementById('login-prompt-title').textContent = 'LinkedIn security check';
         document.getElementById('login-prompt-body').textContent = 'LinkedIn has shown a CAPTCHA or security check. Complete it in the browser window — the bot will continue automatically.';
+        loginPrompt.style.display = 'flex';
+      } else if (bot === 'glassdoor' && (text.includes('Opening login page') || text.includes('Waiting for you to complete login'))) {
+        document.getElementById('login-prompt-title').textContent = 'Glassdoor is waiting for you to log in';
+        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Glassdoor password — the bot will continue automatically once signed in.';
+        loginPrompt.style.display = 'flex';
+      } else if (bot === 'indeed' && (text.includes('Opening login page') || text.includes('Waiting for you to complete login') || text.includes('Verification required'))) {
+        document.getElementById('login-prompt-title').textContent = 'Indeed is waiting for you to log in';
+        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Indeed password (and any verification code) — the bot will continue automatically once signed in.';
         loginPrompt.style.display = 'flex';
       } else if ((text.includes('Logged in') || text.includes('Session restored') || text.includes('ERROR:') || text.includes('login timed out') || text.includes('Logged in successfully'))) {
         loginPrompt.style.display = 'none';

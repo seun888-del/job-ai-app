@@ -7,15 +7,19 @@ const { JOBBOT_BACKEND_URL } = require('../config');
 const BOT_DIR = path.join(__dirname, '..', '..', 'bot');
 
 const BOT_SCRIPTS = {
-  reed: 'bot_reed.js',
-  scorer: 'bot_scorer.js',
-  linkedin: 'bot_linkedin.js',
+  reed:      'bot_reed.js',
+  scorer:    'bot_scorer.js',
+  linkedin:  'bot_linkedin.js',
+  indeed:    'bot_indeed.js',
+  glassdoor: 'bot_glassdoor.js',
 };
 
 const bots = {
-  reed: { proc: null, status: 'stopped', stopping: false },
-  scorer: { proc: null, status: 'stopped', stopping: false },
-  linkedin: { proc: null, status: 'stopped', stopping: false },
+  reed:      { proc: null, status: 'stopped', stopping: false },
+  scorer:    { proc: null, status: 'stopped', stopping: false },
+  linkedin:  { proc: null, status: 'stopped', stopping: false },
+  indeed:    { proc: null, status: 'stopped', stopping: false },
+  glassdoor: { proc: null, status: 'stopped', stopping: false },
 };
 
 let logHandler = null;
@@ -30,7 +34,13 @@ function emitStatus(botName, status) {
 }
 
 function getStatus() {
-  return { reed: bots.reed.status, scorer: bots.scorer.status, linkedin: bots.linkedin.status };
+  return {
+    reed:      bots.reed.status,
+    scorer:    bots.scorer.status,
+    linkedin:  bots.linkedin.status,
+    indeed:    bots.indeed.status,
+    glassdoor: bots.glassdoor.status,
+  };
 }
 
 // Spawn via the Electron binary itself (ELECTRON_RUN_AS_NODE) since a
@@ -83,6 +93,31 @@ function start(botName, userDataPath) {
     env.LI_EMAIL = cred.username;
     env.LI_PASS = safeStorage.decryptString(Buffer.from(cred.secret_enc, 'base64'));
   }
+
+  if (botName === 'indeed') {
+    const cred = db.getCredential('indeed');
+    if (!cred || !cred.secret_enc) {
+      throw new Error('No Indeed credentials saved — add them in Job Site Login before starting the Indeed bot');
+    }
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('OS-level credential encryption is not available on this machine');
+    }
+    env.INDEED_EMAIL = cred.username;
+    env.INDEED_PASS = safeStorage.decryptString(Buffer.from(cred.secret_enc, 'base64'));
+  }
+
+  if (botName === 'glassdoor') {
+    const cred = db.getCredential('glassdoor');
+    if (!cred || !cred.secret_enc) {
+      throw new Error('No Glassdoor credentials saved — add them in Job Site Login before starting the Glassdoor bot');
+    }
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('OS-level credential encryption is not available on this machine');
+    }
+    env.GLASSDOOR_EMAIL = cred.username;
+    env.GLASSDOOR_PASS = safeStorage.decryptString(Buffer.from(cred.secret_enc, 'base64'));
+  }
+
 
   const scriptPath = path.join(BOT_DIR, BOT_SCRIPTS[botName]);
   const proc = spawn(process.execPath, [scriptPath], { cwd: BOT_DIR, env });

@@ -17,7 +17,9 @@ if (!USER_DATA) {
 const OUTPUT_DIR = path.join(USER_DATA, 'output');
 const LOGS_DIR = path.join(USER_DATA, 'logs');
 const SCREENSHOTS_DIR = path.join(USER_DATA, 'screenshots');
-const SESSION_FILE = path.join(USER_DATA, 'reed_session.json');
+const SESSION_FILE        = path.join(USER_DATA, 'reed_session.json');
+const INDEED_SESSION_FILE     = path.join(USER_DATA, 'indeed_session.json');
+const GLASSDOOR_SESSION_FILE  = path.join(USER_DATA, 'glassdoor_session.json');
 for (const dir of [OUTPUT_DIR, LOGS_DIR, SCREENSHOTS_DIR]) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -26,12 +28,15 @@ const cfg = {
   // ── Credentials (set via env vars by the bot manager) ──
   REED_EMAIL: process.env.REED_EMAIL,
   REED_PASSWORD: process.env.REED_PASS,
+  CAPSOLVER_KEY: process.env.CAPSOLVER_KEY || '__CAPSOLVER_KEY__',
 
   // ── Paths ──
   OUTPUT_DIR,
   LOGS_DIR,
   SCREENSHOTS_DIR,
   SESSION_FILE,
+  INDEED_SESSION_FILE,
+  GLASSDOOR_SESSION_FILE,
   RESUME_FILENAME: 'Resume.pdf', // placeholder — replaced in init() with "<Name> Resume.pdf"
 
   // ── Search limits (not yet user-configurable) ──
@@ -90,6 +95,15 @@ const cfg = {
         seekSponsorship: !!profile.seek_sponsorship,
         drivingLicence: !!profile.driving_licence,
         salaryExpectation: profile.salary_expectation || '',
+        country: profile.country || 'United Kingdom',
+        experienceLevel: profile.experience_level || '',
+        employmentType: (profile.employment_type || '').split(',').filter(Boolean),
+        availability: profile.availability || 'immediately',
+        willingToRelocate: !!profile.willing_to_relocate,
+        eeoGender: profile.eeo_gender || '',
+        eeoEthnicity: profile.eeo_ethnicity || '',
+        eeoDisability: profile.eeo_disability || '',
+        eeoVeteran: profile.eeo_veteran || '',
       };
 
       cfg.JOB_SEARCHES = terms.map(t => t.term);

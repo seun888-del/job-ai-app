@@ -106,6 +106,27 @@ async function init(userDataPath) {
   if (!profileCols.includes('seek_sponsorship')) {
     db.exec('ALTER TABLE profile ADD COLUMN seek_sponsorship INTEGER DEFAULT 0');
   }
+  if (!profileCols.includes('country')) {
+    db.exec("ALTER TABLE profile ADD COLUMN country TEXT DEFAULT 'United Kingdom'");
+  }
+  if (!profileCols.includes('experience_level')) {
+    db.exec('ALTER TABLE profile ADD COLUMN experience_level TEXT');
+  }
+  if (!profileCols.includes('employment_type')) {
+    db.exec('ALTER TABLE profile ADD COLUMN employment_type TEXT');
+  }
+  if (!profileCols.includes('availability')) {
+    db.exec("ALTER TABLE profile ADD COLUMN availability TEXT DEFAULT 'immediately'");
+  }
+  if (!profileCols.includes('willing_to_relocate')) {
+    db.exec('ALTER TABLE profile ADD COLUMN willing_to_relocate INTEGER DEFAULT 0');
+  }
+  if (!profileCols.includes('eeo_disability')) {
+    db.exec('ALTER TABLE profile ADD COLUMN eeo_disability TEXT');
+  }
+  if (!profileCols.includes('eeo_veteran')) {
+    db.exec('ALTER TABLE profile ADD COLUMN eeo_veteran TEXT');
+  }
 
   // Migration: add job_age to search_preferences
   const searchPrefsCols = db.prepare('PRAGMA table_info(search_preferences)').all().map(c => c.name);

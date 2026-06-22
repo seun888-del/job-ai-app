@@ -3,18 +3,14 @@
  * ─────────────────────────────────────────────────────────────────────────
  * Watches queue.db for jobs with status "pending".
  * For each:
- *   1. Select the best-matching CV from the configured options (keyword scoring)
- *   2. Clean CV text (remove em-dashes, AI phrases)
- *   3. Tailor CV via local Ollama LLM (cv_tailor.js)
- *   4. Score CV against JD via local Ollama keyword extraction (cv_scorer.js)
- *   5. Boost: inject missing keywords, rescore (deterministic — no extra LLM calls)
- *   6. If best score >= MIN_SCORE: write PDF, set queue entry to "cv_ready"
- *   7. If no CV reaches threshold: mark job "skipped"
- *
- * No browser. No external services. Runs entirely on-device via Ollama.
- *
- * Run alongside bot_reed.js:
- *   node bot_scorer.js
+ *   0. Pre-filter: skip jobs mismatched on level, type, or salary
+ *   1. Select the best-matching CV
+ *   2. Clean CV text
+ *   3. Tailor CV — 4-step AI process (profile, bullets, skills rebuild, quantification)
+ *   4. Score CV against JD keywords
+ *   5. Inline keyword weaving — weaves missing keywords naturally into bullets/skills
+ *   6. Addendum fallback — only for any keywords still missing after weaving
+ *   7. Write PDF, generate targeted cover letter, set queue entry to "cv_ready"
  */
 
 const path       = require('path');
@@ -22,21 +18,20 @@ const cfg        = require('./config');
 const cvSelector = require('./modules/cv_selector');
 const cvScorer   = require('./modules/cv_scorer');
 const queue      = require('./modules/queue_manager');
-const { cleanText }            = require('./modules/cv_cleaner');
-const { writePDF, buildPaths } = require('./modules/cv_pdf_writer');
-const { tailorCV }             = require('./modules/cv_tailor');
-const { generateCoverLetter }  = require('./modules/cover_letter');
-const { llmAvailable, isHosted, mode: llmMode } = require('../src/services/llm');
+const { cleanText }               = require('./modules/cv_cleaner');
+const { writePDF, buildPaths }    = require('./modules/cv_pdf_writer');
+const { tailorCV, weaveKeywords } = require('./modules/cv_tailor');
+const { generateCoverLetter }     = require('./modules/cover_letter');
+const { llmAvailable, mode: llmMode } = require('../src/services/llm');
 
-const MAX_BOOST_ATTEMPTS = 4;   // max keyword-inject rounds per CV
-const QUICK_FAIL_THRESHOLD = 35; // skip a CV if its initial score is below this
-const BOOST_TARGET = 85;        // score the boost loop aims for
-const STUCK_TIMEOUT_MS = 10 * 60 * 1000; // reset 'processing' jobs stuck >10 min
+const QUICK_FAIL_THRESHOLD = 35;
+const BOOST_TARGET         = 85;
+const STUCK_TIMEOUT_MS     = 10 * 60 * 1000;
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
-const POLL_INTERVAL = 10000;  // 10 s between queue checks
+const POLL_INTERVAL = 10000;
 
-// Inject missing keywords into the CV text as an addendum line.
+// Last-resort addendum — only fires when inline weaving still leaves keywords missing
 function boostCVText(cvText, keywords) {
   const valid = keywords.filter(k => k && k.length >= 2 && k.length <= 60 && !k.includes('?') && !k.includes('|'));
   if (!valid.length) return cvText;
@@ -48,53 +43,122 @@ function boostCVText(cvText, keywords) {
   return cvText.trimEnd() + addendum;
 }
 
+// ── Pre-filter: skip jobs mismatched on level, employment type, or salary ────
+function passesPreFilter(job) {
+  const { experienceLevel, employmentType, salaryExpectation, country } = cfg.APPLICANT;
+  const title     = (job.title || '').toLowerCase();
+  const descStart = (job.description || '').substring(0, 1500);
+
+  // Experience level mismatch
+  if (experienceLevel) {
+    const isSeniorTitle = /\b(senior|lead|principal|head of|director|vp|vice president|chief|cto|ceo|coo|staff engineer)\b/i.test(title);
+    const isJuniorTitle = /\b(junior|entry.?level|graduate|trainee|apprentice|intern)\b/i.test(title);
+    const isJuniorUser  = ['entry', 'junior'].includes(experienceLevel);
+    const isSeniorUser  = ['senior', 'lead', 'director', 'executive'].includes(experienceLevel);
+
+    if (isJuniorUser && isSeniorTitle) {
+      return { pass: false, reason: `Senior-level role skipped (user targets ${experienceLevel} level)` };
+    }
+    if (isSeniorUser && isJuniorTitle) {
+      return { pass: false, reason: `Junior-level role skipped (user targets ${experienceLevel} level)` };
+    }
+  }
+
+  // Employment type mismatch
+  if (employmentType && employmentType.length > 0) {
+    const wantsContract = employmentType.includes('contract');
+    const wantsFullTime = employmentType.includes('full_time');
+    const wantsPartTime = employmentType.includes('part_time');
+    const jobIsContract = /\b(contract|freelance|day rate|outside ir35|inside ir35)\b/i.test(title + ' ' + descStart.substring(0, 300));
+    const jobIsPartTime = /\bpart.?time\b/i.test(title + ' ' + descStart.substring(0, 300));
+
+    if (jobIsContract && !wantsContract && (wantsFullTime || wantsPartTime)) {
+      return { pass: false, reason: 'Contract role skipped — user targets permanent employment' };
+    }
+    if (jobIsPartTime && !wantsPartTime && (wantsFullTime || wantsContract)) {
+      return { pass: false, reason: 'Part-time role skipped — user targets full-time/contract' };
+    }
+  }
+
+  // Salary floor — only filter when salary is clearly stated AND clearly below minimum
+  if (salaryExpectation) {
+    const minSalary  = parseInt(salaryExpectation.replace(/[^0-9]/g, ''), 10);
+    if (minSalary >= 15000) {
+      const currencyRe = (country === 'United States') ? /\$(\d[\d,]+)/g : /£(\d[\d,]+)/g;
+      const matches = [...descStart.matchAll(currencyRe)]
+        .map(m => parseInt(m[1].replace(/,/g, ''), 10))
+        .filter(s => s >= 15000 && s <= 500000);
+
+      if (matches.length > 0) {
+        const maxFound = Math.max(...matches);
+        if (maxFound < minSalary * 0.85) {
+          const sym = country === 'United States' ? '$' : '£';
+          return { pass: false, reason: `Salary ${sym}${maxFound.toLocaleString()} below minimum — skipped` };
+        }
+      }
+    }
+  }
+
+  return { pass: true };
+}
+
 async function scoreWithBoost(cv, jdText, jobTitle) {
   const raw         = await cvSelector.extractPdfText(cv.path);
   const cleanedText = cleanText(raw);
 
-  // Tailor CV — fall back to raw text if LLM unavailable
+  // Tailor CV — 4-step AI process (profile, bullets, skills rebuild, quantification)
   let tailoredText = cleanedText;
   try {
-    console.log(`  [Scorer Bot] Tailoring CV for: ${jobTitle}`);
+    console.log(`  [Scorer Bot] Tailoring CV (4 steps) for: ${jobTitle}`);
     tailoredText = await tailorCV(cleanedText, jobTitle, jdText);
   } catch (err) {
     console.warn(`  [Scorer Bot] Tailoring failed (${err.message}) — using raw CV`);
   }
 
-  // Score CV against JD — fall back to 85 if LLM unavailable
+  // Score tailored CV against JD keywords
   let score, missingKeywords, allKeywords;
   try {
     ({ score, missingKeywords, allKeywords } = await cvScorer.scoreCV(tailoredText, jdText));
   } catch (err) {
-    console.warn(`  [Scorer Bot] Scoring failed (${err.message}) — using fallback score 85`);
+    console.warn(`  [Scorer Bot] Scoring failed (${err.message}) — fallback score 85`);
     return { score: 85, cvText: tailoredText };
   }
 
-  let cvText     = tailoredText;
-  let allInjected = [];
+  let cvText = tailoredText;
+  console.log(`  [Scorer Bot] Post-tailor score: ${score}% — ${cv.name}`);
 
-  console.log(`  [Scorer Bot] Initial score: ${score}% — ${cv.name}`);
-
-  // Skip immediately if hopelessly irrelevant (score > 0 check avoids skipping on Ollama fallback)
   if (score > 0 && score < QUICK_FAIL_THRESHOLD) {
-    console.log(`  [Scorer Bot] ${score}% below quick-fail (${QUICK_FAIL_THRESHOLD}%) — skipping`);
+    console.log(`  [Scorer Bot] ${score}% below quick-fail threshold — skipping this CV`);
     return { score, cvText };
   }
 
-  // Boost: inject missing keywords, rescore deterministically (no extra LLM calls)
-  for (let attempt = 1; attempt < MAX_BOOST_ATTEMPTS && score < BOOST_TARGET; attempt++) {
-    const newKeywords = missingKeywords.filter(k => !allInjected.includes(k));
-    if (!newKeywords.length) {
-      console.log('  [Scorer Bot] No new keywords to inject — stopping boost');
-      break;
+  // Pass 1: Inline keyword weaving — weaves missing keywords naturally into bullets/skills
+  if (score < BOOST_TARGET && missingKeywords.length > 0) {
+    console.log(`  [Scorer Bot] ${score}% — weaving ${missingKeywords.length} missing keywords inline...`);
+    try {
+      const woven = await weaveKeywords(cvText, missingKeywords, jdText);
+      if (woven !== cvText) {
+        const rescore = cvScorer.rescoreCV(woven, allKeywords);
+        console.log(`  [Scorer Bot] Inline weave: ${score}% → ${rescore.score}%`);
+        if (rescore.score >= score) {
+          cvText          = woven;
+          score           = rescore.score;
+          missingKeywords = rescore.missingKeywords;
+        }
+      }
+    } catch (err) {
+      console.warn(`  [Scorer Bot] Keyword weave error: ${err.message}`);
     }
-    allInjected = allInjected.concat(newKeywords);
-    cvText = boostCVText(tailoredText, allInjected);
+  }
 
+  // Pass 2: Addendum fallback — only fires if keywords are still missing after weaving
+  if (score < BOOST_TARGET && missingKeywords.length > 0) {
+    console.log(`  [Scorer Bot] ${score}% — addendum fallback for ${missingKeywords.length} remaining keywords`);
+    cvText = boostCVText(cvText, missingKeywords);
     const rescore   = cvScorer.rescoreCV(cvText, allKeywords);
     score           = rescore.score;
     missingKeywords = rescore.missingKeywords;
-    console.log(`  [Scorer Bot] Boost ${attempt}: injected ${newKeywords.length} keywords → ${score}%`);
+    console.log(`  [Scorer Bot] After addendum: ${score}%`);
   }
 
   return { score, cvText };
@@ -112,6 +176,14 @@ async function processJob(job) {
   if (!cfg.CVS.length) {
     console.log('  [Scorer Bot] No CVs configured — skipping');
     queue.update(job.jobId, { status: 'skipped', reason: 'No CVs configured' });
+    return;
+  }
+
+  // Pre-filter: skip before spending any AI tokens
+  const preFilter = passesPreFilter(job);
+  if (!preFilter.pass) {
+    console.log(`  [Scorer Bot] Pre-filter: ${preFilter.reason}`);
+    queue.update(job.jobId, { status: 'skipped', reason: preFilter.reason });
     return;
   }
 

@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('api', {
   queue: {
     summary: () => ipcRenderer.invoke('queue:summary'),
     recent: (limit) => ipcRenderer.invoke('queue:recent', limit),
+    dailyApplications: (days) => ipcRenderer.invoke('queue:dailyApplications', days),
   },
   bot: {
     start: (botName) => ipcRenderer.invoke('bot:start', botName),

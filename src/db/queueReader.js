@@ -44,4 +44,19 @@ function getRecentApplications(limit = 50) {
   `, [limit]), []);
 }
 
-module.exports = { init, getQueueSummary, getRecentApplications };
+// Returns applications-per-day for the last N days (from applied_jobs table)
+function getDailyApplications(days = 14) {
+  return withQueueDb(db => {
+    try {
+      return all(db, `
+        SELECT date(applied_at) AS day, COUNT(*) AS count
+        FROM applied_jobs
+        WHERE applied_at >= date('now', '-${days} days')
+        GROUP BY date(applied_at)
+        ORDER BY day ASC
+      `, []);
+    } catch (_) { return []; }
+  }, []);
+}
+
+module.exports = { init, getQueueSummary, getRecentApplications, getDailyApplications };

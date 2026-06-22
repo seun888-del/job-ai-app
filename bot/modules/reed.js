@@ -1,5 +1,8 @@
-const cfg  = require('../config');
-const fs   = require('fs');
+const cfg     = require('../config');
+const fs      = require('fs');
+const stealth = require('./stealth');
+const salary  = require('./salary_filter');
+const queue   = require('./queue_manager');
 
 const SSDIR        = cfg.SCREENSHOTS_DIR;
 const SESSION_FILE = cfg.SESSION_FILE;
@@ -23,6 +26,7 @@ async function login(browser, email, password) {
     context = await browser.newContext();
   }
 
+  await stealth.applyToContext(context);
   const page = await context.newPage();
   page.setDefaultTimeout(30000);
 
@@ -571,17 +575,40 @@ async function answerScreeningQuestions(page) {
 
       let target = null;
       if (/sponsor|visa|right to work|work permit|require.*sponsor/i.test(question)) {
-        target = options.find(o => o.label === 'no' || o.label.startsWith('no'));
+        const needs = cfg.APPLICANT.requiresSponsorship;
+        target = options.find(o => needs ? o.label.startsWith('yes') : o.label.startsWith('no'));
       } else if (/commut|travel to|able to.*office|willing to.*office/i.test(question)) {
-        target = options.find(o => o.label === 'yes' || o.label.startsWith('yes'));
+        target = options.find(o => o.label.startsWith('yes'));
+      } else if (/reloc/i.test(question)) {
+        target = cfg.APPLICANT.willingToRelocate
+          ? options.find(o => o.label.startsWith('yes'))
+          : options.find(o => o.label.startsWith('no'));
       } else if (/driving.*licen|licen.*driving|valid.*licen/i.test(question)) {
-        target = options.find(o => o.label === 'yes' || o.label.startsWith('yes'));
+        target = cfg.APPLICANT.drivingLicence
+          ? options.find(o => o.label.startsWith('yes'))
+          : options.find(o => o.label.startsWith('no'));
+      } else if (/gender/i.test(question)) {
+        const g = cfg.APPLICANT.eeoGender;
+        if (g === 'female') target = options.find(o => /\bfemale\b|\bwoman\b/i.test(o.label));
+        else if (g === 'nonbinary') target = options.find(o => /non.?binary|other/i.test(o.label));
+        else if (!g) target = options.find(o => /prefer not|decline|not.*say/i.test(o.label)) || options[options.length - 1];
+        else target = options.find(o => /\bmale\b|\bman\b/i.test(o.label) && !/fe/i.test(o.label));
+      } else if (/disability|disabled|chronic/i.test(question)) {
+        const d = cfg.APPLICANT.eeoDisability;
+        if (d === 'yes') target = options.find(o => o.label.startsWith('yes'));
+        else if (d === 'no') target = options.find(o => o.label.startsWith('no'));
+        else target = options.find(o => /prefer not|decline|not.*say/i.test(o.label)) || options[options.length - 1];
+      } else if (/veteran|military/i.test(question)) {
+        const v = cfg.APPLICANT.eeoVeteran;
+        if (v === 'yes') target = options.find(o => o.label.startsWith('yes') || /protected/i.test(o.label));
+        else if (v === 'no') target = options.find(o => o.label.startsWith('no') || /not a/i.test(o.label));
+        else target = options.find(o => /prefer not|decline|not.*say/i.test(o.label)) || options[options.length - 1];
       } else if (/experience|have you|familiar|worked with|authoris|authoriz|eligible/i.test(question)) {
-        target = options.find(o => o.label === 'yes' || o.label.startsWith('yes'));
+        target = options.find(o => o.label.startsWith('yes'));
       } else if (/british|uk citizen|nationality/i.test(question)) {
-        target = options.find(o => o.label === 'yes' || o.label.startsWith('yes'));
+        target = options.find(o => o.label.startsWith('yes'));
       } else {
-        target = options.find(o => o.label === 'yes' || o.label.startsWith('yes')) || options[0];
+        target = options.find(o => o.label.startsWith('yes')) || options[0];
       }
 
       if (target) {
@@ -613,13 +640,26 @@ async function answerScreeningQuestions(page) {
 
       let chosen = null;
       if (/sponsor|visa|right to work/i.test(question)) {
-        chosen = nonEmpty.find(o => o.text === 'no' || o.text.startsWith('no'));
+        const needs = cfg.APPLICANT.requiresSponsorship;
+        chosen = nonEmpty.find(o => needs ? o.text.startsWith('yes') : o.text.startsWith('no')) || nonEmpty[0];
       } else if (/year|experience/i.test(question)) {
-        chosen = nonEmpty.find(o => /\b4\b/.test(o.text)) ||
-                 nonEmpty.find(o => /3.*(year|yr)|4.*(year|yr)|2.*(year|yr)/.test(o.text)) ||
+        const yr = cfg.APPLICANT.yearsExperience || 0;
+        chosen = nonEmpty.find(o => new RegExp(`\\b${yr}\\b`).test(o.text)) ||
+                 nonEmpty.find(o => { const n = o.text.match(/\d+/g); return n && n.length >= 2 && yr >= Number(n[0]) && yr <= Number(n[1]); }) ||
+                 nonEmpty.find(o => { const n = o.text.match(/\d+/g); return n && /\+|more|above|over/.test(o.text) && yr >= Number(n[0]); }) ||
                  nonEmpty[0];
       } else if (/driving.*licen/i.test(question)) {
-        chosen = nonEmpty.find(o => o.text === 'yes' || o.text.startsWith('yes')) || nonEmpty[0];
+        chosen = cfg.APPLICANT.drivingLicence
+          ? nonEmpty.find(o => o.text.startsWith('yes'))
+          : nonEmpty.find(o => o.text.startsWith('no')) || nonEmpty[0];
+      } else if (/notice period|availab/i.test(question)) {
+        const avMap = { 'immediately': 'immediate', '1week': '1 week', '2weeks': '2 weeks', '1month': '1 month', '2months': '2 months', '3months': '3 months' };
+        const key = avMap[cfg.APPLICANT.availability || 'immediately'] || 'immediate';
+        chosen = nonEmpty.find(o => o.text.includes(key)) || nonEmpty.find(o => o.text.startsWith('yes')) || nonEmpty[0];
+      } else if (/reloc/i.test(question)) {
+        chosen = cfg.APPLICANT.willingToRelocate
+          ? nonEmpty.find(o => o.text.startsWith('yes')) || nonEmpty[0]
+          : nonEmpty.find(o => o.text.startsWith('no')) || nonEmpty[0];
       } else {
         chosen = nonEmpty.find(o => o.text === 'yes' || o.text.startsWith('yes')) || nonEmpty[0];
       }
@@ -643,16 +683,21 @@ async function answerScreeningQuestions(page) {
       });
 
       if (/sponsor|visa|right to work/i.test(question)) {
-        await inp.fill('No').catch(() => {});
+        await inp.fill(cfg.APPLICANT.requiresSponsorship ? 'Yes' : 'No').catch(() => {});
       } else if (/commut|travel/i.test(question)) {
         await inp.fill('Yes').catch(() => {});
+      } else if (/reloc/i.test(question)) {
+        await inp.fill(cfg.APPLICANT.willingToRelocate ? 'Yes' : 'No').catch(() => {});
+      } else if (/notice period|availab|when can you start/i.test(question)) {
+        const avText = { 'immediately': 'Immediately available', '1week': '1 week', '2weeks': '2 weeks', '1month': '1 month', '2months': '2 months', '3months': '3 months' };
+        await inp.fill(avText[cfg.APPLICANT.availability || 'immediately'] || 'Immediately available').catch(() => {});
       } else if (/year|experience|how long|how many/i.test(question)) {
-        await inp.fill('4').catch(() => {});
+        await inp.fill(String(cfg.APPLICANT.yearsExperience || 0)).catch(() => {});
       } else if (/salary|expected|compensation/i.test(question)) {
-        // leave blank
+        if (cfg.APPLICANT.salaryExpectation) await inp.fill(cfg.APPLICANT.salaryExpectation).catch(() => {});
       } else {
         const type = await inp.getAttribute('type');
-        if (type === 'number') await inp.fill('4').catch(() => {});
+        if (type === 'number') await inp.fill(String(cfg.APPLICANT.yearsExperience || 0)).catch(() => {});
       }
     }
   } catch (_) {}

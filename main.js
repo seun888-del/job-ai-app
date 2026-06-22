@@ -130,6 +130,7 @@ ipcMain.handle('credentials:get', (event, site) => {
 // ── Queue / dashboard ──────────────────────────────────────────────────────
 ipcMain.handle('queue:summary', () => queueReader.getQueueSummary());
 ipcMain.handle('queue:recent', (event, limit) => queueReader.getRecentApplications(limit));
+ipcMain.handle('queue:dailyApplications', (event, days) => queueReader.getDailyApplications(days || 14));
 
 // ── Bot manager ──────────────────────────────────────────────────────────
 ipcMain.handle('bot:start', (event, botName) => botManager.start(botName, app.getPath('userData')));

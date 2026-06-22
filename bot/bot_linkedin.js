@@ -15,6 +15,7 @@ const cfg      = require('./config');
 const linkedin = require('./modules/linkedin');
 const queue    = require('./modules/queue_manager');
 const logger   = require('./modules/logger');
+const salary   = require('./modules/salary_filter');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
 const POLL_INTERVAL = 10000;
@@ -69,6 +70,11 @@ async function phase1_searchAndQueue(liPage) {
         continue;
       }
 
+      if (queue.hasCanonical(job.title, job.company)) {
+        console.log(`  [LinkedIn Bot] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`);
+        continue;
+      }
+
       try {
         const jobDetails = await linkedin.getJobDescription(liPage, job);
 
@@ -96,6 +102,13 @@ async function phase1_searchAndQueue(liPage) {
           }
         }
 
+        if (!salary.isAcceptable(jobDetails.description, cfg.APPLICANT.salaryExpectation)) {
+          const min = salary.extractMinSalary(jobDetails.description);
+          console.log(`  [LinkedIn Bot] Below salary expectation (£${min?.toLocaleString() || '?'} < ${cfg.APPLICANT.salaryExpectation}) — skipping: ${job.title}`);
+          queue.add({ ...job, source: 'linkedin', status: 'skipped', reason: 'Below salary expectation' });
+          continue;
+        }
+
         queue.add({ ...jobDetails, source: 'linkedin', workType });
         console.log(`  [LinkedIn Bot] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
       } catch (err) {
@@ -114,6 +127,9 @@ async function phase2_applyReadyCVs(liPage) {
   console.log('\n══════════════════════════════════════════════════════');
   console.log('  [LinkedIn Bot] Phase 2 — Waiting for Scorer bot...');
   console.log('══════════════════════════════════════════════════════');
+
+  const retried = queue.requeueFailed('linkedin');
+  if (retried > 0) console.log(`  [LinkedIn Bot] Requeueing ${retried} previously-failed LinkedIn job(s) for retry.`);
 
   const priority = workTypePriority();
   let idleCount = 0;

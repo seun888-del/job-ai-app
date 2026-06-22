@@ -24,14 +24,13 @@ async function init(userDataPath) {
   const db = new SQL.Database(buffer);
   db.run(schema); // idempotent — creates tables if missing
 
-  // Migration: add cover_letter column if not present
+  // Migrations: add columns if not present
   const colStmt = db.prepare('PRAGMA table_info(queue)');
   const cols = [];
   while (colStmt.step()) cols.push(colStmt.getAsObject().name);
   colStmt.free();
-  if (!cols.includes('cover_letter')) {
-    db.run('ALTER TABLE queue ADD COLUMN cover_letter TEXT');
-  }
+  if (!cols.includes('cover_letter')) db.run('ALTER TABLE queue ADD COLUMN cover_letter TEXT');
+  if (!cols.includes('retry_count'))  db.run('ALTER TABLE queue ADD COLUMN retry_count INTEGER DEFAULT 0');
 
   fs.writeFileSync(dbPath, Buffer.from(db.export()));
   db.close();
@@ -65,6 +64,7 @@ function rowToJob(row) {
     cvPath: row.cv_path,
     coverLetter: row.cover_letter,
     error: row.error,
+    retryCount: row.retry_count || 0,
     addedAt: row.added_at,
     updatedAt: row.updated_at,
   };
@@ -115,6 +115,7 @@ const FIELD_MAP = {
   description: 'description', status: 'status', reason: 'reason',
   workType: 'work_type', cvName: 'cv_name', cvScore: 'cv_score',
   cvPath: 'cv_path', coverLetter: 'cover_letter', error: 'error',
+  retryCount: 'retry_count',
 };
 
 // Update fields on a job entry
@@ -202,4 +203,43 @@ function countAppliedToday() {
   });
 }
 
-module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, wasApplied, countAppliedToday };
+// Cross-site deduplication — normalise title+company and check across all sources.
+// Returns true if a job with the same role at the same company already exists.
+function _normalise(str) {
+  return (str || '')
+    .toLowerCase()
+    .replace(/\b(senior|sr|junior|jr|lead|principal|remote|contract|interim|staff)\b/g, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
+function hasCanonical(title, company) {
+  const nt = _normalise(title);
+  const nc = _normalise(company);
+  if (!nt || !nc) return false;
+  return withDb((db) => {
+    const stmt = db.prepare('SELECT job_id, title, company FROM queue UNION SELECT job_id, title, company FROM applied_jobs');
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      if (_normalise(row.title) === nt && _normalise(row.company) === nc) {
+        stmt.free();
+        return true;
+      }
+    }
+    stmt.free();
+    return false;
+  });
+}
+
+// Requeue apply_failed jobs for one more attempt (max 2 retries total).
+// Call this at the start of each phase2 cycle.
+function requeueFailed(source) {
+  const failed = getByStatus('apply_failed').filter(j => j.source === source && (j.retryCount || 0) < 2);
+  for (const j of failed) {
+    update(j.jobId, { status: 'cv_ready', retryCount: (j.retryCount || 0) + 1, error: null });
+    console.log(`  [Queue] Requeueing for retry (attempt ${(j.retryCount || 0) + 1}): ${j.title}`);
+  }
+  return failed.length;
+}
+
+module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, wasApplied, countAppliedToday, hasCanonical, requeueFailed };

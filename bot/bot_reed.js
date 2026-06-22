@@ -14,6 +14,7 @@ const cfg    = require('./config');
 const reed   = require('./modules/reed');
 const queue  = require('./modules/queue_manager');
 const logger = require('./modules/logger');
+const salary = require('./modules/salary_filter');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
 const POLL_INTERVAL = 10000;   // 10 s between queue polls
@@ -79,6 +80,11 @@ async function phase1_searchAndQueue(browser, reedPage) {
         continue;
       }
 
+      if (queue.hasCanonical(job.title, job.company)) {
+        console.log(`  [Reed Bot] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`);
+        continue;
+      }
+
       if (/with verification/i.test(job.title)) {
         console.log(`  [Reed Bot] Requires identity verification — skipping: ${job.title}`);
         queue.add({ ...job, source: 'reed', status: 'skipped', reason: 'Requires identity verification' });
@@ -121,6 +127,14 @@ async function phase1_searchAndQueue(browser, reedPage) {
             continue;
           }
         }
+
+        if (!salary.isAcceptable(jobDetails.description, cfg.APPLICANT.salaryExpectation)) {
+          const min = salary.extractMinSalary(jobDetails.description);
+          console.log(`  [Reed Bot] Below salary expectation (${min ? '£' + min.toLocaleString() : 'stated'} < ${cfg.APPLICANT.salaryExpectation}) — skipping: ${job.title}`);
+          queue.add({ ...job, source: 'reed', status: 'skipped', reason: 'Below salary expectation' });
+          continue;
+        }
+
         queue.add({ ...jobDetails, source: 'reed', workType });
         console.log(`  [Reed Bot] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
       } catch (err) {
@@ -140,6 +154,9 @@ async function phase2_applyReadyCVs(reedPage) {
   console.log('\n══════════════════════════════════════════════════════');
   console.log('  [Reed Bot] Phase 2 — Waiting for Scorer bot...');
   console.log('══════════════════════════════════════════════════════');
+
+  const retried = queue.requeueFailed('reed');
+  if (retried > 0) console.log(`  [Reed Bot] Requeueing ${retried} previously-failed Reed job(s) for retry.`);
 
   const priority = workTypePriority();
   let idleCount = 0;

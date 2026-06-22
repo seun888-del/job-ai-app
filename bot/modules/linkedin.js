@@ -1,6 +1,8 @@
-const cfg  = require('../config');
-const fs   = require('fs');
-const path = require('path');
+const cfg     = require('../config');
+const fs      = require('fs');
+const path    = require('path');
+const stealth = require('./stealth');
+const captcha = require('./captcha_solver');
 
 const SSDIR = cfg.SCREENSHOTS_DIR;
 const DELAY = (ms) => new Promise(r => setTimeout(r, ms));
@@ -9,6 +11,7 @@ const DELAY = (ms) => new Promise(r => setTimeout(r, ms));
 async function login(browser, email, password) {
   console.log('  [LinkedIn] Logging in...');
   const page = await browser.newPage();
+  await stealth.applyToPage(page);
   page.setDefaultTimeout(30000);
 
   await page.goto('https://www.linkedin.com/login', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -42,7 +45,8 @@ async function login(browser, email, password) {
       break;
     }
     if (u.includes('checkpoint') || u.includes('challenge') || u.includes('captcha') || u.includes('security-check')) {
-      console.log('  [LinkedIn] ⚠️  Security check — please complete it in the browser window...');
+      console.log('  [LinkedIn] ⚠️  Security check — attempting auto-solve...');
+      await captcha.autoSolve(page).catch(() => {});
     }
     await DELAY(5000);
   }
@@ -351,9 +355,18 @@ function pickExperienceOption(nonEmpty, yearsExp) {
   return m || nonEmpty[nonEmpty.length - 1];
 }
 
+const AVAILABILITY_TEXT = {
+  'immediately': 'I am immediately available and can start at short notice.',
+  '1week':  'I have a 1-week notice period and can start within 1 week.',
+  '2weeks': 'I have a 2-week notice period and can start within 2 weeks.',
+  '1month': 'I have a 1-month notice period and can start within 1 month.',
+  '2months': 'I have a 2-month notice period and can start within 2 months.',
+  '3months': 'I have a 3-month notice period and can start within 3 months.',
+};
+
 // Build a short professional textarea answer from job and CV context
 function buildTextareaAnswer(label, job) {
-  const { yearsExperience, salaryExpectation } = cfg.APPLICANT;
+  const { yearsExperience, salaryExpectation, availability } = cfg.APPLICANT;
   const yearsText = yearsExperience > 0 ? `${yearsExperience} years of` : 'extensive';
   const domain  = (job && job.cvName)  ? job.cvName  : 'IT support and service desk operations';
   const title   = (job && job.title)   ? job.title   : 'this role';
@@ -364,7 +377,7 @@ function buildTextareaAnswer(label, job) {
     return (job && job.coverLetter) || `I am writing to express my strong interest in the ${title} position at ${company}. With ${yearsText} experience in ${domain}, I have developed a proven ability to deliver results in fast-paced environments. I am confident in my ability to contribute effectively from day one and look forward to the opportunity to discuss my application further.`;
   }
   if (/notice period|availability|available to start|when can you start/i.test(lbl)) {
-    return 'I am immediately available and can start at short notice.';
+    return AVAILABILITY_TEXT[availability || 'immediately'] || AVAILABILITY_TEXT['immediately'];
   }
   if (/why.*(company|role|position|opportunit|us\b)|motivat|what attract/i.test(lbl)) {
     return `The ${title} role at ${company} closely aligns with my ${yearsText} background in ${domain}. I am drawn to this opportunity because it allows me to apply my technical expertise and problem-solving skills within a forward-thinking organisation.`;
@@ -444,14 +457,37 @@ function resolveDropdownChoice(question, options, job) {
     return options.find(o => /^yes/.test(o.text)) || null;
   }
   if (/gender/i.test(q)) {
-    return options.find(o => /\bman\b|^male$/.test(o.text) || (o.text.includes('man') && !o.text.includes('woman'))) || null;
+    const g = cfg.APPLICANT.eeoGender;
+    if (g === 'female') return options.find(o => /\bfemale\b|^woman$|\bwoman\b/i.test(o.text)) || null;
+    if (g === 'nonbinary') return options.find(o => /non.?binary|other|self.?describ/i.test(o.text)) || null;
+    if (g === 'other') return options.find(o => /other|self.?describ|prefer not/i.test(o.text)) || null;
+    if (!g) return options.find(o => /prefer not|decline|not.*say/i.test(o.text)) || options[options.length - 1] || null;
+    return options.find(o => /\bman\b|^male$|\bmale\b/i.test(o.text)) || null;
+  }
+  if (/disability|disabled|chronic/i.test(q)) {
+    const d = cfg.APPLICANT.eeoDisability;
+    if (d === 'yes') return options.find(o => /^yes/i.test(o.text)) || null;
+    if (d === 'no') return options.find(o => /^no/i.test(o.text)) || null;
+    return options.find(o => /prefer not|decline|not.*say/i.test(o.text)) || options[options.length - 1] || null;
+  }
+  if (/veteran|protected veteran|military/i.test(q)) {
+    const v = cfg.APPLICANT.eeoVeteran;
+    if (v === 'yes') return options.find(o => /^yes|^i am a.*veteran|^protected/i.test(o.text)) || null;
+    if (v === 'no') return options.find(o => /^no|^not a/i.test(o.text)) || null;
+    return options.find(o => /prefer not|decline|not.*say/i.test(o.text)) || options[options.length - 1] || null;
   }
   if (/sexual orientation|sexuality/i.test(q)) {
     return options.find(o => /straight|heterosexual/i.test(o.text)) || null;
   }
   if (/ethnic|race|racial/i.test(q)) {
-    return options.find(o => /black.*african|african.*black|black or african/i.test(o.text)) ||
-           options.find(o => /\bblack\b/i.test(o.text)) || null;
+    const eth = cfg.APPLICANT.eeoEthnicity;
+    if (eth === 'white') return options.find(o => /\bwhite\b/i.test(o.text) && !/hispanic/i.test(o.text)) || null;
+    if (eth === 'black') return options.find(o => /black.*african|african.*black|black or african|\bblack\b/i.test(o.text)) || null;
+    if (eth === 'asian') return options.find(o => /\basian\b/i.test(o.text)) || null;
+    if (eth === 'hispanic') return options.find(o => /hispanic|latino/i.test(o.text)) || null;
+    if (eth === 'mixed') return options.find(o => /mixed|multiple/i.test(o.text)) || null;
+    if (eth === 'mena') return options.find(o => /middle east|north african|mena/i.test(o.text)) || null;
+    return options.find(o => /prefer not|decline|not.*say/i.test(o.text)) || options[options.length - 1] || null;
   }
   if (/year.*experience|experience.*year|how many year|how long|years in/i.test(q)) {
     const m = options.find(o => new RegExp(`\\b${yr}\\b`).test(o.text)) ||
@@ -605,13 +641,38 @@ async function _answerRadios(page, job) {
       } else if (/british|uk citizen|citizen.*uk|nationality/i.test(question)) {
         target = options.find(o => /^yes/.test(o.label));
       } else if (/gender|sex(?!ual)/i.test(question)) {
-        target = options.find(o => /\bman\b|^male$/i.test(o.label)) || options.find(o => o.label.includes('man') && !o.label.includes('woman'));
+        const g = cfg.APPLICANT.eeoGender;
+        if (g === 'female') target = options.find(o => /\bfemale\b|\bwoman\b/i.test(o.label));
+        else if (g === 'nonbinary') target = options.find(o => /non.?binary|other|self.?describ/i.test(o.label));
+        else if (!g) target = options.find(o => /prefer not|decline|not.*say/i.test(o.label)) || options[options.length - 1];
+        else target = options.find(o => /\bman\b|^male$|\bmale\b/i.test(o.label));
+      } else if (/disability|disabled|chronic/i.test(question)) {
+        const d = cfg.APPLICANT.eeoDisability;
+        if (d === 'yes') target = options.find(o => /^yes/i.test(o.label));
+        else if (d === 'no') target = options.find(o => /^no/i.test(o.label));
+        else target = options.find(o => /prefer not|decline|not.*say/i.test(o.label)) || options[options.length - 1];
+      } else if (/veteran|protected veteran|military/i.test(question)) {
+        const v = cfg.APPLICANT.eeoVeteran;
+        if (v === 'yes') target = options.find(o => /^yes|^i am a.*veteran|^protected/i.test(o.label));
+        else if (v === 'no') target = options.find(o => /^no|^not a/i.test(o.label));
+        else target = options.find(o => /prefer not|decline|not.*say/i.test(o.label)) || options[options.length - 1];
       } else if (/sexual orientation|sexuality/i.test(question)) {
         target = options.find(o => /straight|heterosexual/i.test(o.label));
       } else if (/ethnic|race|racial/i.test(question)) {
-        target = options.find(o => /black.*african|african.*black|black or african/i.test(o.label)) || options.find(o => /\bblack\b/i.test(o.label));
+        const eth = cfg.APPLICANT.eeoEthnicity;
+        if (eth === 'white') target = options.find(o => /\bwhite\b/i.test(o.label) && !/hispanic/i.test(o.label));
+        else if (eth === 'black') target = options.find(o => /black.*african|african.*black|\bblack\b/i.test(o.label));
+        else if (eth === 'asian') target = options.find(o => /\basian\b/i.test(o.label));
+        else if (eth === 'hispanic') target = options.find(o => /hispanic|latino/i.test(o.label));
+        else if (eth === 'mixed') target = options.find(o => /mixed|multiple/i.test(o.label));
+        else if (eth === 'mena') target = options.find(o => /middle east|north african/i.test(o.label));
+        else target = options.find(o => /prefer not|decline|not.*say/i.test(o.label)) || options[options.length - 1];
       } else if (/experience|work.*with|have you.*used|familiar|proficient/i.test(question)) {
         target = options.find(o => /^yes/.test(o.label));
+      } else if (/reloc/i.test(question)) {
+        target = cfg.APPLICANT.willingToRelocate
+          ? options.find(o => /^yes/.test(o.label))
+          : options.find(o => /^no/.test(o.label));
       } else if (/driving.*licen|licen.*driving|valid.*licen|licen.*valid/i.test(question)) {
         target = cfg.APPLICANT.drivingLicence
           ? options.find(o => /^yes/.test(o.label))
@@ -673,8 +734,11 @@ async function _answerTextInputs(page, job) {
         await inp.fill(String(cfg.APPLICANT.yearsExperience ?? 0)).catch(() => {});
       } else if (/salary|expected.*pay|compensation|remuneration/i.test(question)) {
         if (cfg.APPLICANT.salaryExpectation) await inp.fill(cfg.APPLICANT.salaryExpectation).catch(() => {});
-      } else if (/notice period|availability/i.test(question)) {
-        await inp.fill('Immediately available').catch(() => {});
+      } else if (/notice period|availability|available to start|when can you start/i.test(question)) {
+        const avText = { 'immediately': 'Immediately available', '1week': '1 week', '2weeks': '2 weeks', '1month': '1 month', '2months': '2 months', '3months': '3 months' };
+        await inp.fill(avText[cfg.APPLICANT.availability || 'immediately'] || 'Immediately available').catch(() => {});
+      } else if (/reloc/i.test(question)) {
+        await inp.fill(cfg.APPLICANT.willingToRelocate ? 'Yes' : 'No').catch(() => {});
       } else {
         const type = await inp.getAttribute('type').catch(() => 'text');
         if (type === 'number') {
