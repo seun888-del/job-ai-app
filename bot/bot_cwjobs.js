@@ -15,7 +15,7 @@ const cfg    = require('./config');
 const queue  = require('./modules/queue_manager');
 const logger = require('./modules/logger');
 const salary = require('./modules/salary_filter');
-const stealth = require('./modules/stealth_plugin');
+const stealth = require('./modules/stealth');
 const path   = require('path');
 const fs     = require('fs');
 
@@ -304,7 +304,7 @@ async function phase2_applyReadyCVs(page) {
     viewport: { width: 1366, height: 768 },
   });
 
-  await stealth.applyStealthScripts(context);
+  await stealth.applyToContext(context);
 
   if (fs.existsSync(SESSION_FILE)) {
     try {
