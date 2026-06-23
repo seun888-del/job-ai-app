@@ -10,20 +10,17 @@
  * identical; only the base URL and session file differ.
  */
 
-const { chromium } = require('playwright');
-const cfg    = require('./config');
-const queue  = require('./modules/queue_manager');
-const logger = require('./modules/logger');
-const salary = require('./modules/salary_filter');
+const cfg     = require('./config');
+const queue   = require('./modules/queue_manager');
+const logger  = require('./modules/logger');
+const salary  = require('./modules/salary_filter');
 const stealth = require('./modules/stealth');
-const path   = require('path');
-const fs     = require('fs');
+const browser_launcher = require('./modules/browser_launcher');
+const path    = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
 const POLL_INTERVAL = 10000;
 const MAX_IDLE      = 6;
-const SESSION_FILE  = cfg.SESSION_FILE?.replace('reed_session', 'cwjobs_session')
-  || path.join(path.dirname(cfg.SESSION_FILE || '/tmp/x'), 'cwjobs_session.json');
 
 const BASE_URL = 'https://www.cwjobs.co.uk';
 
@@ -304,38 +301,20 @@ async function phase2_applyReadyCVs(page) {
   await cfg.init();
   await queue.init(process.env.JOBBOT_USERDATA);
 
-  const browser = await chromium.launch({
-    headless: false,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'],
-  });
-
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    viewport: { width: 1366, height: 768 },
-  });
-
+  const profileDir = path.join(process.env.JOBBOT_USERDATA, 'cwjobs_profile');
+  const context = await browser_launcher.launchPersistentContext(profileDir);
   await stealth.applyToContext(context);
-
-  if (fs.existsSync(SESSION_FILE)) {
-    try {
-      const cookies = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-      await context.addCookies(cookies);
-      console.log('  [CWJobs Bot] Restored previous session');
-    } catch (_) {}
-  }
 
   const page = await context.newPage();
 
   try {
     await ensureLoggedIn(page);
-    const cookies = await context.cookies();
-    fs.writeFileSync(SESSION_FILE, JSON.stringify(cookies), 'utf8');
     await phase1_searchAndQueue(page);
     await phase2_applyReadyCVs(page);
   } catch (err) {
     console.error(`  [CWJobs Bot] Fatal error: ${err.message}`);
     process.exit(1);
   } finally {
-    await browser.close();
+    await context.close();
   }
 })();
