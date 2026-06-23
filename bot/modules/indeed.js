@@ -456,7 +456,9 @@ function _resolveRadio(question, labels) {
 
   const find = re => labels.find(l => re.test(l));
 
-  if (/authoris|right to work|eligible.*work|legal.*work|work.*permit/i.test(q)) return find(/^yes/i) || labels[0];
+  if (/right to work|work permit|authoris.*work|authoriz.*work|eligible.*work|legal.*work/i.test(q)) {
+    return (!requiresSponsorship) ? (find(/^yes/i) || labels[0]) : (find(/^no/i) || labels[labels.length - 1]);
+  }
   if (/require.*sponsor|need.*sponsor|visa.*sponsor|employer.*sponsor/i.test(q)) {
     return requiresSponsorship ? find(/^yes/i) : find(/^no/i);
   }
@@ -499,7 +501,9 @@ function _resolveDropdown(question, options) {
 
   const find = re => options.find(o => re.test(o.text));
 
-  if (/authoris|right to work|eligible.*work|legal.*work/i.test(q)) return find(/^yes/i);
+  if (/right to work|work permit|authoris.*work|authoriz.*work|eligible.*work|legal.*work/i.test(q)) {
+    return (!requiresSponsorship) ? find(/^yes/i) : find(/^no/i);
+  }
   if (/require.*sponsor|need.*sponsor|visa.*sponsor/i.test(q)) {
     return requiresSponsorship ? find(/^yes/i) : find(/^no/i);
   }

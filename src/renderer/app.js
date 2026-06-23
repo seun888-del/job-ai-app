@@ -242,11 +242,14 @@ async function renderPersonal() {
 
 // ── 2. Job Site Login ────────────────────────────────────────────────────
 async function renderLogin() {
-  const [reedCred, liCred, indeedCred, gdCred] = await Promise.all([
+  const [reedCred, liCred, indeedCred, gdCred, cvlibCred, tjCred, cwCred] = await Promise.all([
     window.api.credentials.get('reed'),
     window.api.credentials.get('linkedin'),
     window.api.credentials.get('indeed'),
     window.api.credentials.get('glassdoor'),
+    window.api.credentials.get('cvlibrary'),
+    window.api.credentials.get('totaljobs'),
+    window.api.credentials.get('cwjobs'),
   ]);
 
   content.innerHTML = `
@@ -286,6 +289,30 @@ async function renderLogin() {
       <button class="primary" id="save-gd">Save Glassdoor Login</button>
       <div class="status-msg" id="status-gd"></div>
     </div>
+
+    <div class="card">
+      <h3>CV-Library</h3>
+      <div class="field"><label>Email</label><input id="cvlib_email" value="${cvlibCred?.username || ''}"></div>
+      <div class="field"><label>Password</label><input id="cvlib_pass" type="password" value=""></div>
+      <button class="primary" id="save-cvlib">Save CV-Library Login</button>
+      <div class="status-msg" id="status-cvlib"></div>
+    </div>
+
+    <div class="card">
+      <h3>Totaljobs</h3>
+      <div class="field"><label>Email</label><input id="tj_email" value="${tjCred?.username || ''}"></div>
+      <div class="field"><label>Password</label><input id="tj_pass" type="password" value=""></div>
+      <button class="primary" id="save-tj">Save Totaljobs Login</button>
+      <div class="status-msg" id="status-tj"></div>
+    </div>
+
+    <div class="card">
+      <h3>CWJobs</h3>
+      <div class="field"><label>Email</label><input id="cw_email" value="${cwCred?.username || ''}"></div>
+      <div class="field"><label>Password</label><input id="cw_pass" type="password" value=""></div>
+      <button class="primary" id="save-cw">Save CWJobs Login</button>
+      <div class="status-msg" id="status-cw"></div>
+    </div>
   `;
 
   const saveCredential = async (site, usernameId, passwordId, statusId, successMsg) => {
@@ -308,6 +335,12 @@ async function renderLogin() {
     saveCredential('indeed', 'indeed_email', 'indeed_pass', 'status-indeed', 'Saved — Indeed Bot will open a browser window on first start to verify'));
   document.getElementById('save-gd').addEventListener('click', () =>
     saveCredential('glassdoor', 'gd_email', 'gd_pass', 'status-gd', 'Saved — Glassdoor Bot will open a browser window on first start'));
+  document.getElementById('save-cvlib').addEventListener('click', () =>
+    saveCredential('cvlibrary', 'cvlib_email', 'cvlib_pass', 'status-cvlib', 'Saved — CV-Library Bot will open a browser window on first start'));
+  document.getElementById('save-tj').addEventListener('click', () =>
+    saveCredential('totaljobs', 'tj_email', 'tj_pass', 'status-tj', 'Saved — Totaljobs Bot will open a browser window on first start'));
+  document.getElementById('save-cw').addEventListener('click', () =>
+    saveCredential('cwjobs', 'cw_email', 'cw_pass', 'status-cw', 'Saved — CWJobs Bot will open a browser window on first start'));
 }
 
 // ── 3. CVs ──────────────────────────────────────────────────────────────

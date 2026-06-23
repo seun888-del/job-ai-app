@@ -148,7 +148,7 @@ function start(botName, userDataPath) {
   if (botName === 'cvlibrary') {
     const cred = db.getCredential('cvlibrary');
     if (!cred || !cred.secret_enc) {
-      throw new Error('No CV-Library credentials saved — connect your account on the Dashboard');
+      throw new Error('No CV-Library credentials saved — go to Job Site Login and save your credentials');
     }
     if (!safeStorage.isEncryptionAvailable()) {
       throw new Error('OS-level credential encryption is not available on this machine');
@@ -160,7 +160,7 @@ function start(botName, userDataPath) {
   if (botName === 'totaljobs') {
     const cred = db.getCredential('totaljobs');
     if (!cred || !cred.secret_enc) {
-      throw new Error('No Totaljobs credentials saved — connect your account on the Dashboard');
+      throw new Error('No Totaljobs credentials saved — go to Job Site Login and save your credentials');
     }
     if (!safeStorage.isEncryptionAvailable()) {
       throw new Error('OS-level credential encryption is not available on this machine');
@@ -172,7 +172,7 @@ function start(botName, userDataPath) {
   if (botName === 'cwjobs') {
     const cred = db.getCredential('cwjobs');
     if (!cred || !cred.secret_enc) {
-      throw new Error('No CWJobs credentials saved — connect your account on the Dashboard');
+      throw new Error('No CWJobs credentials saved — go to Job Site Login and save your credentials');
     }
     if (!safeStorage.isEncryptionAvailable()) {
       throw new Error('OS-level credential encryption is not available on this machine');

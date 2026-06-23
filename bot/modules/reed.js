@@ -574,9 +574,13 @@ async function answerScreeningQuestions(page) {
       }
 
       let target = null;
-      if (/sponsor|visa|right to work|work permit|require.*sponsor/i.test(question)) {
-        const needs = cfg.APPLICANT.requiresSponsorship;
-        target = options.find(o => needs ? o.label.startsWith('yes') : o.label.startsWith('no'));
+      const _needsSponsor = cfg.APPLICANT.requiresSponsorship;
+      if (/right to work|work permit|authoris.*work|authoriz.*work|eligible.*work|legal.*work/i.test(question)) {
+        // "Do you have the right to work?" — yes if user does NOT require sponsorship
+        target = options.find(o => (!_needsSponsor) ? o.label.startsWith('yes') : o.label.startsWith('no'));
+      } else if (/require.*sponsor|need.*sponsor|visa.*sponsor|sponsor.*required|employer.*sponsor|sponsor/i.test(question)) {
+        // "Do you require visa sponsorship?" — yes only if user needs it
+        target = options.find(o => _needsSponsor ? o.label.startsWith('yes') : o.label.startsWith('no'));
       } else if (/commut|travel to|able to.*office|willing to.*office/i.test(question)) {
         target = options.find(o => o.label.startsWith('yes'));
       } else if (/reloc/i.test(question)) {
@@ -639,9 +643,11 @@ async function answerScreeningQuestions(page) {
       );
 
       let chosen = null;
-      if (/sponsor|visa|right to work/i.test(question)) {
-        const needs = cfg.APPLICANT.requiresSponsorship;
-        chosen = nonEmpty.find(o => needs ? o.text.startsWith('yes') : o.text.startsWith('no')) || nonEmpty[0];
+      const _needsSponsor2 = cfg.APPLICANT.requiresSponsorship;
+      if (/right to work|work permit|authoris.*work|authoriz.*work|eligible.*work|legal.*work/i.test(question)) {
+        chosen = nonEmpty.find(o => (!_needsSponsor2) ? o.text.startsWith('yes') : o.text.startsWith('no')) || nonEmpty[0];
+      } else if (/require.*sponsor|need.*sponsor|visa.*sponsor|sponsor.*required|sponsor/i.test(question)) {
+        chosen = nonEmpty.find(o => _needsSponsor2 ? o.text.startsWith('yes') : o.text.startsWith('no')) || nonEmpty[0];
       } else if (/year|experience/i.test(question)) {
         const yr = cfg.APPLICANT.yearsExperience || 0;
         chosen = nonEmpty.find(o => new RegExp(`\\b${yr}\\b`).test(o.text)) ||
@@ -682,8 +688,11 @@ async function answerScreeningQuestions(page) {
         return (lab ? lab.innerText : '').toLowerCase();
       });
 
-      if (/sponsor|visa|right to work/i.test(question)) {
-        await inp.fill(cfg.APPLICANT.requiresSponsorship ? 'Yes' : 'No').catch(() => {});
+      const _needsSponsor3 = cfg.APPLICANT.requiresSponsorship;
+      if (/right to work|work permit|authoris.*work|authoriz.*work|eligible.*work|legal.*work/i.test(question)) {
+        await inp.fill((!_needsSponsor3) ? 'Yes' : 'No').catch(() => {});
+      } else if (/require.*sponsor|need.*sponsor|visa.*sponsor|sponsor/i.test(question)) {
+        await inp.fill(_needsSponsor3 ? 'Yes' : 'No').catch(() => {});
       } else if (/commut|travel/i.test(question)) {
         await inp.fill('Yes').catch(() => {});
       } else if (/reloc/i.test(question)) {
