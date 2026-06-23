@@ -9,6 +9,13 @@ navItems.forEach(li => {
   });
 });
 
+function navigate(view) {
+  const navLi = document.querySelector(`#nav li[data-view="${view}"]`);
+  navItems.forEach(x => x.classList.remove('active'));
+  if (navLi) navLi.classList.add('active');
+  render(view).then(() => updateNavProgress());
+}
+
 function showStatus(el, msg, type = 'success') {
   el.textContent = msg;
   el.className = 'status-msg' + (type ? ` ${type}` : '');
@@ -60,11 +67,11 @@ async function renderPersonal() {
       <p class="card-hint">Determines which job sites are available and how employer screening questions are answered.</p>
       <div class="country-picker">
         <button class="country-btn${country === 'United Kingdom' ? ' active' : ''}" data-country="United Kingdom">
-          <span class="country-flag">ðŸ‡¬ðŸ‡§</span>
+          <span class="country-flag">🇬🇧</span>
           <span class="country-name">United Kingdom</span>
         </button>
         <button class="country-btn${country === 'United States' ? ' active' : ''}" data-country="United States">
-          <span class="country-flag">ðŸ‡ºðŸ‡¸</span>
+          <span class="country-flag">🇺🇸</span>
           <span class="country-name">United States</span>
         </button>
       </div>
@@ -975,7 +982,7 @@ async function renderDashboard() {
     <div class="status-msg" id="bot-error"></div>
 
     <div id="login-prompt" class="login-prompt" style="display:none">
-      <div class="login-prompt-icon">ðŸ”</div>
+      <div class="login-prompt-icon">🔐</div>
       <div class="login-prompt-body">
         <strong id="login-prompt-title">Bot is waiting for you to log in</strong>
         <span id="login-prompt-body">A browser window has opened â€” complete the login there and the bot will continue automatically.</span>

@@ -46,14 +46,14 @@ function workTypePriority() {
 
 // ── Login ─────────────────────────────────────────────────────────────────
 async function ensureLoggedIn(page) {
-  await page.goto('https://www.cv-library.co.uk/', { waitUntil: 'load', timeout: 30000 });
+  await page.goto('https://www.cv-library.co.uk/', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitForCloudflareSolve(page);
   await DELAY(2000);
   const isLoggedIn = await page.evaluate(() => {
     const text = (document.body?.innerText || '').toLowerCase();
-    const hasLogout = text.includes('sign out') || text.includes('log out') || text.includes('my account') || text.includes('my cv');
-    const hasLoginBtn = !!document.querySelector('a[href*="/login"]');
-    return hasLogout || !hasLoginBtn;
+    return text.includes('my dashboard') || text.includes('my profile') ||
+           text.includes('saved jobs') || text.includes('sign out') ||
+           text.includes('log out') || text.includes('my cv');
   }).catch(() => false);
   if (!isLoggedIn) {
     throw new Error('CV-Library: not logged in. Go to Job Site Login → click Connect CV-Library Account → log in → close the Chrome window → then start this bot.');
@@ -79,7 +79,7 @@ async function phase1_searchAndQueue(page) {
 
   // Warm up on the homepage first so navigation looks human (not cold-jumping to /search-jobs)
   console.log('  [CV-Library Bot] Warming up on homepage...');
-  await page.goto(BASE_URL, { waitUntil: 'load', timeout: 30000 });
+  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitForCloudflareSolve(page);
   await acceptCookies(page);
   cookiesAccepted = true;
@@ -91,7 +91,7 @@ async function phase1_searchAndQueue(page) {
 
     try {
       // CV-Library's new Next.js site requires using the search form, not query params
-      await page.goto(`${BASE_URL}/search-jobs`, { waitUntil: 'load', timeout: 30000 });
+      await page.goto(`${BASE_URL}/search-jobs`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       const passed = await waitForCloudflareSolve(page);
       if (!passed) {
         console.error('');
@@ -111,7 +111,7 @@ async function phase1_searchAndQueue(page) {
       await page.fill('input[name="keyword"]', searchTerm);
       await DELAY(400);
       await page.press('input[name="keyword"]', 'Enter');
-      await page.waitForLoadState('load', { timeout: 20000 });
+      await page.waitForLoadState('domcontentloaded', { timeout: 60000 });
       await waitForCloudflareSolve(page);
       await humanWarmup(page);
       await DELAY(2500);
@@ -164,7 +164,7 @@ async function phase1_searchAndQueue(page) {
 
       try {
         // Navigate to job detail page for description
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await waitForCloudflareSolve(page);
         await DELAY(1500);
 
