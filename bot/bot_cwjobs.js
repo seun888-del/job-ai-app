@@ -49,12 +49,22 @@ function workTypePriority() {
 
 // ── Login ──────────────────────────────────────────────────────────────────
 async function ensureLoggedIn(page) {
-  await page.goto(`${BASE_URL}/register/member/login`, { waitUntil: 'domcontentloaded' });
-  await DELAY(2000);
+  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+  await DELAY(2000 + Math.random() * 1000);
 
-  if (!page.url().includes('/login')) {
+  // Already logged in?
+  const loggedInEl = await page.$('a[href*="my-account"], a[href*="profile"], [data-testid="user-nav"], .user-nav, button[aria-label*="account"]').catch(() => null);
+  if (loggedInEl) {
     console.log('  [CWJobs Bot] Session still valid');
     return;
+  }
+
+  // Click the site's own Sign In link
+  const signInLink = await page.$('a[href*="login"], a[href*="sign-in"], a:has-text("Sign in"), a:has-text("Log in")').catch(() => null);
+  if (signInLink) {
+    await signInLink.click();
+    await page.waitForLoadState('domcontentloaded');
+    await DELAY(1500 + Math.random() * 500);
   }
 
   // Pre-fill email with human-like typing then wait for user to enter password
@@ -72,7 +82,10 @@ async function ensureLoggedIn(page) {
   const deadline = Date.now() + 300000;
   let loggedIn = false;
   while (Date.now() < deadline) {
-    if (!page.url().includes('/login')) { loggedIn = true; break; }
+    const u = page.url();
+    if (!u.includes('cwjobs.co.uk') || (!u.includes('login') && !u.includes('sign-in') && !u.includes('register'))) {
+      loggedIn = true; break;
+    }
     await DELAY(3000);
   }
 
