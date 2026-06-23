@@ -70,7 +70,8 @@ function start(botName, userDataPath) {
   if (!BOT_SCRIPTS[botName]) throw new Error(`Unknown bot: ${botName}`);
   if (bots[botName].proc) return;
 
-  if (!isWithinSchedule()) {
+  // Scorer processes the queue regardless of schedule — only search bots are time-gated
+  if (botName !== 'scorer' && !isWithinSchedule()) {
     const prefs = db.getSearchPreferences();
     throw new Error(`Outside scheduled hours (${prefs.schedule_start}:00–${prefs.schedule_end}:00). Change your schedule in Search Preferences.`);
   }

@@ -480,7 +480,7 @@ async function renderSearch() {
 
     <div class="card">
       <h3>Bot Schedule</h3>
-      <p class="card-hint">Restrict the bots to specific hours. When outside schedule, Start is blocked.</p>
+      <p class="card-hint">Restrict the search bots to specific hours. The Scorer Bot always runs regardless of schedule.</p>
       <div class="checkbox-field" style="margin-bottom:16px">
         <input id="schedule_enabled" type="checkbox" ${prefs.schedule_enabled ? 'checked' : ''}>
         <label for="schedule_enabled">Enable schedule</label>
