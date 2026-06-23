@@ -287,3 +287,36 @@ ipcMain.handle('license:verify', async (event, key) => {
 
 // ── Shell ────────────────────────────────────────────────────────────────
 ipcMain.handle('shell:openPath', (event, filePath) => shell.openPath(filePath));
+
+// ── Site Connect — opens Chrome (no Playwright/CDP) so user can log in ──
+// The bot later uses launchPersistentContext on the same profileDir and
+// finds an already-authenticated session — bot detection never fires.
+ipcMain.handle('site:connect', async (event, { site, loginUrl }) => {
+  const fs   = require('fs');
+  const { execFile } = require('child_process');
+  const profileDir = path.join(app.getPath('userData'), `${site}_profile`);
+
+  // Find Chrome or Edge (ordered by preference)
+  const candidates = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft\\Edge\\Application\\msedge.exe'),
+  ];
+  const browserPath = candidates.find(p => { try { return fs.existsSync(p); } catch(_) { return false; } });
+  if (!browserPath) return { success: false, error: 'Chrome or Edge not found on this computer.' };
+
+  return new Promise((resolve) => {
+    const proc = execFile(browserPath, [
+      `--user-data-dir=${profileDir}`,
+      '--profile-directory=Default',
+      '--no-first-run',
+      '--no-default-browser-check',
+      loginUrl,
+    ]);
+    proc.on('close', () => resolve({ success: true }));
+    proc.on('error', (err) => resolve({ success: false, error: err.message }));
+  });
+});

@@ -121,65 +121,8 @@ function start(botName, userDataPath) {
     env.LI_PASS = safeStorage.decryptString(Buffer.from(cred.secret_enc, 'base64'));
   }
 
-  if (botName === 'indeed') {
-    const cred = db.getCredential('indeed');
-    if (!cred || !cred.secret_enc) {
-      throw new Error('No Indeed credentials saved — add them in Job Site Login before starting the Indeed bot');
-    }
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('OS-level credential encryption is not available on this machine');
-    }
-    env.INDEED_EMAIL = cred.username;
-    env.INDEED_PASS = safeStorage.decryptString(Buffer.from(cred.secret_enc, 'base64'));
-  }
-
-  if (botName === 'glassdoor') {
-    const cred = db.getCredential('glassdoor');
-    if (!cred || !cred.secret_enc) {
-      throw new Error('No Glassdoor credentials saved — add them in Job Site Login before starting the Glassdoor bot');
-    }
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('OS-level credential encryption is not available on this machine');
-    }
-    env.GLASSDOOR_EMAIL = cred.username;
-    env.GLASSDOOR_PASS = safeStorage.decryptString(Buffer.from(cred.secret_enc, 'base64'));
-  }
-
-  if (botName === 'cvlibrary') {
-    const cred = db.getCredential('cvlibrary');
-    if (!cred || !cred.secret_enc) {
-      throw new Error('No CV-Library credentials saved — go to Job Site Login and save your credentials');
-    }
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('OS-level credential encryption is not available on this machine');
-    }
-    env.CVLIB_EMAIL = cred.username;
-    env.CVLIB_PASS = safeStorage.decryptString(Buffer.from(cred.secret_enc, 'base64'));
-  }
-
-  if (botName === 'totaljobs') {
-    const cred = db.getCredential('totaljobs');
-    if (!cred || !cred.secret_enc) {
-      throw new Error('No Totaljobs credentials saved — go to Job Site Login and save your credentials');
-    }
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('OS-level credential encryption is not available on this machine');
-    }
-    env.TOTALJOBS_EMAIL = cred.username;
-    env.TOTALJOBS_PASS = safeStorage.decryptString(Buffer.from(cred.secret_enc, 'base64'));
-  }
-
-  if (botName === 'cwjobs') {
-    const cred = db.getCredential('cwjobs');
-    if (!cred || !cred.secret_enc) {
-      throw new Error('No CWJobs credentials saved — go to Job Site Login and save your credentials');
-    }
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('OS-level credential encryption is not available on this machine');
-    }
-    env.CWJOBS_EMAIL = cred.username;
-    env.CWJOBS_PASS = safeStorage.decryptString(Buffer.from(cred.secret_enc, 'base64'));
-  }
+  // indeed, glassdoor, cvlibrary, totaljobs, cwjobs use persistent Chrome profiles
+  // set up via the Connect button in Job Site Login — no credentials needed here.
 
   const scriptPath = path.join(BOT_DIR, BOT_SCRIPTS[botName]);
   const proc = spawn(process.execPath, [scriptPath], { cwd: BOT_DIR, env });

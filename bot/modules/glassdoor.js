@@ -1,10 +1,7 @@
 const cfg     = require('../config');
-const fs      = require('fs');
-const path    = require('path');
-const stealth = require('./stealth');
 const captcha = require('./captcha_solver');
+const { humanWarmup, waitForCloudflareSolve } = require('./browser_launcher');
 
-const SSDIR = cfg.SCREENSHOTS_DIR;
 const DELAY = ms => new Promise(r => setTimeout(r, ms));
 
 function getBaseUrl() {
@@ -14,77 +11,22 @@ function getBaseUrl() {
 }
 
 // ── Login ──────────────────────────────────────────────────────────────────
-async function login(browser, email, password) {
-  const sessionFile = cfg.GLASSDOOR_SESSION_FILE;
-  const baseUrl     = getBaseUrl();
-
-  let context;
-  if (fs.existsSync(sessionFile)) {
-    try { context = await browser.newContext({ storageState: sessionFile }); }
-    catch (_) { context = await browser.newContext(); }
-  } else {
-    context = await browser.newContext();
-  }
-
-  await stealth.applyToContext(context);
-  const page = await context.newPage();
-  page.setDefaultTimeout(30000);
-
-  if (fs.existsSync(sessionFile)) {
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await DELAY(2000);
-    const isLoggedIn = await page.evaluate(() => {
-      const t = (document.body?.innerText || '').toLowerCase();
-      return t.includes('sign out') || t.includes('my profile') || t.includes('account settings') ||
-             !!document.querySelector('[data-test="user-menu"], [class*="userMenu"], [class*="SignedIn"]');
-    }).catch(() => false);
-    if (isLoggedIn) {
-      console.log('  [Glassdoor] ✓ Session restored — already logged in.');
-      return page;
-    }
-    console.log('  [Glassdoor] Saved session expired — logging in again.');
-  }
-
-  const loginUrl = `${baseUrl}/profile/login_input.htm`;
-  console.log('  [Glassdoor] Opening login page — please complete login in the browser window.');
-  await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+// Uses a persistent Chrome profile set up via the app's "Connect" button.
+// No form interaction — bot detection cannot fire during login.
+async function ensureLoggedIn(page, domain) {
+  const baseUrl = domain ? `https://www.${domain}` : getBaseUrl();
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await waitForCloudflareSolve(page);
   await DELAY(2000);
-
-  try {
-    const emailInput = page.locator('input[type="email"], input[id="userEmail"], input[name="username"]').first();
-    if (await emailInput.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await emailInput.fill(email);
-    }
-  } catch (_) {}
-
-  console.log('  [Glassdoor] ⏳ Waiting for you to complete login (up to 5 minutes)...');
-  const deadline = Date.now() + 300000;
-  let loggedIn = false;
-  while (Date.now() < deadline) {
-    const url = page.url();
-    if (url.includes('glassdoor') && !url.includes('login') && !url.includes('signin')) {
-      const authenticated = await page.evaluate(() => {
-        const t = (document.body?.innerText || '').toLowerCase();
-        return t.includes('sign out') || t.includes('my profile') ||
-               !!document.querySelector('[data-test="user-menu"], [class*="userMenu"]');
-      }).catch(() => false);
-      if (authenticated) { loggedIn = true; break; }
-    }
-    if (url.includes('captcha') || url.includes('challenge')) {
-      console.log('  [Glassdoor] ⚠️  CAPTCHA detected — attempting auto-solve...');
-      await captcha.autoSolve(page).catch(() => {});
-    }
-    await DELAY(4000);
+  const isLoggedIn = await page.evaluate(() => {
+    const t = (document.body?.innerText || '').toLowerCase();
+    return t.includes('sign out') || t.includes('my profile') || t.includes('account settings') ||
+           !!document.querySelector('[data-test="user-menu"], [class*="userMenu"], [class*="SignedIn"]');
+  }).catch(() => false);
+  if (!isLoggedIn) {
+    throw new Error('Glassdoor: not logged in. Go to Job Site Login → Connect Glassdoor Account first.');
   }
-
-  if (!loggedIn) {
-    await page.screenshot({ path: path.join(SSDIR, 'glassdoor_login_issue.png') }).catch(() => {});
-    throw new Error('Glassdoor login timed out. Check your credentials in Job Site Login.');
-  }
-
-  await context.storageState({ path: sessionFile });
-  console.log('  [Glassdoor] ✓ Logged in. Session saved.');
-  return page;
+  console.log('  [Glassdoor] Session active');
 }
 
 // ── Search Jobs ────────────────────────────────────────────────────────────
@@ -100,6 +42,8 @@ async function searchJobs(page, searchTerm, limit = 25) {
 
   console.log(`\n  [Glassdoor] Searching: "${searchTerm}" (Remote, Easy Apply)`);
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await waitForCloudflareSolve(page);
+  await humanWarmup(page);
   await DELAY(3000);
 
   // Dismiss modal if present
@@ -336,4 +280,4 @@ async function _tryContinue(page) {
   return false;
 }
 
-module.exports = { login, searchJobs, getJobDescription, applyToJob };
+module.exports = { ensureLoggedIn, searchJobs, getJobDescription, applyToJob };

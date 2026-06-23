@@ -1,102 +1,31 @@
 const cfg     = require('../config');
-const fs      = require('fs');
-const path    = require('path');
-const stealth = require('./stealth');
 const captcha = require('./captcha_solver');
+const { humanWarmup, waitForCloudflareSolve } = require('./browser_launcher');
 
-const SSDIR = cfg.SCREENSHOTS_DIR;
 const DELAY = ms => new Promise(r => setTimeout(r, ms));
 
 function getBaseUrl() {
   return (cfg.APPLICANT.country === 'United States') ? 'https://www.indeed.com' : 'https://uk.indeed.com';
 }
 
-function getSessionFile() {
-  return cfg.INDEED_SESSION_FILE;
-}
-
 // ── Login ──────────────────────────────────────────────────────────────────
-// Session-backed: saves cookies after first manual login.
-// Subsequent runs restore session automatically.
-async function login(browser, email, password) {
-  const sessionFile = getSessionFile();
-  const baseUrl     = getBaseUrl();
-
-  let context;
-  if (fs.existsSync(sessionFile)) {
-    try { context = await browser.newContext({ storageState: sessionFile }); }
-    catch (_) { context = await browser.newContext(); }
-  } else {
-    context = await browser.newContext();
+// Uses a persistent Chrome profile set up via the app's "Connect" button.
+// No form interaction — bot detection cannot fire during login.
+async function ensureLoggedIn(page) {
+  const baseUrl = getBaseUrl();
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await waitForCloudflareSolve(page);
+  await DELAY(2000);
+  const isLoggedIn = await page.evaluate(() => {
+    return !!(
+      document.querySelector('[data-gnav-element-name="SignOut"], [class*="gnav-SignOut"], [id*="UserDropdown"], [class*="UserDropdown"]') ||
+      (document.body?.innerText || '').toLowerCase().includes('sign out')
+    );
+  }).catch(() => false);
+  if (!isLoggedIn) {
+    throw new Error('Indeed: not logged in. Go to Job Site Login → Connect Indeed Account first.');
   }
-
-  await stealth.applyToContext(context);
-  const page = await context.newPage();
-  page.setDefaultTimeout(30000);
-
-  // Check if saved session is still valid
-  if (fs.existsSync(sessionFile)) {
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await DELAY(2000);
-    const isLoggedIn = await page.evaluate(() => {
-      const t = (document.body?.innerText || '').toLowerCase();
-      return t.includes('sign out') || t.includes('my account') ||
-             !!document.querySelector('[data-gnav-element-name="SignOut"], [class*="gnav-SignOut"], [id*="UserDropdown"], [class*="UserDropdown"]');
-    }).catch(() => false);
-    if (isLoggedIn) {
-      console.log('  [Indeed] ✓ Session restored — already logged in.');
-      return page;
-    }
-    console.log('  [Indeed] Saved session expired — logging in again.');
-  }
-
-  const isUS = cfg.APPLICANT.country === 'United States';
-  const loginUrl = isUS
-    ? `https://secure.indeed.com/auth?hl=en_US&co=US&continue=${encodeURIComponent('https://www.indeed.com/')}`
-    : `https://secure.indeed.com/auth?hl=en_GB&co=GB&continue=${encodeURIComponent('https://uk.indeed.com/')}`;
-
-  console.log('  [Indeed] Opening login page — please complete login in the browser window.');
-  await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await DELAY(3000);
-
-  // Pre-fill email if visible
-  try {
-    const emailInput = page.locator('input[type="email"], input[id*="email"], input[id="emailOrUsername"]').first();
-    if (await emailInput.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await emailInput.fill(email);
-      console.log('  [Indeed] Email pre-filled. Please enter your password and complete any verification.');
-    }
-  } catch (_) {}
-
-  console.log('  [Indeed] ⏳ Waiting for you to complete login (up to 5 minutes)...');
-
-  const deadline = Date.now() + 300000;
-  let loggedIn = false;
-  while (Date.now() < deadline) {
-    const url = page.url();
-    if (url.includes('indeed.com') && !url.includes('/auth') && !url.includes('/login')) {
-      const authenticated = await page.evaluate(() => {
-        const t = (document.body?.innerText || '').toLowerCase();
-        return t.includes('sign out') || t.includes('my account') ||
-               !!document.querySelector('[data-gnav-element-name="SignOut"], [class*="gnav-SignOut"], [id*="UserDropdown"]');
-      }).catch(() => false);
-      if (authenticated) { loggedIn = true; break; }
-    }
-    if (url.includes('/auth') || url.includes('captcha') || url.includes('challenge') || url.includes('verify')) {
-      console.log('  [Indeed] ⚠️  Verification required — attempting auto-solve...');
-      await captcha.autoSolve(page).catch(() => {});
-    }
-    await DELAY(4000);
-  }
-
-  if (!loggedIn) {
-    await page.screenshot({ path: path.join(SSDIR, 'indeed_login_issue.png') }).catch(() => {});
-    throw new Error('Indeed login timed out. Check your credentials in Job Site Login.');
-  }
-
-  await context.storageState({ path: sessionFile });
-  console.log('  [Indeed] ✓ Logged in. Session saved — next run will skip login.');
-  return page;
+  console.log('  [Indeed] Session active');
 }
 
 // ── Search Jobs ────────────────────────────────────────────────────────────
@@ -118,6 +47,8 @@ async function searchJobs(page, searchTerm, limit = 25) {
 
   console.log(`\n  [Indeed] Searching: "${searchTerm}" (Remote, Easily Apply, last ${fromage} days)`);
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await waitForCloudflareSolve(page);
+  await humanWarmup(page);
   await DELAY(3000);
 
   // Scroll to load more cards
@@ -741,4 +672,4 @@ async function _tryContinue(page) {
   return false;
 }
 
-module.exports = { login, searchJobs, getJobDescription, applyToJob };
+module.exports = { ensureLoggedIn, searchJobs, getJobDescription, applyToJob };

@@ -12,7 +12,7 @@ const queue   = require('./modules/queue_manager');
 const logger  = require('./modules/logger');
 const salary  = require('./modules/salary_filter');
 const stealth = require('./modules/stealth');
-const browser_launcher = require('./modules/browser_launcher');
+const { launchPersistentContext, humanWarmup, waitForCloudflareSolve } = require('./modules/browser_launcher');
 const path    = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
@@ -46,49 +46,16 @@ function workTypePriority() {
 
 // ── Login ──────────────────────────────────────────────────────────────────
 async function ensureLoggedIn(page) {
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
-  await DELAY(2000 + Math.random() * 1000);
-
-  // Already logged in — look for user-only elements
-  const alreadyIn = await page.$('a[href*="my-account"], a[href*="/profile"], [data-testid="user-nav"], .user-nav__name').catch(() => null);
-  if (alreadyIn) { console.log('  [Totaljobs Bot] Session still valid'); return; }
-
-  // Try the site's own Sign In link; fall back to direct login URL
-  const signInLink = await page.$('a[href*="login"], a[href*="sign-in"], a:has-text("Sign in"), a:has-text("Log in")').catch(() => null);
-  if (signInLink) {
-    await signInLink.click();
-    await page.waitForLoadState('domcontentloaded');
-    await DELAY(1500 + Math.random() * 500);
-  } else {
-    await page.goto(`${BASE_URL}/register/member/login`, { waitUntil: 'domcontentloaded' });
-    await DELAY(1500);
+  await page.goto('https://www.totaljobs.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await waitForCloudflareSolve(page);
+  await DELAY(2000);
+  const u = page.url();
+  if (u.includes('/login') || u.includes('/sign-in') || u.includes('/register')) {
+    throw new Error('Totaljobs: not logged in. Go to Job Site Login → Connect Totaljobs Account first.');
   }
-
-  // Pre-fill email then wait for user to enter password
-  try {
-    const emailEl = page.locator('#email, input[name="email"], input[type="email"]').first();
-    if (await emailEl.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await emailEl.click();
-      await DELAY(400 + Math.random() * 300);
-      await emailEl.pressSequentially(process.env.TOTALJOBS_EMAIL || '', { delay: 55 + Math.random() * 65 });
-    }
-  } catch (_) {}
-
-  const loginPageUrl = page.url();
-  console.log('  [Totaljobs Bot] ⏳ Please enter your password and sign in (up to 5 minutes)...');
-
-  const deadline = Date.now() + 300000;
-  let loggedIn = false;
-  while (Date.now() < deadline) {
-    const u = page.url();
-    if (u !== loginPageUrl && u.includes('totaljobs.com') && !u.includes('login') && !u.includes('sign-in') && !u.includes('register')) {
-      loggedIn = true; break;
-    }
-    await DELAY(3000);
-  }
-
-  if (!loggedIn) throw new Error('Totaljobs login timed out — check credentials in Job Site Login');
-  console.log('  [Totaljobs Bot] Logged in successfully');
+  const userNav = await page.$('[data-testid="user-nav"], .user-nav__name, a[href*="my-account"]').catch(() => null);
+  if (!userNav) throw new Error('Totaljobs: not logged in. Go to Job Site Login → Connect Totaljobs Account first.');
+  console.log('  [Totaljobs Bot] Session active');
 }
 
 // ── Phase 1: Search & queue ───────────────────────────────────────────────
@@ -110,6 +77,8 @@ async function phase1_searchAndQueue(page) {
 
     try {
       await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await waitForCloudflareSolve(page);
+      await humanWarmup(page);
       await DELAY(2000);
     } catch (err) {
       console.error(`  [Totaljobs Bot] Failed to load search: ${err.message}`);
@@ -314,7 +283,7 @@ async function phase2_applyReadyCVs(page) {
   await queue.init(process.env.JOBBOT_USERDATA);
 
   const profileDir = path.join(process.env.JOBBOT_USERDATA, 'totaljobs_profile');
-  const context = await browser_launcher.launchPersistentContext(profileDir);
+  const context = await launchPersistentContext(profileDir);
   await stealth.applyToContext(context);
 
   const page = await context.newPage();

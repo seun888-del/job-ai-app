@@ -32,6 +32,7 @@ jobs:
       - name: Inject secrets
         run: |
           (Get-Content bot\config.js) -replace '__CAPSOLVER_KEY__', '${{ secrets.CAPSOLVER_KEY }}' | Set-Content bot\config.js
+          (Get-Content bot\modules\browser_launcher.js) -replace '__PROXY_URL__', '${{ secrets.PROXY_URL }}' | Set-Content bot\modules\browser_launcher.js
         shell: pwsh
 
       - name: Build Windows installer
@@ -82,7 +83,9 @@ jobs:
           iconutil -c icns assets/icon.iconset -o assets/icon.icns || true
 
       - name: Inject secrets
-        run: sed -i '' 's/__CAPSOLVER_KEY__/${{ secrets.CAPSOLVER_KEY }}/g' bot/config.js
+        run: |
+          sed -i '' 's/__CAPSOLVER_KEY__/${{ secrets.CAPSOLVER_KEY }}/g' bot/config.js
+          sed -i '' 's|__PROXY_URL__|${{ secrets.PROXY_URL }}|g' bot/modules/browser_launcher.js
 
       - name: Build Mac DMG
         run: npm run dist:mac

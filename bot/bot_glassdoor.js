@@ -6,12 +6,14 @@
  * Phase 2 — When Scorer marks a job cv_ready, submits via Glassdoor Easy Apply.
  */
 
-const { chromium } = require('playwright');
-const cfg       = require('./config');
-const glassdoor = require('./modules/glassdoor');
-const queue     = require('./modules/queue_manager');
-const logger    = require('./modules/logger');
-const salary    = require('./modules/salary_filter');
+const cfg            = require('./config');
+const glassdoor      = require('./modules/glassdoor');
+const queue          = require('./modules/queue_manager');
+const logger         = require('./modules/logger');
+const salary         = require('./modules/salary_filter');
+const stealth        = require('./modules/stealth');
+const { launchPersistentContext } = require('./modules/browser_launcher');
+const path           = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
 const POLL_INTERVAL = 10000;
@@ -190,14 +192,6 @@ async function main() {
   await cfg.init();
   await queue.init(process.env.JOBBOT_USERDATA);
 
-  const gdEmail = process.env.GLASSDOOR_EMAIL;
-  const gdPass  = process.env.GLASSDOOR_PASS;
-
-  if (!gdEmail || !gdPass) {
-    console.error('ERROR: Set GLASSDOOR_EMAIL and GLASSDOOR_PASS env vars');
-    process.exit(1);
-  }
-
   const country = cfg.APPLICANT.country || 'United Kingdom';
   const domain  = country === 'United States' ? 'glassdoor.com' : 'glassdoor.co.uk';
 
@@ -211,22 +205,25 @@ async function main() {
     for (const j of stuckApplying) queue.update(j.jobId, { status: 'cv_ready' });
   }
 
-  const browser = await chromium.launch({ headless: false, slowMo: 60 });
-  let gdPage;
+  const profileDir = path.join(process.env.JOBBOT_USERDATA, 'glassdoor_profile');
+  const context = await launchPersistentContext(profileDir);
+  await stealth.applyToContext(context);
+  const gdPage = await context.newPage();
+
   try {
-    gdPage = await glassdoor.login(browser, gdEmail, gdPass);
+    await glassdoor.ensureLoggedIn(gdPage, domain);
+    while (true) {
+      await phase1_searchAndQueue(gdPage);
+      await phase2_applyReadyCVs(gdPage);
+      logger.printSummary();
+      console.log('\n  [Glassdoor Bot] Cycle complete. Waiting 1 min...');
+      await DELAY(60 * 1000);
+    }
   } catch (err) {
     console.error('ERROR: ' + err.message);
-    await browser.close().catch(() => {});
     process.exit(1);
-  }
-
-  while (true) {
-    await phase1_searchAndQueue(gdPage);
-    await phase2_applyReadyCVs(gdPage);
-    logger.printSummary();
-    console.log('\n  [Glassdoor Bot] Cycle complete. Waiting 1 min...');
-    await DELAY(60 * 1000);
+  } finally {
+    await context.close().catch(() => {});
   }
 }
 

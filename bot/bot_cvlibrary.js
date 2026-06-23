@@ -12,7 +12,7 @@ const queue   = require('./modules/queue_manager');
 const logger  = require('./modules/logger');
 const salary  = require('./modules/salary_filter');
 const stealth = require('./modules/stealth');
-const browser_launcher = require('./modules/browser_launcher');
+const { launchPersistentContext, humanWarmup, waitForCloudflareSolve } = require('./modules/browser_launcher');
 const path    = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
@@ -46,49 +46,27 @@ function workTypePriority() {
 
 // ── Login ─────────────────────────────────────────────────────────────────
 async function ensureLoggedIn(page) {
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
-  await DELAY(2000 + Math.random() * 1000);
-
-  // Already logged in — look for user-only elements
-  const alreadyIn = await page.$('a[href*="/my-cv-library"], a[href*="/dashboard"], .user-nav__name, [data-testid="user-menu"]').catch(() => null);
-  if (alreadyIn) { console.log('  [CV-Library Bot] Session still valid'); return; }
-
-  // Try the site's own Sign In link; fall back to direct login URL
-  const signInLink = await page.$('a[href*="login"], a:has-text("Sign in"), a:has-text("Log in"), a:has-text("Login")').catch(() => null);
-  if (signInLink) {
-    await signInLink.click();
-    await page.waitForLoadState('domcontentloaded');
-    await DELAY(1500 + Math.random() * 500);
-  } else {
-    await page.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded' });
-    await DELAY(1500);
+  await page.goto('https://www.cv-library.co.uk/', { waitUntil: 'load', timeout: 30000 });
+  await waitForCloudflareSolve(page);
+  await DELAY(2000);
+  const isLoggedIn = await page.evaluate(() => {
+    const text = (document.body?.innerText || '').toLowerCase();
+    const hasLogout = text.includes('sign out') || text.includes('log out') || text.includes('my account') || text.includes('my cv');
+    const hasLoginBtn = !!document.querySelector('a[href*="/login"]');
+    return hasLogout || !hasLoginBtn;
+  }).catch(() => false);
+  if (!isLoggedIn) {
+    throw new Error('CV-Library: not logged in. Go to Job Site Login → click Connect CV-Library Account → log in → close the Chrome window → then start this bot.');
   }
+  console.log('  [CV-Library Bot] Session active');
+}
 
-  // Pre-fill email then wait for user to enter password
+// Accept the OneTrust cookie consent banner if visible (new Next.js site)
+async function acceptCookies(page) {
   try {
-    const emailEl = page.locator('input[name="email"], input[type="email"]').first();
-    if (await emailEl.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await emailEl.click();
-      await DELAY(400 + Math.random() * 300);
-      await emailEl.pressSequentially(process.env.CVLIB_EMAIL || '', { delay: 55 + Math.random() * 65 });
-    }
+    const btn = await page.$('button:has-text("Accept All"), #onetrust-accept-btn-handler');
+    if (btn && await btn.isVisible()) { await btn.click(); await DELAY(800); }
   } catch (_) {}
-
-  const loginPageUrl = page.url();
-  console.log('  [CV-Library Bot] ⏳ Please enter your password and sign in (up to 5 minutes)...');
-
-  const deadline = Date.now() + 300000;
-  let loggedIn = false;
-  while (Date.now() < deadline) {
-    const u = page.url();
-    if (u !== loginPageUrl && u.includes('cv-library.co.uk') && !u.includes('login') && !u.includes('sign-in')) {
-      loggedIn = true; break;
-    }
-    await DELAY(3000);
-  }
-
-  if (!loggedIn) throw new Error('CV-Library login timed out — check credentials in Job Site Login');
-  console.log('  [CV-Library Bot] Logged in successfully');
 }
 
 // ── Phase 1: Search & queue ───────────────────────────────────────────────
@@ -97,128 +75,138 @@ async function phase1_searchAndQueue(page) {
   console.log('  [CV-Library Bot] Phase 1 — Searching for jobs');
   console.log('══════════════════════════════════════════════════════');
 
+  let cookiesAccepted = false;
+
+  // Warm up on the homepage first so navigation looks human (not cold-jumping to /search-jobs)
+  console.log('  [CV-Library Bot] Warming up on homepage...');
+  await page.goto(BASE_URL, { waitUntil: 'load', timeout: 30000 });
+  await waitForCloudflareSolve(page);
+  await acceptCookies(page);
+  cookiesAccepted = true;
+  await humanWarmup(page);
+  await DELAY(2000 + Math.random() * 1500);
+
   for (const searchTerm of cfg.JOB_SEARCHES) {
     console.log(`\n  [CV-Library Bot] Searching: "${searchTerm}"`);
 
-    const minSalary = (() => {
-      if (!cfg.APPLICANT.salaryExpectation) return '';
-      const m = String(cfg.APPLICANT.salaryExpectation).replace(/[^0-9]/g, '');
-      return m ? `&minsalary=${m}` : '';
-    })();
-
-    const searchUrl = `${BASE_URL}/search-jobs?q=${encodeURIComponent(searchTerm)}&distance=50&salarytype=annual${minSalary}&tempperm=Permanent&us=1`;
-
     try {
-      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await DELAY(2000);
+      // CV-Library's new Next.js site requires using the search form, not query params
+      await page.goto(`${BASE_URL}/search-jobs`, { waitUntil: 'load', timeout: 30000 });
+      const passed = await waitForCloudflareSolve(page);
+      if (!passed) {
+        console.error('');
+        console.error('  ════════════════════════════════════════════════════');
+        console.error('  [CV-Library Bot] IP BLOCKED by CV-Library security.');
+        console.error('  This is a temporary block on your IP address.');
+        console.error('  DO NOT restart the bot — every attempt extends the block.');
+        console.error('  Wait 24–48 hours, then try again.');
+        console.error('  Reference: see "Blocked" page in the browser window.');
+        console.error('  ════════════════════════════════════════════════════');
+        console.error('');
+        return; // stop entirely — don't keep hitting the blocked endpoint
+      }
+
+      if (!cookiesAccepted) { await acceptCookies(page); cookiesAccepted = true; } // fallback in case homepage didn't catch it
+
+      await page.fill('input[name="keyword"]', searchTerm);
+      await DELAY(400);
+      await page.press('input[name="keyword"]', 'Enter');
+      await page.waitForLoadState('load', { timeout: 20000 });
+      await waitForCloudflareSolve(page);
+      await humanWarmup(page);
+      await DELAY(2500);
     } catch (err) {
-      console.error(`  [CV-Library Bot] Failed to load search page: ${err.message}`);
+      console.error(`  [CV-Library Bot] Failed to load search for "${searchTerm}": ${err.message}`);
       continue;
     }
 
-    // Collect job cards from the results page
-    const jobLinks = await page.$$eval(
-      'article.job-result a[href*="/jobs/"], .job-result__title a, .results-jobs a.job-result__title',
-      els => els.map(el => ({
-        url: el.href,
-        title: el.textContent.trim(),
-      }))
-    );
+    // Extract job cards using the new Next.js card structure
+    const jobCards = await page.evaluate((limit) => {
+      const cards = Array.from(document.querySelectorAll('[class*="Card_card__"]'))
+        .filter(c => c.querySelector('[data-qa="type-apply-now"]'));
+      return cards.slice(0, limit).map(card => {
+        const applyEl = card.querySelector('[data-qa="type-apply-now"]');
+        const titleEl = card.querySelector('[class*="JobCard_titleText__"], [class*="JobCard_title__"] a, h2 a, h3 a');
+        const companyEl = card.querySelector('[class*="JobCard_company__"]');
+        const jobId = (applyEl?.getAttribute('href') || '').match(/\/apply\/(\d+)/)?.[1] || '';
+        return {
+          title: (titleEl?.innerText || '').trim(),
+          url: titleEl?.closest('a')?.href || titleEl?.href || '',
+          company: (companyEl?.innerText || '').trim(),
+          applyUrl: applyEl?.href || '',
+          jobId: 'cvlib_' + jobId,
+        };
+      }).filter(j => j.jobId !== 'cvlib_' && j.title && j.url);
+    }, cfg.MAX_JOBS_PER_SEARCH).catch(() => []);
 
-    if (!jobLinks.length) {
+    if (!jobCards.length) {
       console.log(`  [CV-Library Bot] No results for "${searchTerm}"`);
       continue;
     }
+    console.log(`  [CV-Library Bot] Found ${jobCards.length} listings`);
 
-    console.log(`  [CV-Library Bot] Found ${jobLinks.length} listings`);
+    for (const card of jobCards) {
+      const { jobId, title, url, company, applyUrl } = card;
 
-    for (const link of jobLinks.slice(0, cfg.MAX_JOBS_PER_SEARCH)) {
-      const jobId = `cvlib_${link.url.replace(/[^a-z0-9]/gi, '_').slice(-40)}`;
+      if (queue.has(jobId)) { console.log(`  [CV-Library Bot] Already queued: ${title}`); continue; }
+      if (queue.wasApplied(jobId)) { console.log(`  [CV-Library Bot] Already applied — skipping: ${title}`); continue; }
+      if (!isRelevantTitle(title)) { console.log(`  [CV-Library Bot] Title filter — skipping: ${title}`); continue; }
+      if (isBlockedCompany(company)) { console.log(`  [CV-Library Bot] Company blocked — skipping: ${title} @ ${company}`); continue; }
+      if (queue.wasAppliedToCompanyRecently(company)) { console.log(`  [CV-Library Bot] Applied to ${company} in last 30 days — skipping: ${title}`); continue; }
+      if (queue.hasCanonical(title, company)) { console.log(`  [CV-Library Bot] Duplicate (cross-site) — skipping: ${title} @ ${company}`); continue; }
 
-      if (queue.has(jobId)) { console.log(`  [CV-Library Bot] Already queued: ${link.title}`); continue; }
-      if (queue.wasApplied(jobId)) { console.log(`  [CV-Library Bot] Already applied — skipping: ${link.title}`); continue; }
-      if (!isRelevantTitle(link.title)) { console.log(`  [CV-Library Bot] Title filter — skipping: ${link.title}`); continue; }
+      // Skip if apply URL points to an external site
+      if (applyUrl && !applyUrl.includes('cv-library.co.uk')) {
+        console.log(`  [CV-Library Bot] External site — skipping: ${title}`);
+        queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'External site' });
+        continue;
+      }
 
       try {
-        await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        // Navigate to job detail page for description
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await waitForCloudflareSolve(page);
         await DELAY(1500);
 
-        const company = await page.$eval(
-          '.job-header__company, .job-details__company, [class*="company"]',
-          el => el.textContent.trim()
-        ).catch(() => '');
-
-        if (isBlockedCompany(company)) {
-          console.log(`  [CV-Library Bot] Company blocked — skipping: ${link.title} @ ${company}`);
-          continue;
-        }
-
-        if (queue.wasAppliedToCompanyRecently(company)) {
-          console.log(`  [CV-Library Bot] Applied to ${company} in last 30 days — skipping: ${link.title}`);
-          continue;
-        }
-
-        if (queue.hasCanonical(link.title, company)) {
-          console.log(`  [CV-Library Bot] Duplicate (cross-site) — skipping: ${link.title} @ ${company}`);
-          continue;
-        }
-
-        // Check for Quick Apply button
-        const hasQuickApply = await page.$('button[data-action*="apply"], a[href*="/apply/"], .apply-button, button:has-text("Apply"), a:has-text("Quick Apply")').catch(() => null);
-        if (!hasQuickApply) {
-          console.log(`  [CV-Library Bot] No apply button — skipping: ${link.title}`);
-          queue.add({ jobId, title: link.title, company, url: link.url, source: 'cvlibrary', status: 'skipped', reason: 'No quick apply' });
-          continue;
-        }
-
-        // Check for external redirect
-        const applyHref = await page.$eval(
-          'a[href*="/apply/"], a:has-text("Apply Now")',
-          el => el.href
-        ).catch(() => '');
-        if (applyHref && !applyHref.includes('cv-library.co.uk')) {
-          console.log(`  [CV-Library Bot] External site — skipping: ${link.title}`);
-          queue.add({ jobId, title: link.title, company, url: link.url, source: 'cvlibrary', status: 'skipped', reason: 'External site' });
-          continue;
-        }
-
-        const description = await page.$eval(
-          '.job-description, .job-details__description, [class*="description"]',
-          el => el.innerText
-        ).catch(() => '');
+        const description = await page.evaluate(() => {
+          const descEl = document.querySelector(
+            '[class*="JobView_jobDescription__"], [class*="JobDescription_description__"], [class*="job-description"]'
+          ) || document.querySelector('main');
+          return descEl ? descEl.innerText.trim() : '';
+        }).catch(() => '');
 
         if (!description || description.trim().split(/\s+/).length < 80) {
-          console.log(`  [CV-Library Bot] Short/missing JD — skipping: ${link.title}`);
-          queue.add({ jobId, title: link.title, company, url: link.url, source: 'cvlibrary', status: 'skipped', reason: 'JD too short or missing' });
+          console.log(`  [CV-Library Bot] Short/missing JD — skipping: ${title}`);
+          queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'JD too short or missing' });
           continue;
         }
 
         if (cfg.APPLICANT.seekSponsorship) {
           if (!/visa sponsor|sponsorship|skilled worker|tier 2|work permit/i.test(description)) {
-            console.log(`  [CV-Library Bot] No sponsorship — skipping: ${link.title}`);
-            queue.add({ jobId, title: link.title, company, url: link.url, source: 'cvlibrary', status: 'skipped', reason: 'No sponsorship offered' });
+            console.log(`  [CV-Library Bot] No sponsorship — skipping: ${title}`);
+            queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'No sponsorship offered' });
             continue;
           }
         }
 
         if (!salary.isAcceptable(description, cfg.APPLICANT.salaryExpectation)) {
           const min = salary.extractMinSalary(description);
-          console.log(`  [CV-Library Bot] Below salary expectation (${min ? '£' + min.toLocaleString() : 'stated'}) — skipping: ${link.title}`);
-          queue.add({ jobId, title: link.title, company, url: link.url, source: 'cvlibrary', status: 'skipped', reason: 'Below salary expectation' });
+          console.log(`  [CV-Library Bot] Below salary (${min ? '£' + min.toLocaleString() : '?'}) — skipping: ${title}`);
+          queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'Below salary expectation' });
           continue;
         }
 
         const workType = detectWorkType(description);
         if (!cfg.WORK_TYPE_PRIORITY.includes(workType)) {
-          console.log(`  [CV-Library Bot] Work type "${workType}" not wanted — skipping: ${link.title}`);
-          queue.add({ jobId, title: link.title, company, url: link.url, source: 'cvlibrary', status: 'skipped', reason: `Work type (${workType}) not wanted` });
+          console.log(`  [CV-Library Bot] Work type "${workType}" not wanted — skipping: ${title}`);
+          queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: `Work type (${workType}) not wanted` });
           continue;
         }
 
-        queue.add({ jobId, title: link.title, company, url: link.url, description, source: 'cvlibrary', workType });
-        console.log(`  [CV-Library Bot] → Queued for Scorer: ${link.title} @ ${company} [${workType}]`);
+        queue.add({ jobId, title, company, url, description, source: 'cvlibrary', workType });
+        console.log(`  [CV-Library Bot] → Queued for Scorer: ${title} @ ${company} [${workType}]`);
       } catch (err) {
-        console.error(`  [CV-Library Bot] Error on "${link.title}": ${err.message}`);
+        console.error(`  [CV-Library Bot] Error on "${title}": ${err.message}`);
       }
 
       await DELAY(2000);
@@ -341,7 +329,7 @@ async function phase2_applyReadyCVs(page) {
   await queue.init(process.env.JOBBOT_USERDATA);
 
   const profileDir = path.join(process.env.JOBBOT_USERDATA, 'cvlibrary_profile');
-  const context = await browser_launcher.launchPersistentContext(profileDir);
+  const context = await launchPersistentContext(profileDir);
   await stealth.applyToContext(context);
 
   const page = await context.newPage();

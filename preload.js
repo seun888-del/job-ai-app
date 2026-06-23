@@ -67,6 +67,9 @@ contextBridge.exposeInMainWorld('api', {
   shell: {
     openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
   },
+  site: {
+    connect: (site, loginUrl) => ipcRenderer.invoke('site:connect', { site, loginUrl }),
+  },
   onUpdateReady: (callback) => {
     ipcRenderer.on('update:ready', () => callback());
   },

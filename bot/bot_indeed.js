@@ -14,12 +14,14 @@
  * the country setting in the applicant's profile.
  */
 
-const { chromium } = require('playwright');
-const cfg    = require('./config');
-const indeed = require('./modules/indeed');
-const queue  = require('./modules/queue_manager');
-const logger = require('./modules/logger');
-const salary = require('./modules/salary_filter');
+const cfg            = require('./config');
+const indeed         = require('./modules/indeed');
+const queue          = require('./modules/queue_manager');
+const logger         = require('./modules/logger');
+const salary         = require('./modules/salary_filter');
+const stealth        = require('./modules/stealth');
+const { launchPersistentContext, humanWarmup } = require('./modules/browser_launcher');
+const path           = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
 const POLL_INTERVAL = 10000;
@@ -230,14 +232,6 @@ async function main() {
   await cfg.init();
   await queue.init(process.env.JOBBOT_USERDATA);
 
-  const indeedEmail = process.env.INDEED_EMAIL;
-  const indeedPass  = process.env.INDEED_PASS;
-
-  if (!indeedEmail || !indeedPass) {
-    console.error('ERROR: Set INDEED_EMAIL and INDEED_PASS env vars');
-    process.exit(1);
-  }
-
   const country = cfg.APPLICANT.country || 'United Kingdom';
   const domain  = country === 'United States' ? 'indeed.com' : 'uk.indeed.com';
 
@@ -252,22 +246,25 @@ async function main() {
     for (const j of stuckApplying) queue.update(j.jobId, { status: 'cv_ready' });
   }
 
-  const browser = await chromium.launch({ headless: false, slowMo: 60 });
-  let indeedPage;
+  const profileDir = path.join(process.env.JOBBOT_USERDATA, 'indeed_profile');
+  const context = await launchPersistentContext(profileDir);
+  await stealth.applyToContext(context);
+  const indeedPage = await context.newPage();
+
   try {
-    indeedPage = await indeed.login(browser, indeedEmail, indeedPass);
+    await indeed.ensureLoggedIn(indeedPage);
+    while (true) {
+      await phase1_searchAndQueue(indeedPage);
+      await phase2_applyReadyCVs(indeedPage);
+      logger.printSummary();
+      console.log('\n  [Indeed Bot] Cycle complete. Waiting 1 min before next search...');
+      await DELAY(60 * 1000);
+    }
   } catch (err) {
     console.error('ERROR: ' + err.message);
-    await browser.close().catch(() => {});
     process.exit(1);
-  }
-
-  while (true) {
-    await phase1_searchAndQueue(indeedPage);
-    await phase2_applyReadyCVs(indeedPage);
-    logger.printSummary();
-    console.log('\n  [Indeed Bot] Cycle complete. Waiting 1 min before next search...');
-    await DELAY(60 * 1000);
+  } finally {
+    await context.close().catch(() => {});
   }
 }
 

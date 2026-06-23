@@ -1,4 +1,4 @@
-const content = document.getElementById('content');
+﻿const content = document.getElementById('content');
 const navItems = document.querySelectorAll('#nav li');
 
 navItems.forEach(li => {
@@ -43,7 +43,7 @@ async function render(view) {
   }
 }
 
-// ── 1. Personal Details ─────────────────────────────────────────────────
+// â”€â”€ 1. Personal Details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function renderPersonal() {
   const p = await window.api.profile.get();
   const country = p.country || 'United Kingdom';
@@ -60,11 +60,11 @@ async function renderPersonal() {
       <p class="card-hint">Determines which job sites are available and how employer screening questions are answered.</p>
       <div class="country-picker">
         <button class="country-btn${country === 'United Kingdom' ? ' active' : ''}" data-country="United Kingdom">
-          <span class="country-flag">🇬🇧</span>
+          <span class="country-flag">ðŸ‡¬ðŸ‡§</span>
           <span class="country-name">United Kingdom</span>
         </button>
         <button class="country-btn${country === 'United States' ? ' active' : ''}" data-country="United States">
-          <span class="country-flag">🇺🇸</span>
+          <span class="country-flag">ðŸ‡ºðŸ‡¸</span>
           <span class="country-name">United States</span>
         </button>
       </div>
@@ -88,7 +88,7 @@ async function renderPersonal() {
     <div class="card">
       <h3>Work Eligibility</h3>
       <div class="field"><label>Years of experience</label><input id="years_experience" type="number" min="0" value="${p.years_experience ?? 0}"></div>
-      <div class="field"><label>Salary expectation (e.g. 45000 or $45,000–$55,000)</label><input id="salary_expectation" value="${p.salary_expectation || ''}"></div>
+      <div class="field"><label>Salary expectation (e.g. 45000 or $45,000â€“$55,000)</label><input id="salary_expectation" value="${p.salary_expectation || ''}"></div>
       <div class="field">
         <label>Countries I am eligible to work in (hold Ctrl/Cmd to select multiple)</label>
         ${(() => {
@@ -102,8 +102,8 @@ async function renderPersonal() {
       <div class="field">
         <label>Do you require visa sponsorship?</label>
         <select id="requires_sponsorship">
-          <option value="0" ${!p.requires_sponsorship ? 'selected' : ''}>No — I do not require sponsorship</option>
-          <option value="1" ${p.requires_sponsorship ? 'selected' : ''}>Yes — I require visa sponsorship</option>
+          <option value="0" ${!p.requires_sponsorship ? 'selected' : ''}>No â€” I do not require sponsorship</option>
+          <option value="1" ${p.requires_sponsorship ? 'selected' : ''}>Yes â€” I require visa sponsorship</option>
         </select>
       </div>
       <div class="checkbox-field">
@@ -240,7 +240,7 @@ async function renderPersonal() {
   });
 }
 
-// ── 2. Job Site Login ────────────────────────────────────────────────────
+// â”€â”€ 2. Job Site Login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function renderLogin() {
   const [reedCred, liCred, indeedCred, gdCred, cvlibCred, tjCred, cwCred] = await Promise.all([
     window.api.credentials.get('reed'),
@@ -276,41 +276,36 @@ async function renderLogin() {
 
     <div class="card">
       <h3>Indeed</h3>
-      <div class="field"><label>Email</label><input id="indeed_email" value="${indeedCred?.username || ''}"></div>
-      <div class="field"><label>Password</label><input id="indeed_pass" type="password" value=""></div>
-      <button class="primary" id="save-indeed">Save Indeed Login</button>
+      <p style="color:#888;font-size:13px;margin:0 0 12px">Click Connect to open a Chrome window and log in to Indeed. The bot will reuse that session automatically â€” no bot detection.</p>
+      <button class="primary" id="connect-indeed">Connect Indeed Account</button>
       <div class="status-msg" id="status-indeed"></div>
     </div>
 
     <div class="card">
       <h3>Glassdoor</h3>
-      <div class="field"><label>Email</label><input id="gd_email" value="${gdCred?.username || ''}"></div>
-      <div class="field"><label>Password</label><input id="gd_pass" type="password" value=""></div>
-      <button class="primary" id="save-gd">Save Glassdoor Login</button>
+      <p style="color:#888;font-size:13px;margin:0 0 12px">Click Connect to open a Chrome window and log in to Glassdoor. The bot will reuse that session automatically â€” no bot detection.</p>
+      <button class="primary" id="connect-gd">Connect Glassdoor Account</button>
       <div class="status-msg" id="status-gd"></div>
     </div>
 
     <div class="card">
       <h3>CV-Library</h3>
-      <div class="field"><label>Email</label><input id="cvlib_email" value="${cvlibCred?.username || ''}"></div>
-      <div class="field"><label>Password</label><input id="cvlib_pass" type="password" value=""></div>
-      <button class="primary" id="save-cvlib">Save CV-Library Login</button>
+      <p style="color:#888;font-size:13px;margin:0 0 12px">Click Connect to open a Chrome window and log in to CV-Library. The bot will reuse that session automatically â€” no bot detection.</p>
+      <button class="primary" id="connect-cvlib">Connect CV-Library Account</button>
       <div class="status-msg" id="status-cvlib"></div>
     </div>
 
     <div class="card">
       <h3>Totaljobs</h3>
-      <div class="field"><label>Email</label><input id="tj_email" value="${tjCred?.username || ''}"></div>
-      <div class="field"><label>Password</label><input id="tj_pass" type="password" value=""></div>
-      <button class="primary" id="save-tj">Save Totaljobs Login</button>
+      <p style="color:#888;font-size:13px;margin:0 0 12px">Click Connect to open a Chrome window and log in to Totaljobs. The bot will reuse that session automatically â€” no bot detection.</p>
+      <button class="primary" id="connect-tj">Connect Totaljobs Account</button>
       <div class="status-msg" id="status-tj"></div>
     </div>
 
     <div class="card">
       <h3>CWJobs</h3>
-      <div class="field"><label>Email</label><input id="cw_email" value="${cwCred?.username || ''}"></div>
-      <div class="field"><label>Password</label><input id="cw_pass" type="password" value=""></div>
-      <button class="primary" id="save-cw">Save CWJobs Login</button>
+      <p style="color:#888;font-size:13px;margin:0 0 12px">Click Connect to open a Chrome window and log in to CWJobs. The bot will reuse that session automatically â€” no bot detection.</p>
+      <button class="primary" id="connect-cw">Connect CWJobs Account</button>
       <div class="status-msg" id="status-cw"></div>
     </div>
   `;
@@ -328,22 +323,44 @@ async function renderLogin() {
   };
 
   document.getElementById('save-reed').addEventListener('click', () =>
-    saveCredential('reed', 'reed_email', 'reed_pass', 'status-reed', 'Saved — Reed Bot will open a login window on first start to verify'));
+    saveCredential('reed', 'reed_email', 'reed_pass', 'status-reed', 'Saved â€” Reed Bot will open a login window on first start to verify'));
   document.getElementById('save-li').addEventListener('click', () =>
-    saveCredential('linkedin', 'li_email', 'li_pass', 'status-li', 'Saved — LinkedIn Bot will open a browser window on first start'));
-  document.getElementById('save-indeed').addEventListener('click', () =>
-    saveCredential('indeed', 'indeed_email', 'indeed_pass', 'status-indeed', 'Saved — Indeed Bot will open a browser window on first start to verify'));
-  document.getElementById('save-gd').addEventListener('click', () =>
-    saveCredential('glassdoor', 'gd_email', 'gd_pass', 'status-gd', 'Saved — Glassdoor Bot will open a browser window on first start'));
-  document.getElementById('save-cvlib').addEventListener('click', () =>
-    saveCredential('cvlibrary', 'cvlib_email', 'cvlib_pass', 'status-cvlib', 'Saved — CV-Library Bot will open a browser window on first start'));
-  document.getElementById('save-tj').addEventListener('click', () =>
-    saveCredential('totaljobs', 'tj_email', 'tj_pass', 'status-tj', 'Saved — Totaljobs Bot will open a browser window on first start'));
-  document.getElementById('save-cw').addEventListener('click', () =>
-    saveCredential('cwjobs', 'cw_email', 'cw_pass', 'status-cw', 'Saved — CWJobs Bot will open a browser window on first start'));
+    saveCredential('linkedin', 'li_email', 'li_pass', 'status-li', 'Saved â€” LinkedIn Bot will open a browser window on first start'));
+  const connectSite = async (site, loginUrl, btnId, statusId) => {
+    const btn = document.getElementById(btnId);
+    const statusEl = document.getElementById(statusId);
+    btn.disabled = true;
+    btn.textContent = 'Opening Chrome...';
+    showStatus(statusEl, 'Log in to the site in the Chrome window, then close it when done.', 'info');
+    const result = await window.api.site.connect(site, loginUrl);
+    btn.disabled = false;
+    btn.textContent = btn.dataset.label;
+    if (result.success) {
+      showStatus(statusEl, 'Session saved â€” bot will start already logged in next time.');
+    } else {
+      showStatus(statusEl, `Error: ${result.error}`, 'error');
+    }
+  };
+
+  document.getElementById('connect-indeed').dataset.label = 'Connect Indeed Account';
+  document.getElementById('connect-gd').dataset.label    = 'Connect Glassdoor Account';
+  document.getElementById('connect-cvlib').dataset.label = 'Connect CV-Library Account';
+  document.getElementById('connect-tj').dataset.label    = 'Connect Totaljobs Account';
+  document.getElementById('connect-cw').dataset.label    = 'Connect CWJobs Account';
+
+  document.getElementById('connect-indeed').addEventListener('click', () =>
+    connectSite('indeed',    'https://secure.indeed.com/auth?hl=en_GB&co=GB&continue=https%3A%2F%2Fuk.indeed.com%2F', 'connect-indeed', 'status-indeed'));
+  document.getElementById('connect-gd').addEventListener('click', () =>
+    connectSite('glassdoor', 'https://www.glassdoor.co.uk/profile/login_input.htm', 'connect-gd', 'status-gd'));
+  document.getElementById('connect-cvlib').addEventListener('click', () =>
+    connectSite('cvlibrary', 'https://www.cv-library.co.uk/login', 'connect-cvlib', 'status-cvlib'));
+  document.getElementById('connect-tj').addEventListener('click', () =>
+    connectSite('totaljobs', 'https://www.totaljobs.com/en-GB/candidate/login', 'connect-tj', 'status-tj'));
+  document.getElementById('connect-cw').addEventListener('click', () =>
+    connectSite('cwjobs',    'https://www.cwjobs.co.uk/', 'connect-cw', 'status-cw'));
 }
 
-// ── 3. CVs ──────────────────────────────────────────────────────────────
+// â”€â”€ 3. CVs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function renderCVs() {
   const cvs = await window.api.cvs.get();
 
@@ -370,7 +387,7 @@ async function renderCVs() {
               <div class="tag-list">${cv.extracted_keywords.map(k => `<div class="tag">${k}</div>`).join('')}</div>
             </div>` : ''}
           ${!cv.suggested_roles.length && !cv.extracted_keywords.length
-            ? '<p class="muted">AI analysis unavailable — add search terms manually in Search Preferences.</p>'
+            ? '<p class="muted">AI analysis unavailable â€” add search terms manually in Search Preferences.</p>'
             : ''}
         </div>
       `).join('') || `<div class="card"><div class="empty-upload">
@@ -399,7 +416,7 @@ async function renderCVs() {
     const statusEl = document.getElementById('status');
     addBtn.disabled = true;
     statusEl.className = 'status-msg';
-    statusEl.textContent = 'Analysing CV with AI — this can take a couple of minutes...';
+    statusEl.textContent = 'Analysing CV with AI â€” this can take a couple of minutes...';
     try {
       const result = await window.api.cvs.pickAndAdd(label);
       if (result) {
@@ -418,12 +435,12 @@ async function renderCVs() {
   content.querySelectorAll('button[data-cv-id]').forEach(btn => {
     btn.addEventListener('click', async () => {
       await window.api.cvs.addSuggestedTerms(Number(btn.dataset.cvId));
-      showStatus(document.getElementById('status'), 'Search terms added — see Search Preferences');
+      showStatus(document.getElementById('status'), 'Search terms added â€” see Search Preferences');
     });
   });
 }
 
-// ── 4. Search Preferences ──────────────────────────────────────────────────
+// â”€â”€ 4. Search Preferences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function renderSearch() {
   const [prefs, terms, excludes, blacklist] = await Promise.all([
     window.api.searchPrefs.get(),
@@ -457,10 +474,10 @@ async function renderSearch() {
       <div class="field">
         <label>Work type priority (first = most preferred)</label>
         <select id="work_type_priority">
-          <option value='["remote","hybrid","onsite"]'>Remote → Hybrid → Onsite</option>
-          <option value='["remote","hybrid"]'>Remote → Hybrid only</option>
+          <option value='["remote","hybrid","onsite"]'>Remote â†’ Hybrid â†’ Onsite</option>
+          <option value='["remote","hybrid"]'>Remote â†’ Hybrid only</option>
           <option value='["remote"]'>Remote only</option>
-          <option value='["hybrid","onsite","remote"]'>Hybrid → Onsite → Remote</option>
+          <option value='["hybrid","onsite","remote"]'>Hybrid â†’ Onsite â†’ Remote</option>
         </select>
       </div>
       <div class="field">
@@ -479,7 +496,7 @@ async function renderSearch() {
     <div class="card">
       <h3>Search Terms</h3>
       <div class="tag-list" id="terms-list">
-        ${terms.map(t => `<div class="tag">${t.term} <button data-id="${t.id}" data-type="term">×</button></div>`).join('') || '<div class="empty-state">No search terms yet</div>'}
+        ${terms.map(t => `<div class="tag">${t.term} <button data-id="${t.id}" data-type="term">Ã—</button></div>`).join('') || '<div class="empty-state">No search terms yet</div>'}
       </div>
       <div class="input-group">
         <div class="field"><input id="new_term" placeholder="Add a job title, e.g. Sales Engineer"></div>
@@ -491,7 +508,7 @@ async function renderSearch() {
       <h3>Exclude Keywords</h3>
       <p class="card-hint">Jobs with these words in the title are skipped.</p>
       <div class="tag-list" id="exclude-list">
-        ${excludes.map(e => `<div class="tag exclude">${e.keyword} <button data-id="${e.id}" data-type="exclude">×</button></div>`).join('') || '<div class="empty-state">No exclude keywords yet</div>'}
+        ${excludes.map(e => `<div class="tag exclude">${e.keyword} <button data-id="${e.id}" data-type="exclude">Ã—</button></div>`).join('') || '<div class="empty-state">No exclude keywords yet</div>'}
       </div>
       <div class="input-group">
         <div class="field"><input id="new_exclude" placeholder="Add a keyword to exclude"></div>
@@ -503,7 +520,7 @@ async function renderSearch() {
       <h3>Blocked Companies</h3>
       <p class="card-hint">Jobs from these companies are skipped automatically.</p>
       <div class="tag-list" id="blacklist-list">
-        ${blacklist.map(b => `<div class="tag exclude">${b.company} <button data-id="${b.id}" data-type="blacklist">×</button></div>`).join('') || '<div class="empty-state">No blocked companies</div>'}
+        ${blacklist.map(b => `<div class="tag exclude">${b.company} <button data-id="${b.id}" data-type="blacklist">Ã—</button></div>`).join('') || '<div class="empty-state">No blocked companies</div>'}
       </div>
       <div class="input-group">
         <div class="field"><input id="new_company" placeholder="e.g. Capita, Serco, Reed Staffing"></div>
@@ -562,6 +579,7 @@ async function renderSearch() {
       <button class="primary" id="save-prefs">Save</button>
       <div class="status-msg" id="status"></div>
     </div>
+
   `;
 
   // Pre-select work type priority
@@ -660,21 +678,20 @@ async function renderSearch() {
       schedule_end: Number(document.getElementById('schedule_end').value),
     });
     showStatus(document.getElementById('status-schedule'), 'Schedule saved');
-  });
-}
+  });}
 
-// ── 5. License ──────────────────────────────────────────────────────────
+// â”€â”€ 5. License â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LICENSE_ERRORS = {
   missing_key: 'Enter a license key',
-  network_error: 'Could not reach the JobBot backend — check your internet connection',
+  network_error: 'Could not reach the JobBot backend â€” check your internet connection',
   invalid_license_key: 'Invalid license key',
   missing_license_key: 'Enter a license key',
   license_inactive: 'This license has been revoked',
   license_expired: 'This license has expired',
   rate_limit_exceeded: 'Daily usage limit reached for this license',
   invalid_email: 'Enter a valid email address',
-  already_registered: 'A license is already registered to this email — check your inbox',
-  server_error: 'Something went wrong on our end — please try again',
+  already_registered: 'A license is already registered to this email â€” check your inbox',
+  server_error: 'Something went wrong on our end â€” please try again',
 };
 
 function licenseBadgeClass(status) {
@@ -691,7 +708,7 @@ function renderLicenseStatus(license, usage) {
   if (!license || !license.license_key) {
     return '<div class="empty-state">No license activated. Start a free trial or enter a license key above to enable AI CV tailoring.</div>';
   }
-  const expires = license.expires_at ? new Date(license.expires_at).toLocaleString() : '—';
+  const expires = license.expires_at ? new Date(license.expires_at).toLocaleString() : 'â€”';
 
   let usageRow = '';
   if (usage) {
@@ -704,7 +721,7 @@ function renderLicenseStatus(license, usage) {
   }
 
   return `
-    <div class="stat-row"><span class="stat-label">Email</span><span class="stat-value">${license.email || '—'}</span></div>
+    <div class="stat-row"><span class="stat-label">Email</span><span class="stat-value">${license.email || 'â€”'}</span></div>
     <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value"><span class="badge ${licenseBadgeClass(license.status)}">${license.status}</span></span></div>
     <div class="stat-row"><span class="stat-label">Expires</span><span class="stat-value">${expires}</span></div>
     ${usageRow}
@@ -718,7 +735,7 @@ async function renderLicense() {
   const trialCard = hasLicense ? '' : `
     <div class="card">
       <h3>Start Free Trial</h3>
-      <p style="font-size:14px;color:#64748b;margin-bottom:16px">Try JobBot free for 7 days — no card required. Enter your email and we'll send you a license key instantly.</p>
+      <p style="font-size:14px;color:#64748b;margin-bottom:16px">Try JobBot free for 7 days â€” no card required. Enter your email and we'll send you a license key instantly.</p>
       <div class="field"><label>Your email</label><input id="trial_email" type="email" placeholder="you@example.com"></div>
       <button class="primary" id="start-trial">Start 7-day free trial</button>
       <div class="status-msg" id="trial-status"></div>
@@ -803,7 +820,7 @@ async function renderLicense() {
   });
 }
 
-// ── Dashboard ────────────────────────────────────────────────────────────
+// â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const BOT_LABELS = { reed: 'Reed Bot', scorer: 'Scorer Bot (AI)', linkedin: 'LinkedIn Bot', indeed: 'Indeed Bot', glassdoor: 'Glassdoor Bot', cvlibrary: 'CV-Library Bot', totaljobs: 'Totaljobs Bot', cwjobs: 'CWJobs Bot' };
 
 let botLogUnsub = null;
@@ -863,8 +880,8 @@ function buildPreflightWarning(profile) {
   if (!profile?.phone) missing.push('Phone');
   if (!missing.length) return '';
   return `<div class="preflight-warning">
-    ⚠ Your profile is incomplete — the bots may fail on contact fields. Please fill in: <strong>${missing.join(', ')}</strong>
-    <button class="preflight-link" data-view="personal">Complete Profile →</button>
+    âš  Your profile is incomplete â€” the bots may fail on contact fields. Please fill in: <strong>${missing.join(', ')}</strong>
+    <button class="preflight-link" data-view="personal">Complete Profile â†’</button>
   </div>`;
 }
 
@@ -877,7 +894,8 @@ function statusBadgeClass(status) {
   }
 }
 
-const CREDS_NEEDED = new Set(['reed', 'linkedin', 'indeed', 'glassdoor', 'cvlibrary', 'totaljobs', 'cwjobs']);
+// indeed, glassdoor, cvlibrary, totaljobs, cwjobs use persistent Chrome profiles (Connect button in Job Site Login) â€” no stored credentials
+const CREDS_NEEDED = new Set(['reed', 'linkedin']);
 const CRED_SITE_NAMES = { reed: 'Reed.co.uk', linkedin: 'LinkedIn', indeed: 'Indeed', glassdoor: 'Glassdoor', cvlibrary: 'CV-Library', totaljobs: 'Totaljobs', cwjobs: 'CWJobs' };
 
 async function renderDashboard() {
@@ -917,7 +935,7 @@ async function renderDashboard() {
           </div>
           <p class="bot-connect-hint">Connect your ${CRED_SITE_NAMES[key]} account to enable this bot.</p>
           <div class="bot-card-actions">
-            <button class="connect-btn" data-bot="${key}" data-action="connect">Connect account →</button>
+            <button class="connect-btn" data-bot="${key}" data-action="connect">Connect account â†’</button>
           </div>
         </div>`;
     }
@@ -932,6 +950,7 @@ async function renderDashboard() {
           <button class="primary" data-bot="${key}" data-action="start" ${!dashboardHasLicense || isRunning ? 'disabled' : ''}>Start</button>
           <button class="secondary" data-bot="${key}" data-action="stop" ${!isRunning ? 'disabled' : ''}>Stop</button>
           ${needsCreds ? `<button class="btn-text-muted" data-bot="${key}" data-action="connect">Change login</button>` : ''}
+          ${!needsCreds && !['reed','linkedin','scorer'].includes(key) ? `<span style="font-size:12px;color:#888;margin-left:6px">Session via <a href="#" data-view="login" style="color:#888">Job Site Login</a></span>` : ''}
         </div>
       </div>`;
   }
@@ -944,8 +963,8 @@ async function renderDashboard() {
 
     ${!dashboardHasLicense ? `
     <div class="no-license-banner">
-      <span>⚠ A license is required to start the bots.</span>
-      <button class="no-license-cta" data-view="license">Activate license →</button>
+      <span>âš  A license is required to start the bots.</span>
+      <button class="no-license-cta" data-view="license">Activate license â†’</button>
     </div>` : ''}
 
     ${buildPreflightWarning(profile)}
@@ -956,10 +975,10 @@ async function renderDashboard() {
     <div class="status-msg" id="bot-error"></div>
 
     <div id="login-prompt" class="login-prompt" style="display:none">
-      <div class="login-prompt-icon">🔐</div>
+      <div class="login-prompt-icon">ðŸ”</div>
       <div class="login-prompt-body">
         <strong id="login-prompt-title">Bot is waiting for you to log in</strong>
-        <span id="login-prompt-body">A browser window has opened — complete the login there and the bot will continue automatically.</span>
+        <span id="login-prompt-body">A browser window has opened â€” complete the login there and the bot will continue automatically.</span>
       </div>
     </div>
 
@@ -977,7 +996,7 @@ async function renderDashboard() {
     </div>
 
     <div class="card card-wide">
-      <h3>Applications — Last 14 Days</h3>
+      <h3>Applications â€” Last 14 Days</h3>
       ${buildApplicationsGraph(dailyApps)}
     </div>
 
@@ -993,7 +1012,7 @@ async function renderDashboard() {
               <td>${r.title || ''}</td>
               <td>${r.company || ''}</td>
               <td><span class="badge ${statusBadgeClass(r.status)}">${r.status}</span></td>
-              <td class="cv-name-cell">${r.cv_name || '—'}</td>
+              <td class="cv-name-cell">${r.cv_name || 'â€”'}</td>
               <td>${r.updated_at ? r.updated_at.slice(0, 10) : ''}</td>
               <td>${r.cv_path ? `<button class="view-cv-btn" data-path="${r.cv_path}">View CV</button>` : ''}</td>
             </tr>`).join('') || '<tr><td colspan="6"><div class="empty-state">No activity yet</div></td></tr>'}
@@ -1010,6 +1029,10 @@ async function renderDashboard() {
 
   content.querySelectorAll('.view-cv-btn').forEach(btn => {
     btn.addEventListener('click', () => window.api.shell.openPath(btn.dataset.path));
+  });
+
+  content.querySelectorAll('a[data-view]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); navigate(a.dataset.view); });
   });
 
   content.querySelectorAll('button[data-action]').forEach(btn => {
@@ -1048,19 +1071,19 @@ async function renderDashboard() {
     if (loginPrompt) {
       if (bot === 'reed' && (text.includes('Opening login page') || text.includes('Waiting for you to complete login'))) {
         document.getElementById('login-prompt-title').textContent = 'Reed is waiting for you to log in';
-        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Reed.co.uk password there and click Log In — the bot will continue automatically once you\'re signed in.';
+        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Reed.co.uk password there and click Log In â€” the bot will continue automatically once you\'re signed in.';
         loginPrompt.style.display = 'flex';
       } else if (bot === 'linkedin' && text.includes('Security check')) {
         document.getElementById('login-prompt-title').textContent = 'LinkedIn security check';
-        document.getElementById('login-prompt-body').textContent = 'LinkedIn has shown a CAPTCHA or security check. Complete it in the browser window — the bot will continue automatically.';
+        document.getElementById('login-prompt-body').textContent = 'LinkedIn has shown a CAPTCHA or security check. Complete it in the browser window â€” the bot will continue automatically.';
         loginPrompt.style.display = 'flex';
       } else if (bot === 'glassdoor' && (text.includes('Opening login page') || text.includes('Waiting for you to complete login'))) {
         document.getElementById('login-prompt-title').textContent = 'Glassdoor is waiting for you to log in';
-        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Glassdoor password — the bot will continue automatically once signed in.';
+        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Glassdoor password â€” the bot will continue automatically once signed in.';
         loginPrompt.style.display = 'flex';
       } else if (bot === 'indeed' && (text.includes('Opening login page') || text.includes('Waiting for you to complete login') || text.includes('Verification required'))) {
         document.getElementById('login-prompt-title').textContent = 'Indeed is waiting for you to log in';
-        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Indeed password (and any verification code) — the bot will continue automatically once signed in.';
+        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Indeed password (and any verification code) â€” the bot will continue automatically once signed in.';
         loginPrompt.style.display = 'flex';
       } else if ((text.includes('Logged in') || text.includes('Session restored') || text.includes('ERROR:') || text.includes('login timed out') || text.includes('Logged in successfully'))) {
         loginPrompt.style.display = 'none';
@@ -1073,7 +1096,7 @@ async function renderDashboard() {
   });
 }
 
-// ── Interview Tracker ─────────────────────────────────────────────────────
+// â”€â”€ Interview Tracker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const TRACKER_STAGES = ['applied', 'phone_screen', 'interview', 'offer', 'rejected', 'withdrawn'];
 const STAGE_LABELS = { applied: 'Applied', phone_screen: 'Phone Screen', interview: 'Interview', offer: 'Offer', rejected: 'Rejected', withdrawn: 'Withdrawn' };
 const STAGE_COLORS = { applied: '#6366f1', phone_screen: '#8b5cf6', interview: '#f59e0b', offer: '#10b981', rejected: '#ef4444', withdrawn: '#94a3b8' };
@@ -1120,13 +1143,13 @@ async function renderTracker() {
         <tbody>
           ${entries.map(e => `
             <tr data-id="${e.id}">
-              <td class="tracker-title">${e.title ? `<a href="${e.url || '#'}" class="tracker-link" data-url="${e.url || ''}">${e.title}</a>` : '—'}</td>
-              <td>${e.company || '—'}</td>
-              <td>${e.source ? `<span class="tracker-source-badge" style="background:${SOURCE_BADGE[e.source] || '#6366f1'}">${e.source}</span>` : '—'}</td>
-              <td>${e.applied_at ? e.applied_at.slice(0, 10) : '—'}</td>
+              <td class="tracker-title">${e.title ? `<a href="${e.url || '#'}" class="tracker-link" data-url="${e.url || ''}">${e.title}</a>` : 'â€”'}</td>
+              <td>${e.company || 'â€”'}</td>
+              <td>${e.source ? `<span class="tracker-source-badge" style="background:${SOURCE_BADGE[e.source] || '#6366f1'}">${e.source}</span>` : 'â€”'}</td>
+              <td>${e.applied_at ? e.applied_at.slice(0, 10) : 'â€”'}</td>
               <td>${stageHtml(e.id, e.stage || 'applied')}</td>
               <td><input class="tracker-notes-input" data-id="${e.id}" value="${(e.notes || '').replace(/"/g, '&quot;')}" placeholder="Add notes..."></td>
-              <td><button class="tracker-delete-btn" data-id="${e.id}">×</button></td>
+              <td><button class="tracker-delete-btn" data-id="${e.id}">Ã—</button></td>
             </tr>`).join('')}
         </tbody>
       </table>
@@ -1172,7 +1195,7 @@ async function renderTracker() {
   });
 }
 
-// ── Analytics ─────────────────────────────────────────────────────────────
+// â”€â”€ Analytics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function buildAnalyticsGraph(daily30) {
   if (!daily30 || daily30.length === 0) return '<div class="graph-empty">No applications in the past 30 days</div>';
   const W = 560, H = 80, PAD = 4;
@@ -1207,7 +1230,7 @@ async function renderAnalytics() {
   const data = await window.api.analytics.get();
 
   if (!data) {
-    content.innerHTML = `<div class="page-header"><h2>Analytics</h2><p>No data yet — run the bots to see analytics.</p></div>`;
+    content.innerHTML = `<div class="page-header"><h2>Analytics</h2><p>No data yet â€” run the bots to see analytics.</p></div>`;
     return;
   }
 
@@ -1218,7 +1241,7 @@ async function renderAnalytics() {
   const skipRate = totalApplied + totalSkipped > 0 ? Math.round((totalSkipped / (totalApplied + totalSkipped)) * 100) : 0;
   const totalDaysActive = daily30.filter(d => d.count > 0).length || 1;
   const avgPerDay = totalDaysActive > 0 ? (totalApplied / totalDaysActive).toFixed(1) : '0';
-  const topSource = bySource[0]?.source || '—';
+  const topSource = bySource[0]?.source || 'â€”';
 
   const barRow = (label, count, max, color) => {
     const pct = max > 0 ? Math.round((count / max) * 100) : 0;
@@ -1249,7 +1272,7 @@ async function renderAnalytics() {
     </div>
 
     <div class="card card-wide">
-      <h3>Applications — Last 30 Days</h3>
+      <h3>Applications â€” Last 30 Days</h3>
       ${buildAnalyticsGraph(daily30)}
     </div>
 
@@ -1301,7 +1324,7 @@ async function renderAnalytics() {
   `;
 }
 
-// ── Credential modal (shared across all bot cards) ───────────────────────
+// â”€â”€ Credential modal (shared across all bot cards) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let credModalBot = null;
 
 function ensureCredModal() {
@@ -1314,9 +1337,9 @@ function ensureCredModal() {
   el.innerHTML = `
     <div class="cred-modal-card">
       <h3 id="cred-modal-title">Connect account</h3>
-      <p class="cred-modal-hint">Stored encrypted on this device only — never sent to our servers.</p>
+      <p class="cred-modal-hint">Stored encrypted on this device only â€” never sent to our servers.</p>
       <div class="field"><label>Email</label><input id="cred-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
-      <div class="field"><label>Password</label><input id="cred-password" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <div class="field"><label>Password</label><input id="cred-password" type="password" autocomplete="current-password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"></div>
       <div class="status-msg" id="cred-status"></div>
       <div class="cred-modal-actions">
         <button class="primary" id="cred-save">Save & Connect</button>
@@ -1350,7 +1373,7 @@ function openCredModal(botName, existingEmail = '') {
   document.getElementById('cred-email').focus();
 }
 
-// ── Expiry banner ───────────────────────────────────────────────────────
+// â”€â”€ Expiry banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function initExpiryBanner() {
   const license = await window.api.license.get();
   if (!license?.license_key || !license.expires_at) return;
@@ -1370,7 +1393,7 @@ async function initExpiryBanner() {
   banner.className = `expiry-banner ${urgency}`;
   banner.innerHTML = `
     <span>${msg}</span>
-    <button id="renew-btn">${isTrial ? 'Subscribe to continue →' : 'Contact to Renew'}</button>
+    <button id="renew-btn">${isTrial ? 'Subscribe to continue â†’' : 'Contact to Renew'}</button>
   `;
   document.getElementById('renew-btn').addEventListener('click', () => {
     if (isTrial) {
@@ -1381,7 +1404,7 @@ async function initExpiryBanner() {
   });
 }
 
-// ── Nav progress dots ────────────────────────────────────────────────────
+// â”€â”€ Nav progress dots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function updateNavProgress() {
   const [profile, cvs, terms, license] = await Promise.all([
     window.api.profile.get(),
@@ -1410,7 +1433,7 @@ async function updateNavProgress() {
   });
 }
 
-// ── Onboarding tour (first launch only) ─────────────────────────────────
+// â”€â”€ Onboarding tour (first launch only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const TOUR_STEPS = [
   {
@@ -1422,31 +1445,31 @@ const TOUR_STEPS = [
   {
     view: 'login',
     title: 'Job Site Login',
-    tip: 'Enter your Reed.co.uk and LinkedIn credentials. They are encrypted and stored only on your device — never uploaded or shared with anyone.',
+    tip: 'Enter your Reed.co.uk and LinkedIn credentials. They are encrypted and stored only on your device â€” never uploaded or shared with anyone.',
     action: 'Enter your Reed.co.uk and LinkedIn email and password, then click Save for each.',
   },
   {
     view: 'cvs',
     title: 'Upload Your CV',
-    tip: 'Upload your CV as a PDF. Before every application, the AI rewrites your profile section to match the specific job description — so every application is uniquely personalised.',
+    tip: 'Upload your CV as a PDF. Before every application, the AI rewrites your profile section to match the specific job description â€” so every application is uniquely personalised.',
     action: 'Click "Add CV" and upload at least one PDF. You can add multiple CVs for different role types.',
   },
   {
     view: 'search',
     title: 'Search Preferences',
-    tip: 'Add the job titles you want to apply for — for example "Sales Engineer" or "Solutions Engineer". Both the Reed Bot and LinkedIn Bot search using these terms automatically.',
+    tip: 'Add the job titles you want to apply for â€” for example "Sales Engineer" or "Solutions Engineer". Both the Reed Bot and LinkedIn Bot search using these terms automatically.',
     action: 'Add at least one search term, choose your preferred work type, then click Save.',
   },
   {
     view: 'license',
     title: 'Activate Your License',
-    tip: 'Start your free trial or enter a license key to activate. The AI that tailors your CV runs entirely on our cloud — nothing extra to install or set up.',
+    tip: 'Start your free trial or enter a license key to activate. The AI that tailors your CV runs entirely on our cloud â€” nothing extra to install or set up.',
     action: 'Click "Start Free Trial" or paste your license key and click Activate.',
   },
   {
     view: 'dashboard',
-    title: "You're All Set — Start the Bots",
-    tip: 'Reed Bot and LinkedIn Bot find and apply to jobs on their respective sites. The Scorer Bot runs in the middle — it uses AI to tailor your CV for every role before it is sent. Run all three together for best results.',
+    title: "You're All Set â€” Start the Bots",
+    tip: 'Reed Bot and LinkedIn Bot find and apply to jobs on their respective sites. The Scorer Bot runs in the middle â€” it uses AI to tailor your CV for every role before it is sent. Run all three together for best results.',
     action: 'Click Start on Reed Bot, LinkedIn Bot, and Scorer Bot. Applications will begin within minutes.',
   },
 ];
@@ -1484,7 +1507,7 @@ function startTour() {
         <div class="tour-action">${s.action}</div>
         <div class="tour-nav">
           <button class="tour-skip" id="tour-skip">Skip tour</button>
-          <button class="tour-next" id="tour-next">${isLast ? 'Finish setup' : 'Next →'}</button>
+          <button class="tour-next" id="tour-next">${isLast ? 'Finish setup' : 'Next â†’'}</button>
         </div>
       </div>
     `;
@@ -1507,7 +1530,7 @@ function startTour() {
   }
 
   async function goToStep() {
-    // Show the panel immediately — don't wait on async nav
+    // Show the panel immediately â€” don't wait on async nav
     showPanel();
     // Navigate sidebar + page in background
     try {
@@ -1531,7 +1554,7 @@ function initOnboarding() {
     <div class="welcome-modal">
       <div class="welcome-logo"></div>
       <h2>Welcome to JobBot</h2>
-      <p>Your fully automated job application assistant. Set up once and the bot finds, tailors, and applies to jobs for you — around the clock.</p>
+      <p>Your fully automated job application assistant. Set up once and the bot finds, tailors, and applies to jobs for you â€” around the clock.</p>
       <div class="welcome-features">
         <div class="welcome-feature">
           <strong>AI CV Tailoring</strong>
@@ -1570,7 +1593,7 @@ function initOnboarding() {
   });
 }
 
-// ── Help ─────────────────────────────────────────────────────────────────
+// â”€â”€ Help â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderHelp() {
   const faqs = [
     {
@@ -1583,35 +1606,35 @@ function renderHelp() {
     },
     {
       q: 'What are the three bots and what do they do?',
-      a: 'Reed Bot searches Reed.co.uk and submits applications. LinkedIn Bot does the same on LinkedIn. Scorer Bot runs in the middle — it uses AI to tailor your CV for each role before it is sent. You should run all three together.'
+      a: 'Reed Bot searches Reed.co.uk and submits applications. LinkedIn Bot does the same on LinkedIn. Scorer Bot runs in the middle â€” it uses AI to tailor your CV for each role before it is sent. You should run all three together.'
     },
     {
-      q: 'The bot opened a browser window and stopped — what do I do?',
-      a: 'This means the job site is asking you to log in or complete a security check. Complete the login in the browser window that opened — the bot will continue automatically once you are signed in.'
+      q: 'The bot opened a browser window and stopped â€” what do I do?',
+      a: 'This means the job site is asking you to log in or complete a security check. Complete the login in the browser window that opened â€” the bot will continue automatically once you are signed in.'
     },
     {
       q: 'Why are some jobs showing as skipped?',
-      a: 'Jobs are skipped when they do not match your preferences — for example, wrong work type, no easy apply button, external application site, or below your minimum match score. This is normal and expected.'
+      a: 'Jobs are skipped when they do not match your preferences â€” for example, wrong work type, no easy apply button, external application site, or below your minimum match score. This is normal and expected.'
     },
     {
       q: 'How do I add more CVs?',
-      a: 'Go to the CVs section in the sidebar and click "Add CV". You can upload multiple CVs — JobBot will automatically select the best one for each job based on the match score.'
+      a: 'Go to the CVs section in the sidebar and click "Add CV". You can upload multiple CVs â€” JobBot will automatically select the best one for each job based on the match score.'
     },
     {
       q: 'What is the minimum match score?',
       a: 'Set this in Search Preferences. JobBot will only apply to jobs where your tailored CV scores at or above this percentage. Leave it blank to apply to all jobs regardless of score.'
     },
     {
-      q: 'The bots are running but no jobs are being found — why?',
-      a: 'Your search terms may have exhausted all available jobs. Try adding more search terms in Search Preferences — for example, if you have "IT Support Analyst", also add "IT Support Specialist" or "Help Desk Analyst".'
+      q: 'The bots are running but no jobs are being found â€” why?',
+      a: 'Your search terms may have exhausted all available jobs. Try adding more search terms in Search Preferences â€” for example, if you have "IT Support Analyst", also add "IT Support Specialist" or "Help Desk Analyst".'
     },
     {
-      q: 'Windows shows a security warning when I install JobBot — is it safe?',
+      q: 'Windows shows a security warning when I install JobBot â€” is it safe?',
       a: 'Yes, this is normal for new software that has not yet been code-signed. Click "More info" then "Run anyway" to proceed. Your device is not at risk.'
     },
     {
-      q: 'Mac shows "unidentified developer" — what do I do?',
-      a: 'Go to System Settings → Privacy & Security, scroll down and click "Open Anyway". This is a standard Mac security prompt for new apps and is safe to bypass.'
+      q: 'Mac shows "unidentified developer" â€” what do I do?',
+      a: 'Go to System Settings â†’ Privacy & Security, scroll down and click "Open Anyway". This is a standard Mac security prompt for new apps and is safe to bypass.'
     },
     {
       q: 'Will my Reed and LinkedIn passwords be shared or stored online?',
@@ -1630,7 +1653,7 @@ function renderHelp() {
         <div class="faq-item" id="faq-${i}">
           <button class="faq-question" onclick="toggleFaq(${i})">
             <span>${f.q}</span>
-            <span class="faq-chevron">›</span>
+            <span class="faq-chevron">â€º</span>
           </button>
           <div class="faq-answer">${f.a}</div>
         </div>
@@ -1647,7 +1670,7 @@ window.toggleFaq = function(i) {
   item.classList.toggle('open');
 };
 
-// ── Auto-update banner ────────────────────────────────────────────────────
+// â”€â”€ Auto-update banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (window.api?.onUpdateReady) {
   window.api.onUpdateReady(() => {
     const banner = document.getElementById('expiry-banner');
@@ -1666,3 +1689,4 @@ render('personal').then(() => {
   initExpiryBanner();
   initOnboarding();
 });
+

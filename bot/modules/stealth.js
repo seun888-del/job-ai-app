@@ -5,6 +5,11 @@ const STEALTH_SCRIPT = `(function () {
   // 1. Hide webdriver flag
   Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 
+  // 1b. Remove any Playwright/CDP runtime globals
+  try { delete window.__playwright; } catch(_) {}
+  try { delete window.__pw_manual; } catch(_) {}
+  try { delete window.__puppeteer_evaluation_script__; } catch(_) {}
+
   // 2. Realistic plugin array
   try {
     const FakePlugin = function(name, fn, desc) {
@@ -104,6 +109,40 @@ const STEALTH_SCRIPT = `(function () {
       return origAttachShadow.call(this, init || { mode: 'open' });
     };
   } catch (_) {}
+
+  // 10. navigator.vendor — real Chrome always returns "Google Inc."
+  try { Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.' }); } catch(_) {}
+
+  // 11. window.outerWidth / outerHeight — should match a real browser window
+  try {
+    Object.defineProperty(window, 'outerWidth',  { get: () => window.innerWidth  || 1366 });
+    Object.defineProperty(window, 'outerHeight', { get: () => (window.innerHeight || 768) + 74 });
+  } catch(_) {}
+
+  // 12. document.hasFocus — bots are typically considered out-of-focus
+  try { document.hasFocus = () => true; } catch(_) {}
+
+  // 13. navigator.connection — expose a realistic network info object
+  try {
+    if (!navigator.connection) {
+      Object.defineProperty(navigator, 'connection', {
+        get: () => ({ rtt: 100, downlink: 10, effectiveType: '4g', saveData: false }),
+      });
+    }
+  } catch(_) {}
+
+  // 14. Hide automation-related error stack traces leaking "puppeteer" / "playwright"
+  try {
+    const origPrepareStackTrace = Error.prepareStackTrace;
+    Error.prepareStackTrace = function(err, stack) {
+      const s = origPrepareStackTrace ? origPrepareStackTrace(err, stack) : String(err);
+      return typeof s === 'string' ? s.replace(/playwright|puppeteer|chromium/gi, 'chrome') : s;
+    };
+  } catch(_) {}
+
+  // 15. Realistic screen properties
+  try { Object.defineProperty(screen, 'colorDepth',  { get: () => 24 }); } catch(_) {}
+  try { Object.defineProperty(screen, 'pixelDepth',  { get: () => 24 }); } catch(_) {}
 })();`;
 
 async function applyToPage(page) {
