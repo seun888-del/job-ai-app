@@ -74,6 +74,9 @@ contextBridge.exposeInMainWorld('api', {
   site: {
     connect: (site, loginUrl) => ipcRenderer.invoke('site:connect', { site, loginUrl }),
   },
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.on('update:available', () => callback());
+  },
   onUpdateReady: (callback) => {
     ipcRenderer.on('update:ready', () => callback());
   },

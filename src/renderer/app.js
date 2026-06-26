@@ -1774,11 +1774,22 @@ window.toggleFaq = function(i) {
 };
 
 // â”€â”€ Auto-update banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (window.api?.onUpdateAvailable) {
+  window.api.onUpdateAvailable(() => {
+    const banner = document.getElementById('expiry-banner');
+    if (banner) {
+      banner.innerHTML = `<span>A new version of JobBot-AI is available — downloading in the background...</span>`;
+      banner.style.display = 'flex';
+      banner.style.background = '#0891b2';
+      banner.style.color = '#fff';
+    }
+  });
+}
 if (window.api?.onUpdateReady) {
   window.api.onUpdateReady(() => {
     const banner = document.getElementById('expiry-banner');
     if (banner) {
-      banner.innerHTML = `<span>A new version of JobBot-AI is ready. It will install automatically when you close the app.</span>`;
+      banner.innerHTML = `<span>Update downloaded — JobBot-AI will install automatically when you close the app.</span>`;
       banner.style.display = 'flex';
       banner.style.background = '#4f46e5';
       banner.style.color = '#fff';

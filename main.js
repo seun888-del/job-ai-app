@@ -57,8 +57,14 @@ app.whenReady().then(async () => {
   // Check for updates silently — download in background, install on next quit
   if (app.isPackaged) {
     autoUpdater.checkForUpdates().catch(() => {});
+    autoUpdater.on('update-available', () => {
+      mainWindow?.webContents.send('update:available');
+    });
     autoUpdater.on('update-downloaded', () => {
       mainWindow?.webContents.send('update:ready');
+    });
+    autoUpdater.on('error', (err) => {
+      console.error('[Updater] Error:', err?.message);
     });
   }
 
