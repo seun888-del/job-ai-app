@@ -59,6 +59,7 @@
       "icon": "assets/icon.ico",
       "signAndEditExecutable": false
     },
+    "afterPack": "./afterPack.js",
     "mac": {
       "target": [
         {
@@ -71,7 +72,7 @@
       ],
       "icon": "assets/icon.png",
       "category": "public.app-category.productivity",
-      "hardenedRuntime": true,
+      "hardenedRuntime": false,
       "gatekeeperAssess": false
     },
     "dmg": {
