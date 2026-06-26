@@ -29,7 +29,7 @@
   },
   "build": {
     "appId": "com.femimerit.jobbotapp",
-    "productName": "JobBot",
+    "productName": "JobBot-AI",
     "publish": null,
     "asar": false,
     "directories": {

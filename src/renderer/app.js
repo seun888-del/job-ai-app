@@ -1,4 +1,4 @@
-﻿﻿const content = document.getElementById('content');
+const content = document.getElementById('content');
 const navItems = document.querySelectorAll('#nav li');
 let _statsPoll = null;
 
@@ -697,7 +697,7 @@ async function renderSearch() {
 // â”€â”€ 5. License â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LICENSE_ERRORS = {
   missing_key: 'Enter a license key',
-  network_error: 'Could not reach the JobBot backend — check your internet connection',
+  network_error: 'Could not reach the JobBot-AI backend — check your internet connection',
   invalid_license_key: 'Invalid license key',
   missing_license_key: 'Enter a license key',
   license_inactive: 'This license has been revoked',
@@ -749,7 +749,7 @@ async function renderLicense() {
   const trialCard = hasLicense ? '' : `
     <div class="card">
       <h3>Start Free Trial</h3>
-      <p style="font-size:14px;color:#64748b;margin-bottom:16px">Try JobBot free for 7 days — no card required. Enter your email and we'll send you a license key instantly.</p>
+      <p style="font-size:14px;color:#64748b;margin-bottom:16px">Try JobBot-AI free for 7 days — no card required. Enter your email and we'll send you a license key instantly.</p>
       <div class="field"><label>Your email</label><input id="trial_email" type="email" placeholder="you@example.com"></div>
       <button class="primary" id="start-trial">Start 7-day free trial</button>
       <div class="status-msg" id="trial-status"></div>
@@ -1486,7 +1486,7 @@ async function initExpiryBanner() {
   const urgency = daysLeft <= 3 ? 'danger' : 'warning';
   const isTrial = license.status === 'trial';
   const msg = daysLeft <= 0
-    ? (isTrial ? 'Your free trial has ended.' : 'Your JobBot license has expired.')
+    ? (isTrial ? 'Your free trial has ended.' : 'Your JobBot-AI license has expired.')
     : (isTrial
         ? `Your free trial expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`
         : `Your license expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`);
@@ -1500,7 +1500,7 @@ async function initExpiryBanner() {
     if (isTrial) {
       window.open('https://jobbot-backend-production-1323.up.railway.app', '_blank');
     } else {
-      window.open('mailto:merritfemi@gmail.com?subject=JobBot%20License%20Renewal', '_blank');
+      window.open('mailto:merritfemi@gmail.com?subject=JobBot-AI%20License%20Renewal', '_blank');
     }
   });
 }
@@ -1675,7 +1675,7 @@ function initOnboarding() {
   modal.className = 'welcome-modal';
   modal.innerHTML = `
     <div class=”welcome-logo”></div>
-    <h2>Welcome to JobBot</h2>
+    <h2>Welcome to JobBot-AI</h2>
     <p>Your fully automated job application assistant. Set up once - the bots find, tailor, and apply to jobs across multiple sites for you, around the clock.</p>
     <div class=”welcome-features”>
       <div class=”welcome-feature”><strong>6 Job Sites</strong><span>Reed, LinkedIn, Glassdoor, CV-Library, Totaljobs &amp; CWJobs</span></div>
@@ -1700,8 +1700,8 @@ function renderHelp() {
       a: 'Complete the 4 setup steps in order: (1) Personal Details, (2) CVs, (3) Search Preferences, (4) License. Then go to the Dashboard, click “Connect account” on each bot card to log in to the job site, and click Start.'
     },
     {
-      q: 'Which job sites does JobBot use?',
-      a: 'JobBot searches and applies across 6 job sites: Reed.co.uk, LinkedIn, Glassdoor, CV-Library, Totaljobs, and CWJobs. Each site has its own bot card on the Dashboard.'
+      q: 'Which job sites does JobBot-AI use?',
+      a: 'JobBot-AI searches and applies across 6 job sites: Reed.co.uk, LinkedIn, Glassdoor, CV-Library, Totaljobs, and CWJobs. Each site has its own bot card on the Dashboard.'
     },
     {
       q: 'How do I connect my job site accounts?',
@@ -1721,18 +1721,18 @@ function renderHelp() {
     },
     {
       q: 'How do I add more CVs?',
-      a: 'Go to CVs in the sidebar and click “Add CV”. You can upload multiple CVs - JobBot will automatically select the best one for each job based on the AI match score.'
+      a: 'Go to CVs in the sidebar and click “Add CV”. You can upload multiple CVs - JobBot-AI will automatically select the best one for each job based on the AI match score.'
     },
     {
       q: 'What is the minimum match score?',
-      a: 'Set this in Search Preferences. JobBot will only apply to jobs where your tailored CV scores at or above this percentage. Leave it blank to apply to all matching jobs.'
+      a: 'Set this in Search Preferences. JobBot-AI will only apply to jobs where your tailored CV scores at or above this percentage. Leave it blank to apply to all matching jobs.'
     },
     {
       q: 'The bots are running but no jobs are being found - why?',
       a: 'Your search terms may have exhausted all available jobs. Try adding more search terms in Search Preferences - for example, if you have “IT Support Analyst”, also add “IT Support Specialist” or “Help Desk Analyst”.'
     },
     {
-      q: 'Windows shows a security warning when I install JobBot - is it safe?',
+      q: 'Windows shows a security warning when I install JobBot-AI - is it safe?',
       a: 'Yes, this is normal for new software that has not yet been code-signed. Click “More info” then “Run anyway” to proceed. Your device is not at risk.'
     },
     {
@@ -1741,7 +1741,7 @@ function renderHelp() {
     },
     {
       q: 'Are my login sessions shared or stored online?',
-      a: 'No. When you click “Connect account” and log in, the session cookie is saved in a profile folder on your own device only. JobBot never uploads or transmits your credentials or sessions anywhere.'
+      a: 'No. When you click “Connect account” and log in, the session cookie is saved in a profile folder on your own device only. JobBot-AI never uploads or transmits your credentials or sessions anywhere.'
     },
     {
       q: 'How do I cancel or manage my subscription?',
@@ -1778,7 +1778,7 @@ if (window.api?.onUpdateReady) {
   window.api.onUpdateReady(() => {
     const banner = document.getElementById('expiry-banner');
     if (banner) {
-      banner.innerHTML = `<span>A new version of JobBot is ready. It will install automatically when you close the app.</span>`;
+      banner.innerHTML = `<span>A new version of JobBot-AI is ready. It will install automatically when you close the app.</span>`;
       banner.style.display = 'flex';
       banner.style.background = '#4f46e5';
       banner.style.color = '#fff';
