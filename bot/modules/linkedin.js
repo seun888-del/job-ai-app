@@ -449,24 +449,36 @@ async function fillContactFields(page) {
 async function uploadResume(page, resumePath) {
   if (!resumePath || !fs.existsSync(resumePath)) return false;
   try {
-    // When LinkedIn pre-attaches a profile CV there's a "Change" button — use it to swap in the tailored CV
-    const changeBtn = await page.$(
-      'button:has-text("Change"), button:has-text("Replace"), [aria-label*="Change resume" i], [aria-label*="Replace resume" i]'
-    );
-    if (changeBtn && await changeBtn.isVisible().catch(() => false)) {
-      const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 5000 }), changeBtn.click()]);
-      await chooser.setFiles(resumePath);
+    // Hidden file input — most reliable: set files directly without clicking
+    const fileInput = await page.$('input[type="file"]');
+    if (fileInput) {
+      await fileInput.setInputFiles(resumePath);
       await DELAY(2000);
+      console.log(`  [LinkedIn] CV uploaded via file input: ${path.basename(resumePath)}`);
       return true;
     }
-    const fileInput = await page.$('input[type="file"]');
-    if (fileInput) { await fileInput.setInputFiles(resumePath); await DELAY(2000); return true; }
-    const uploadBtn = await page.$('button:has-text("Upload resume"), label:has-text("Upload resume"), [aria-label*="upload" i]');
-    if (uploadBtn) {
-      const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 5000 }), uploadBtn.click()]);
-      await chooser.setFiles(resumePath);
-      await DELAY(2000);
-      return true;
+
+    // LinkedIn shows a "Change" or "Upload resume" button when no hidden input visible
+    const triggerSelectors = [
+      'button:has-text("Change")', 'button:has-text("Replace")',
+      '[aria-label*="Change resume" i]', '[aria-label*="Replace resume" i]',
+      'button:has-text("Upload resume")', 'label:has-text("Upload resume")',
+      '[aria-label*="upload" i]',
+    ];
+    for (const sel of triggerSelectors) {
+      try {
+        const btn = await page.$(sel);
+        if (!btn || !await btn.isVisible().catch(() => false)) continue;
+        // waitForEvent('filechooser') is the current Playwright API
+        const [chooser] = await Promise.all([
+          page.waitForEvent('filechooser', { timeout: 5000 }),
+          btn.click(),
+        ]);
+        await chooser.setFiles(resumePath);
+        await DELAY(2000);
+        console.log(`  [LinkedIn] CV uploaded via "${sel}": ${path.basename(resumePath)}`);
+        return true;
+      } catch (_) {}
     }
   } catch (_) {}
   return false;
@@ -710,9 +722,11 @@ async function _answerRadios(page, job) {
         options.push({ radio, label: labelText });
       }
       let target = null;
-      if (/require.*sponsor|need.*sponsor|visa.*sponsor|sponsor.*visa|will.*need.*sponsor|employer.*sponsor/i.test(question)) {
+      if (/sponsor/i.test(question)) {
+        // Any question mentioning sponsorship → use requiresSponsorship from profile
         const needs = cfg.APPLICANT.requiresSponsorship;
         target = needs ? options.find(o => /^yes/.test(o.label)) : options.find(o => /^no/.test(o.label));
+        console.log(`  [LinkedIn] Sponsorship question → ${needs ? 'Yes' : 'No'}`);
       } else if (/right to work|work permit|authoris|authoriz|eligible.*work|legal.*work|work.*authoris/i.test(question)) {
         const rtw = hasRightToWork(job?.description);
         target = rtw ? options.find(o => /^yes/.test(o.label)) : options.find(o => /^no/.test(o.label));
@@ -773,8 +787,10 @@ async function _answerRadios(page, job) {
           ? options.find(o => /^yes/.test(o.label))
           : options.find(o => /^no/.test(o.label));
       } else {
-        target = options.find(o => /^yes/.test(o.label)) || options[0];
-        console.log(`  [LinkedIn] Unknown radio: "${question}" — selected: "${target?.label}"`);
+        // Unknown question — log it and skip rather than guessing wrong
+        // tryNext() will catch the validation error and retry
+        console.log(`  [LinkedIn] Unknown radio question: "${question || '(no label extracted)'}" — skipping`);
+        continue;
       }
       if (target) {
         const already = await target.radio.isChecked().catch(() => false);

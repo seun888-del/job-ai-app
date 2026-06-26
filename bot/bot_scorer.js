@@ -22,6 +22,7 @@ const { writePDF, buildPaths }        = require('./modules/cv_pdf_writer');
 const { writeDocx }                   = require('./modules/cv_docx_writer');
 const { convertDocxToPdf }            = require('./modules/cv_converter');
 const { tailorCV, weaveKeywords }     = require('./modules/cv_tailor');
+const { lightTailorDocx }             = require('./modules/cv_light_tailor');
 const { generateCoverLetter }         = require('./modules/cover_letter');
 const { llmAvailable, mode: llmMode } = require('../src/services/llm');
 
@@ -113,14 +114,14 @@ async function scoreWithBoost(cv, jdText) {
     ({ score, missingKeywords, allKeywords } = await cvScorer.scoreCV(cleanedText, jdText));
   } catch (err) {
     console.warn(`  [Scorer Bot] Scoring failed (${err.message}) — fallback score 85`);
-    return { score: 85, cvText: cleanedText };
+    return { score: 85, cvText: cleanedText, rawCvText: cleanedText, missingKeywords: [] };
   }
 
   console.log(`  [Scorer Bot] Score: ${score}% — ${cv.name}`);
 
   if (score > 0 && score < QUICK_FAIL_THRESHOLD) {
     console.log(`  [Scorer Bot] ${score}% below quick-fail threshold — skipping this CV`);
-    return { score, cvText: cleanedText };
+    return { score, cvText: cleanedText, rawCvText: cleanedText, missingKeywords };
   }
 
   // Addendum: append missing keywords at the bottom for ATS (no rewriting of CV body)
@@ -133,7 +134,7 @@ async function scoreWithBoost(cv, jdText) {
     console.log(`  [Scorer Bot] After addendum: ${score}%`);
   }
 
-  return { score, cvText };
+  return { score, cvText, rawCvText: cleanedText, missingKeywords: missingKeywords || [] };
 }
 
 async function processJob(job) {
@@ -164,10 +165,12 @@ async function processJob(job) {
   const bestCV   = cvSelector.selectBestCV(job.description, cfg.CVS);
   const jobTitle = job.title.split('\n')[0].trim();
 
-  let { score, cvText: boostedText } = await scoreWithBoost(bestCV, job.description);
-  let bestScore  = score;
-  let bestCvText = boostedText;
-  let bestCvName = bestCV.name;
+  let { score, cvText: boostedText, rawCvText, missingKeywords } = await scoreWithBoost(bestCV, job.description);
+  let bestScore        = score;
+  let bestCvText       = boostedText;
+  let bestRawCvText    = rawCvText;
+  let bestMissing      = missingKeywords;
+  let bestCvName       = bestCV.name;
 
   // If the primary CV didn't reach target, try the others in keyword-score order
   if (score < BOOST_TARGET) {
@@ -182,9 +185,11 @@ async function processJob(job) {
       const result = await scoreWithBoost(altCV, job.description);
 
       if (result.score > bestScore) {
-        bestScore  = result.score;
-        bestCvText = result.cvText;
-        bestCvName = altCV.name;
+        bestScore     = result.score;
+        bestCvText    = result.cvText;
+        bestRawCvText = result.rawCvText;
+        bestMissing   = result.missingKeywords;
+        bestCvName    = altCV.name;
       }
 
       if (result.score >= BOOST_TARGET) break;
@@ -202,11 +207,24 @@ async function processJob(job) {
 
     if (isDocx) {
       const docxPath = paths.saved.replace(/\.pdf$/i, '.docx');
-      fs.copyFileSync(bestCVObj.path, docxPath);
+      // Light-tailor: subtitle swap + synonym swap only — no layout changes
+      try {
+        const tailorResult = await lightTailorDocx(bestCVObj.path, docxPath, bestRawCvText, jobTitle, bestMissing);
+        const changes = [
+          tailorResult.subtitleSwapped ? 'subtitle' : '',
+          ...tailorResult.synonymsSwapped,
+        ].filter(Boolean);
+        if (changes.length > 0) {
+          console.log(`  [Scorer Bot] Light-tailored: ${changes.join(', ')}`);
+        }
+      } catch (err) {
+        console.warn(`  [Scorer Bot] Light-tailor failed (${err.message}) — using original`);
+        fs.copyFileSync(bestCVObj.path, docxPath);
+      }
       try {
         await convertDocxToPdf(docxPath, paths.saved);
         await convertDocxToPdf(docxPath, paths.upload);
-        console.log(`  [Scorer Bot] ✓ Original docx→PDF: ${paths.saved}`);
+        console.log(`  [Scorer Bot] ✓ docx→PDF: ${paths.saved}`);
       } catch (err) {
         console.warn(`  [Scorer Bot] docx→PDF failed (${err.message}) — using pdfkit fallback`);
         const fullName = `${cfg.APPLICANT.firstName} ${cfg.APPLICANT.lastName}`.trim();
@@ -215,7 +233,7 @@ async function processJob(job) {
         await writePDF(bestCvText, paths.upload, pdfOpts);
       }
     } else {
-      // PDF: copy original file directly
+      // PDF: copy original file directly (no DOCX XML to manipulate)
       fs.copyFileSync(bestCVObj.path, paths.saved);
       fs.copyFileSync(bestCVObj.path, paths.upload);
     }
