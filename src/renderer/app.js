@@ -1813,14 +1813,33 @@ if (window.api?.onUpdateAvailable) {
   });
 }
 if (window.api?.onUpdateReady) {
-  window.api.onUpdateReady(() => {
+  window.api.onUpdateReady((version) => {
     const banner = document.getElementById('expiry-banner');
-    if (banner) {
-      banner.innerHTML = `<span>Update downloaded — Job-AI will install automatically when you close the app.</span>`;
-      banner.style.display = 'flex';
-      banner.style.background = '#1d4ed8';
-      banner.style.color = '#fff';
-    }
+    if (!banner) return;
+    const vLabel = version ? ` ${version}` : '';
+    banner.innerHTML = `
+      <span style="flex:1">✅ <strong>Job-AI${vLabel} is ready</strong> — new look &amp; smarter CV tailoring. It installs when you next close the app, or update now.</span>
+      <button id="update-install-btn" style="background:#fff;color:#1d4ed8;border:none;padding:7px 16px;border-radius:7px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;margin-left:14px">Restart &amp; update now</button>`;
+    banner.style.display = 'flex';
+    banner.style.alignItems = 'center';
+    banner.style.background = '#1d4ed8';
+    banner.style.color = '#fff';
+
+    const btn = document.getElementById('update-install-btn');
+    if (btn) btn.addEventListener('click', async () => {
+      // Warn if Agents are mid-run — restarting will stop them
+      let running = false;
+      try {
+        const status = await window.api.bot.status();
+        running = Object.values(status || {}).some(s => s === 'running');
+      } catch (_) {}
+      if (running && !window.confirm('This will stop your running Agents and restart Job-AI to finish updating. Continue?')) {
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Restarting…';
+      try { await window.api.installUpdate(); } catch (_) {}
+    });
   });
 }
 

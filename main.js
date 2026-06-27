@@ -13,6 +13,17 @@ autoUpdater.setFeedURL({ provider: 'github', owner: 'seun888-del', repo: 'jobbot
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
+// "Restart & update now" button in the renderer triggers an immediate, silent
+// install + relaunch (before-quit stops all Agents first). Without this the
+// update only applies whenever the user happens to close the app.
+ipcMain.handle('update:install', () => {
+  try {
+    autoUpdater.quitAndInstall(true, true); // isSilent, isForceRunAfter
+  } catch (e) {
+    console.error('[Updater] quitAndInstall failed:', e?.message);
+  }
+});
+
 let mainWindow;
 
 function createWindow() {
@@ -57,11 +68,11 @@ app.whenReady().then(async () => {
   // Check for updates silently — download in background, install on next quit
   if (app.isPackaged) {
     autoUpdater.checkForUpdates().catch(() => {});
-    autoUpdater.on('update-available', () => {
-      mainWindow?.webContents.send('update:available');
+    autoUpdater.on('update-available', (info) => {
+      mainWindow?.webContents.send('update:available', info?.version);
     });
-    autoUpdater.on('update-downloaded', () => {
-      mainWindow?.webContents.send('update:ready');
+    autoUpdater.on('update-downloaded', (info) => {
+      mainWindow?.webContents.send('update:ready', info?.version);
     });
     autoUpdater.on('error', (err) => {
       console.error('[Updater] Error:', err?.message);

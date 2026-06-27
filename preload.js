@@ -75,11 +75,12 @@ contextBridge.exposeInMainWorld('api', {
     connect: (site, loginUrl) => ipcRenderer.invoke('site:connect', { site, loginUrl }),
   },
   onUpdateAvailable: (callback) => {
-    ipcRenderer.on('update:available', () => callback());
+    ipcRenderer.on('update:available', (_e, version) => callback(version));
   },
   onUpdateReady: (callback) => {
-    ipcRenderer.on('update:ready', () => callback());
+    ipcRenderer.on('update:ready', (_e, version) => callback(version));
   },
+  installUpdate: () => ipcRenderer.invoke('update:install'),
   license: {
     get: () => ipcRenderer.invoke('license:get'),
     save: (fields) => ipcRenderer.invoke('license:save', fields),
