@@ -44,6 +44,12 @@ module.exports = async function afterPack(context) {
   }
 
   if (context.electronPlatformName !== 'darwin') return;
+  // When a real Developer ID cert is provided (CSC_LINK), electron-builder does
+  // the proper signing + notarization — so skip the ad-hoc signature here.
+  if (process.env.CSC_LINK) {
+    console.log('[afterPack] CSC_LINK present — skipping ad-hoc sign (electron-builder will sign + notarize)');
+    return;
+  }
   const appPath = `${context.appOutDir}/${context.packager.appInfo.productFilename}.app`;
   try {
     execSync(`codesign --force --deep --sign - "${appPath}"`, { stdio: 'inherit' });

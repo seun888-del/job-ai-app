@@ -78,7 +78,9 @@
       "icon": "assets/icon.png",
       "category": "public.app-category.productivity",
       "hardenedRuntime": false,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
       "title": "Job-AI",
