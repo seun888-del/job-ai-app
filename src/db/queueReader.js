@@ -34,7 +34,15 @@ function all(db, sql, params) {
 }
 
 function getQueueSummary() {
-  return withQueueDb(db => all(db, 'SELECT status, COUNT(*) AS count FROM queue GROUP BY status'), []);
+  return withQueueDb(db => {
+    const rows = all(db, 'SELECT status, COUNT(*) AS count FROM queue GROUP BY status');
+    // "Tailored so far" — every job that has had a CV generated keeps its
+    // cv_path through later status changes, so this is a persistent total that
+    // doesn't get consumed the way the momentary cv_ready status does.
+    const tailored = all(db, "SELECT COUNT(*) AS count FROM queue WHERE cv_path IS NOT NULL AND cv_path != ''");
+    rows.push({ status: 'tailored', count: tailored[0]?.count || 0 });
+    return rows;
+  }, []);
 }
 
 function getRecentApplications(limit = 50) {

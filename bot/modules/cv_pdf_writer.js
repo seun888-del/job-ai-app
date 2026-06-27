@@ -338,6 +338,143 @@ function writePDF(cvText, outputPath, options = {}) {
   });
 }
 
+// ── Structured renderer ─────────────────────────────────────────────────────
+// Renders a parsed CV object (see cv_parser.js) into the fixed reference layout.
+// Layout is driven entirely from named fields, so text can never bleed between
+// sections. This is the path used for every tailored CV.
+function writeStructuredPDF(cv, outputPath, options = {}) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size:    'A4',
+      margins: { top: 48, bottom: 45, left: 55, right: 55 },
+    });
+    const stream = fs.createWriteStream(outputPath);
+    stream.on('error', reject);
+    stream.on('finish', () => resolve(outputPath));
+    doc.pipe(stream);
+
+    const L = doc.page.margins.left;
+    const W = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+    const sectionHeading = (label) => {
+      doc.moveDown(0.6);
+      doc.font(FONT_BOLD).fontSize(10.5).fillColor(BLUE).text(label);
+      doc.moveDown(0.08);
+      drawRule(doc, L, L + W);
+      doc.moveDown(0.4);
+    };
+
+    // Start a new page if the next block of height `h` won't fit
+    const ensureSpace = (h) => {
+      const spaceLeft = doc.page.height - doc.page.margins.bottom - doc.y;
+      if (h > spaceLeft) doc.addPage();
+    };
+
+    // ── Header ───────────────────────────────────────────────────────────────
+    const name = (options.overrideName || cv.name || '').trim();
+    doc.font(FONT_BOLD).fontSize(22).fillColor(BLACK).text(name, { align: 'center' });
+    doc.moveDown(0.1);
+    if (cv.subtitle) {
+      doc.font(FONT_BOLD).fontSize(11).fillColor(BLUE).text(cv.subtitle.trim(), { align: 'center' });
+      doc.moveDown(0.1);
+    }
+    if (cv.contact) {
+      doc.font(FONT).fontSize(9.5).fillColor(GRAY).text(cv.contact.trim(), { align: 'center' });
+    }
+    doc.moveDown(0.35);
+    drawRule(doc, L, L + W);
+    doc.moveDown(0.45);
+
+    // ── Professional Profile ───────────────────────────────────────────────
+    if (cv.profile && cv.profile.trim()) {
+      sectionHeading('PROFESSIONAL PROFILE');
+      doc.font(FONT).fontSize(9.5).fillColor(GRAY).text(cv.profile.trim(), { lineGap: 1.5, align: 'left' });
+    }
+
+    // ── Work Experience ────────────────────────────────────────────────────
+    if (Array.isArray(cv.experience) && cv.experience.length) {
+      sectionHeading('WORK EXPERIENCE');
+      cv.experience.forEach((job, idx) => {
+        if (!job || !job.title) return;
+        // Keep the role header with at least its first bullet on the same page
+        const firstBulletH = job.bullets && job.bullets[0]
+          ? doc.heightOfString(job.bullets[0], { width: W - 18, lineGap: 2 }) : 0;
+        ensureSpace(28 + firstBulletH);
+
+        if (idx > 0) doc.moveDown(0.35);
+        doc.font(FONT_BOLD).fontSize(10).fillColor(BLACK)
+           .text(job.title.trim() + (job.company ? '  |  ' : ''), { continued: !!job.company });
+        if (job.company) {
+          doc.font(FONT_BOLD).fontSize(10).fillColor(BLUE)
+             .text(job.company.trim() + (job.dates ? '    ' : ''), { continued: !!job.dates });
+        }
+        if (job.dates) {
+          doc.font(FONT_ITAL).fontSize(10).fillColor(GRAY).text(job.dates.trim());
+        }
+        doc.moveDown(0.25);
+
+        for (const b of (job.bullets || [])) {
+          const text  = String(b).trim();
+          if (!text) continue;
+          const textW = W - 18;
+          const textH = doc.heightOfString(text, { width: textW, lineGap: 2 });
+          ensureSpace(textH);
+          const bulletX = L + 8;
+          const textX   = L + 18;
+          doc.font(FONT).fontSize(9.5).fillColor(GRAY).text('•', bulletX, doc.y, { width: 10, lineGap: 2 });
+          const lineH = doc.currentLineHeight(true);
+          doc.font(FONT).fontSize(9.5).fillColor(GRAY).text(text, textX, doc.y - lineH, { width: textW, lineGap: 2 });
+          doc.x = L;
+          doc.moveDown(0.06);
+        }
+      });
+    }
+
+    // ── Key Skills ──────────────────────────────────────────────────────────
+    if (Array.isArray(cv.skills) && cv.skills.length) {
+      sectionHeading('KEY SKILLS');
+      for (const s of cv.skills) {
+        if (!s || !s.items) continue;
+        const itemH = doc.heightOfString(s.items, { width: W, lineGap: 1.5 });
+        ensureSpace(itemH);
+        if (s.label) {
+          doc.font(FONT_BOLD).fontSize(9.5).fillColor(BLACK).text(s.label.trim() + ': ', { continued: true });
+          doc.font(FONT).fontSize(9.5).fillColor(GRAY).text(s.items.trim(), { lineGap: 1.5 });
+        } else {
+          doc.font(FONT).fontSize(9.5).fillColor(GRAY).text(s.items.trim(), { lineGap: 1.5 });
+        }
+        doc.x = L;
+        doc.moveDown(0.12);
+      }
+    }
+
+    // ── Education & Certifications ──────────────────────────────────────────
+    if (Array.isArray(cv.education) && cv.education.length) {
+      sectionHeading('EDUCATION AND CERTIFICATIONS');
+      cv.education.forEach((e, idx) => {
+        if (!e || !e.title) return;
+        ensureSpace(34);
+        if (idx > 0) doc.moveDown(0.25);
+        doc.font(FONT_BOLD).fontSize(9.5).fillColor(BLACK).text(e.title.trim());
+        if (e.detail) {
+          const pipe = e.detail.indexOf('|');
+          if (pipe > 0) {
+            const inst = e.detail.slice(0, pipe).trim();
+            const rest = e.detail.slice(pipe + 1).trim();
+            doc.font(FONT).fontSize(9.5).fillColor(BLUE).text(inst + (rest ? '  ' : ''), { continued: !!rest });
+            if (rest) doc.font(FONT_ITAL).fontSize(9.5).fillColor(GRAY).text(rest);
+          } else {
+            doc.font(FONT_ITAL).fontSize(9.5).fillColor(GRAY).text(e.detail.trim());
+          }
+          doc.x = L;
+        }
+      });
+    }
+
+    doc.end();
+  });
+}
+
 function buildPaths(savedDir, uploadDir, uploadFilename, jobTitle, company, score) {
   if (!fs.existsSync(savedDir))  fs.mkdirSync(savedDir,  { recursive: true });
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -349,4 +486,4 @@ function buildPaths(savedDir, uploadDir, uploadFilename, jobTitle, company, scor
   return { saved, upload };
 }
 
-module.exports = { writePDF, buildPaths };
+module.exports = { writePDF, writeStructuredPDF, buildPaths };

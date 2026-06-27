@@ -37,14 +37,14 @@ app.whenReady().then(async () => {
   botManager.setLogHandler((bot, stream, text) => {
     mainWindow?.webContents.send('bot:log', { bot, stream, text });
   });
-  const BOT_DISPLAY = { reed: 'Reed Bot', scorer: 'Scorer Bot', linkedin: 'LinkedIn Bot', indeed: 'Indeed Bot', glassdoor: 'Glassdoor Bot', cvlibrary: 'CV-Library Bot', totaljobs: 'Totaljobs Bot', cwjobs: 'CWJobs Bot' };
+  const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent' };
   botManager.setStatusHandler((bot, status) => {
     mainWindow?.webContents.send('bot:status', { bot, status });
     if ((status === 'stopped' || status === 'error') && Notification.isSupported()) {
       const label = BOT_DISPLAY[bot] || bot;
       new Notification({
         title: status === 'error' ? `${label} stopped with an error` : `${label} finished`,
-        body: status === 'error' ? 'Check the bot logs for details.' : 'The bot has completed its run.',
+        body: status === 'error' ? 'Check the Agent logs for details.' : 'The Agent has completed its run.',
         silent: false,
       }).show();
     }

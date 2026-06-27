@@ -18,11 +18,13 @@ const cvSelector = require('./modules/cv_selector');
 const cvScorer   = require('./modules/cv_scorer');
 const queue      = require('./modules/queue_manager');
 const { cleanText }                   = require('./modules/cv_cleaner');
-const { writePDF, buildPaths }        = require('./modules/cv_pdf_writer');
+const { writePDF, writeStructuredPDF, buildPaths } = require('./modules/cv_pdf_writer');
 const { writeDocx }                   = require('./modules/cv_docx_writer');
 const { convertDocxToPdf }            = require('./modules/cv_converter');
 const { tailorCV, weaveKeywords }     = require('./modules/cv_tailor');
 const { lightTailorDocx }             = require('./modules/cv_light_tailor');
+const { parseCV }                     = require('./modules/cv_parser');
+const { tailorStructured }            = require('./modules/cv_tailor_structured');
 const { generateCoverLetter }         = require('./modules/cover_letter');
 const { llmAvailable, mode: llmMode } = require('../src/services/llm');
 
@@ -201,41 +203,58 @@ async function processJob(job) {
     const bestCVObj = cfg.CVS.find(c => c.name === bestCvName) || cfg.CVS[0];
     const isDocx    = bestCVObj && /\.docx?$/i.test(bestCVObj.path);
 
-    // Copy the original uploaded CV file directly — no AI rewriting
     const savedDir = path.dirname(paths.saved);
     if (!fs.existsSync(savedDir)) fs.mkdirSync(savedDir, { recursive: true });
 
-    if (isDocx) {
-      const docxPath = paths.saved.replace(/\.pdf$/i, '.docx');
-      // Light-tailor: subtitle swap + synonym swap only — no layout changes
-      try {
-        const tailorResult = await lightTailorDocx(bestCVObj.path, docxPath, bestRawCvText, jobTitle, bestMissing);
-        const changes = [
-          tailorResult.subtitleSwapped ? 'subtitle' : '',
-          ...tailorResult.synonymsSwapped,
-        ].filter(Boolean);
-        if (changes.length > 0) {
-          console.log(`  [Scorer Bot] Light-tailored: ${changes.join(', ')}`);
+    const fullName = `${cfg.APPLICANT.firstName} ${cfg.APPLICANT.lastName}`.trim();
+    const pdfOpts  = fullName ? { overrideName: fullName } : {};
+
+    // ── Tailored CV in the fixed reference layout ──────────────────────────
+    // Parse the extracted CV text into a structured object, tailor it to the JD
+    // (subtitle / bullet selection / skills), then render through the strict
+    // deterministic template so every output looks identical with no bleeding.
+    let rendered = false;
+    try {
+      const baseStruct     = parseCV(bestRawCvText, pdfOpts);
+      if (!baseStruct.experience.length && !baseStruct.profile) {
+        throw new Error('parser found no usable structure');
+      }
+      const tailoredStruct = await tailorStructured(
+        baseStruct, jobTitle, job.description, bestMissing, bestRawCvText
+      );
+      await writeStructuredPDF(tailoredStruct, paths.saved, pdfOpts);
+      await writeStructuredPDF(tailoredStruct, paths.upload, pdfOpts);
+      console.log(`  [Scorer Bot] ✓ Tailored CV rendered (reference layout): ${paths.saved}`);
+      rendered = true;
+    } catch (err) {
+      console.warn(`  [Scorer Bot] Structured tailoring failed (${err.message}) — falling back`);
+    }
+
+    // ── Fallback: preserve previous behaviour if structured render failed ───
+    if (!rendered) {
+      if (isDocx) {
+        const docxPath = paths.saved.replace(/\.pdf$/i, '.docx');
+        try {
+          await lightTailorDocx(bestCVObj.path, docxPath, bestRawCvText, jobTitle, bestMissing);
+        } catch (err) {
+          fs.copyFileSync(bestCVObj.path, docxPath);
         }
-      } catch (err) {
-        console.warn(`  [Scorer Bot] Light-tailor failed (${err.message}) — using original`);
-        fs.copyFileSync(bestCVObj.path, docxPath);
+        try {
+          await convertDocxToPdf(docxPath, paths.saved);
+          await convertDocxToPdf(docxPath, paths.upload);
+        } catch (err) {
+          await writePDF(bestCvText, paths.saved, pdfOpts);
+          await writePDF(bestCvText, paths.upload, pdfOpts);
+        }
+      } else {
+        try {
+          await writePDF(bestCvText, paths.saved, pdfOpts);
+          await writePDF(bestCvText, paths.upload, pdfOpts);
+        } catch (err) {
+          fs.copyFileSync(bestCVObj.path, paths.saved);
+          fs.copyFileSync(bestCVObj.path, paths.upload);
+        }
       }
-      try {
-        await convertDocxToPdf(docxPath, paths.saved);
-        await convertDocxToPdf(docxPath, paths.upload);
-        console.log(`  [Scorer Bot] ✓ docx→PDF: ${paths.saved}`);
-      } catch (err) {
-        console.warn(`  [Scorer Bot] docx→PDF failed (${err.message}) — using pdfkit fallback`);
-        const fullName = `${cfg.APPLICANT.firstName} ${cfg.APPLICANT.lastName}`.trim();
-        const pdfOpts  = fullName ? { overrideName: fullName } : {};
-        await writePDF(bestCvText, paths.saved, pdfOpts);
-        await writePDF(bestCvText, paths.upload, pdfOpts);
-      }
-    } else {
-      // PDF: copy original file directly (no DOCX XML to manipulate)
-      fs.copyFileSync(bestCVObj.path, paths.saved);
-      fs.copyFileSync(bestCVObj.path, paths.upload);
     }
 
     const flag = bestScore >= BOOST_TARGET ? '✓' : '~';

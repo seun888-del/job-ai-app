@@ -1,5 +1,5 @@
 :root {
-  --bg: #f1f5f9;
+  --bg: #f5f8ff;
   --surface: #ffffff;
   --surface-alt: #f8fafc;
   --border: #e2e8f0;
@@ -7,9 +7,9 @@
   --text-muted: #64748b;
   --text-faint: #94a3b8;
 
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --primary-soft: #eef2ff;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: #eff6ff;
 
   --success: #16a34a;
   --success-soft: #dcfce7;
@@ -38,7 +38,7 @@ body {
 /* ── Sidebar ──────────────────────────────────────────────────────────── */
 .sidebar {
   width: 240px;
-  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  background: linear-gradient(180deg, #0b1f3a 0%, #13294b 100%);
   color: #fff;
   flex-shrink: 0;
   padding: 24px 0;
@@ -61,7 +61,7 @@ body {
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #6366f1, #818cf8);
+  background: linear-gradient(135deg, #3b82f6, #60a5fa);
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
 }
 .sidebar .tagline {
@@ -90,7 +90,7 @@ body {
 .sidebar li.active {
   background: rgba(99, 102, 241, 0.16);
   color: #fff;
-  border-left-color: #818cf8;
+  border-left-color: #60a5fa;
   font-weight: 600;
 }
 
@@ -107,7 +107,7 @@ body {
   flex-shrink: 0;
   transition: background var(--transition);
 }
-.sidebar li.active .nav-num { background: #818cf8; color: #fff; }
+.sidebar li.active .nav-num { background: #60a5fa; color: #fff; }
 
 .nav-icon {
   display: inline-block;
@@ -118,7 +118,7 @@ body {
   flex-shrink: 0;
   transition: background var(--transition);
 }
-.sidebar li.active .nav-icon { background: #818cf8; }
+.sidebar li.active .nav-icon { background: #60a5fa; }
 
 .sidebar li.nav-dashboard {
   margin-top: 12px;
@@ -144,7 +144,17 @@ main::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 }
 
 .page-header { margin-bottom: 24px; }
-.page-header h2 { margin: 0 0 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+.page-header h2 { margin: 0 0 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; padding-bottom: 10px; position: relative; }
+.page-header h2::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 44px;
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--primary), #60a5fa);
+}
 .page-header p { margin: 0; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
 
 /* ── Cards ────────────────────────────────────────────────────────────── */
@@ -164,7 +174,7 @@ main::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--text-muted);
+  color: var(--primary);
 }
 .card-hint { font-size: 13px; color: var(--text-muted); margin: -6px 0 14px; }
 
@@ -437,7 +447,7 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .faq-item.open .faq-chevron { transform: rotate(90deg); }
 .faq-answer { display: none; padding: 0 18px 14px; font-size: 14px; color: var(--text-muted); line-height: 1.6; }
 .faq-item.open .faq-answer { display: block; }
-.help-contact { background: var(--primary-soft); border: 1px solid #c7d2fe; border-radius: var(--radius); padding: 18px 20px; font-size: 14px; color: #3730a3; }
+.help-contact { background: var(--primary-soft); border: 1px solid #bfdbfe; border-radius: var(--radius); padding: 18px 20px; font-size: 14px; color: #1e40af; }
 .help-contact a { color: var(--primary); font-weight: 600; }
 
 /* ── Country picker ────────────────────────────────────────────────────── */
@@ -524,7 +534,7 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 }
 .btn-connect::before { content: '⚡'; font-size: 11px; }
 .btn-connect:hover { background: var(--primary-soft); opacity: 1; }
-.btn-connect:active { background: #e0e7ff; }
+.btn-connect:active { background: #dbeafe; }
 .btn-connect:disabled { opacity: 0.4; cursor: default; }
 
 /* ── Credential modal ──────────────────────────────────────────────────── */
@@ -609,7 +619,7 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .welcome-logo {
   width: 52px;
   height: 52px;
-  background: linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%);
+  background: linear-gradient(135deg, var(--primary) 0%, #0ea5e9 100%);
   border-radius: 14px;
   margin: 0 0 20px;
   position: relative;
@@ -732,7 +742,7 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #3730a3;
+  color: #1e40af;
   margin: 0 0 20px;
   line-height: 1.5;
 }
@@ -769,7 +779,7 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 /* Pulsing highlight on the active tour nav item */
 @keyframes nav-tour-pulse {
   0%, 100% { box-shadow: inset 3px 0 0 var(--primary); }
-  50%       { box-shadow: inset 3px 0 0 #818cf8; background: rgba(79,70,229,0.08); }
+  50%       { box-shadow: inset 3px 0 0 #60a5fa; background: rgba(79,70,229,0.08); }
 }
 .nav-tour-active { animation: nav-tour-pulse 1.8s ease infinite !important; }
 

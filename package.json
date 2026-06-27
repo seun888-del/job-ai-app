@@ -1,6 +1,6 @@
 {
   "name": "job-bot-app",
-  "version": "0.5.8",
+  "version": "0.6.0",
   "description": "Desktop app for automated job search and application",
   "main": "main.js",
   "private": true,
@@ -29,7 +29,7 @@
   },
   "build": {
     "appId": "com.femimerit.jobbotapp",
-    "productName": "JobBot-AI",
+    "productName": "Job-AI",
     "publish": {
       "provider": "github",
       "owner": "seun888-del",
@@ -81,7 +81,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "title": "JobBot",
+      "title": "Job-AI",
       "backgroundColor": "#ffffff",
       "contents": [
         {
@@ -102,7 +102,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "JobBot"
+      "shortcutName": "Job-AI"
     }
   }
 }
