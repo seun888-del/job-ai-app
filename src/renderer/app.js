@@ -1657,7 +1657,8 @@ async function initExpiryBanner() {
   `;
   document.getElementById('renew-btn').addEventListener('click', () => {
     if (isTrial) {
-      window.open('https://jobbot-backend-production-1323.up.railway.app', '_blank');
+      // Straight to Stripe payment — not the trial signup page
+      window.open('https://jobbot-backend-production-1323.up.railway.app/subscribe', '_blank');
     } else {
       window.open('mailto:merritfemi@gmail.com?subject=Job-AI%20License%20Renewal', '_blank');
     }
