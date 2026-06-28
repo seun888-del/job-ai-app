@@ -648,7 +648,7 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
   gap: 16px;
   flex-shrink: 0;
 }
-.expiry-banner.info { background: #eff6ff; color: #1e40af; border-bottom: 1px solid #bfdbfe; }
+.expiry-banner.info { background: #2563eb; color: #fff; border-bottom: 1px solid #1d4ed8; }
 .expiry-banner.warning { background: #fef9c3; color: #92400e; border-bottom: 1px solid #fde68a; }
 .expiry-banner.danger { background: var(--danger-soft); color: var(--danger); border-bottom: 1px solid #fecaca; }
 .expiry-banner button {
@@ -663,9 +663,11 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
   white-space: nowrap;
   font-family: inherit;
 }
+/* White CTA on the solid-blue info banner so it stands out, not blends */
+.expiry-banner.info button { background: #fff; color: #2563eb; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.20); }
 .expiry-banner.warning button { background: #b45309; }
 .expiry-banner.danger button { background: var(--danger); }
-.expiry-banner button:hover { opacity: 0.88; }
+.expiry-banner button:hover { opacity: 0.9; }
 
 /* ── Nav progress dots ────────────────────────────────────────────────── */
 .nav-check {
