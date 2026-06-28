@@ -117,8 +117,12 @@ function start(botName, userDataPath, opts = {}) {
   // Hosted AI backend (test/commercial builds only): if a license key is
   // saved and active, pass it (and the backend URL) through so cv_tailor/
   // cv_scorer use the hosted backend instead of local Ollama.
+  // Always pass the license key + backend URL so AI routes through the licensed
+  // backend. The backend is the single authority on validity — it rejects
+  // revoked / expired / over-limit licenses — so we don't pre-judge status here
+  // (pre-judging would let an "expired" local record fall back to a direct key).
   const license = db.getLicense();
-  if (license && license.license_key && license.status !== 'expired') {
+  if (license && license.license_key) {
     env.JOBBOT_BACKEND_URL = JOBBOT_BACKEND_URL;
     env.JOBBOT_LICENSE_KEY = license.license_key;
   }

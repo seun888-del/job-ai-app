@@ -185,7 +185,7 @@ async function hostedChat(prompt, timeoutMs) {
       'Authorization': `Bearer ${LICENSE_KEY}`,
     },
     body:   JSON.stringify({ prompt }),
-    signal: AbortSignal.timeout(Math.min(timeoutMs, 30000)),
+    signal: AbortSignal.timeout(Math.min(timeoutMs, 60000)),
   });
   if (res.ok) {
     const data = await res.json();
@@ -197,38 +197,45 @@ async function hostedChat(prompt, timeoutMs) {
 // ── Public API ────────────────────────────────────────────────────────────
 
 async function llmAvailable() {
+  // Licensed users: AI is gated by the license — only the backend counts.
+  if (LICENSE_KEY) return await hostedAvailable();
+  // No license (local dev): any direct provider will do.
   if (await groqAvailable())                       return true;
   if (await ollamaAvailable())                     return true;
   if (ANTHROPIC_KEY && await claudeAvailable())    return true;
-  if (LICENSE_KEY   && await hostedAvailable())    return true;
   return false;
 }
 
 async function llmChat(prompt, timeoutMs = 300000) {
+  // ── Licensed / production ────────────────────────────────────────────────
+  // When a license key is present, route AI through the backend ONLY. We do
+  // NOT fall back to Groq/Ollama/Claude here — that is deliberate: a revoked,
+  // expired, or over-limit license must lose AI access, not silently bypass the
+  // gate with the bundled key. The backend validates the license, meters usage,
+  // and returns the model output (or 401/403/429 which surfaces as an error).
+  if (LICENSE_KEY) {
+    console.log('[LLM] Using licensed backend');
+    return hostedChat(prompt, timeoutMs);
+  }
+
+  // ── No license key (local development only) ──────────────────────────────
   if (await ollamaAvailable()) {
     console.log(`[LLM] Using Ollama (${OLLAMA_MODEL})`);
     return ollamaChat(prompt, timeoutMs);
   }
-
   try {
-    const ok = await groqAvailable();
-    if (ok) {
+    if (await groqAvailable()) {
       console.log(`[LLM] Using Groq (${GROQ_MODEL})`);
       return await groqChat(prompt, timeoutMs);
     }
   } catch (err) {
     console.warn(`[LLM] Groq failed: ${err.message} — trying fallback`);
   }
-
   if (ANTHROPIC_KEY) {
     console.log('[LLM] Falling back to Claude API');
     return claudeChat(prompt, timeoutMs);
   }
-  if (LICENSE_KEY) {
-    console.log('[LLM] Falling back to hosted backend');
-    return hostedChat(prompt, timeoutMs);
-  }
-  throw new Error('No AI backend available.');
+  throw new Error('No AI backend available (no license key set).');
 }
 
 module.exports = { llmAvailable, llmChat, isHosted, mode };
