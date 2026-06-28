@@ -860,6 +860,26 @@ let botLogUnsub = null;
 let botStatusUnsub = null;
 let dashboardHasLicense = false;
 
+// One-time modal shown the first time a user starts the Agents, so they don't
+// mistake the automation's Chrome windows for their own browser.
+function showBrowserNotice() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'notice-overlay';
+    overlay.innerHTML = `
+      <div class="notice-box">
+        <div class="notice-icon">🤖</div>
+        <h3>The Agents drive their own browser</h3>
+        <p>When you start, a Chrome window opens for each connected job site and the Agent works inside it automatically — searching, tailoring your CV, and applying.</p>
+        <div class="notice-warn">⚠️ Please leave those windows alone — do not click, type in, or close them. They are the Agent working, not your browser. Just minimise them and carry on. Closing a window stops that Agent.</div>
+        <button class="primary" id="notice-ok">Got it — start applying</button>
+      </div>`;
+    document.body.appendChild(overlay);
+    const done = () => { overlay.remove(); resolve(); };
+    overlay.querySelector('#notice-ok').addEventListener('click', done);
+  });
+}
+
 function setBotControlsState(botName, status) {
   // The Scorer has no card — it auto-runs alongside the application agents — so
   // reflect its state in the status pill next to the Start applying button.
@@ -1237,6 +1257,12 @@ async function renderDashboard() {
         errorEl.className = 'status-msg';
         errorEl.textContent = '';
         const op = btn.dataset.action === 'start-all' ? 'start' : 'stop';
+        // First time someone starts: warn that the Agent drives its own Chrome
+        // windows and they must be left alone (not used as a normal browser).
+        if (op === 'start' && !localStorage.getItem('browser_notice_seen')) {
+          await showBrowserNotice();
+          try { localStorage.setItem('browser_notice_seen', '1'); } catch (_) {}
+        }
         btn.disabled = true;
         for (const key of appAgentKeys) {
           try { await window.api.bot[op](key); } catch (err) {
@@ -1703,8 +1729,8 @@ const TOUR_STEPS = [
   {
     view: 'dashboard',
     title: 'All Set - Start Applying',
-    tip: 'When you click Start applying, the job site Agents (Reed, LinkedIn) search and apply to matching roles - and the AI tailoring engine runs automatically in the background to customise your CV for every job before it is submitted. You do not start it yourself.',
-    action: 'Click the “Start applying” button on the Dashboard. The “How to start applying” checklist there walks you through anything missing. Applications begin within minutes.',
+    tip: 'When you click Start applying, the Agents open a Chrome window for each connected job site and work inside it automatically - searching, tailoring your CV, and applying to matching roles on their own.',
+    action: 'Click “Start applying” (the checklist flags anything missing). ⚠️ Important: the Chrome windows that open are the Agent working - they are NOT your own browser. Leave them alone: do not click, type in, or close them. Just minimise them and carry on with your day - closing a window stops that Agent.',
   },
 ];
 
