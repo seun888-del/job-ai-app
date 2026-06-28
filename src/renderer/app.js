@@ -1614,7 +1614,9 @@ async function initExpiryBanner() {
   if (daysLeft > 14) return;
 
   const banner = document.getElementById('expiry-banner');
-  const urgency = daysLeft <= 3 ? 'danger' : 'warning';
+  // Professional, calm by default: brand blue while the trial is active, a
+  // single amber nudge on the final day, red only once actually expired.
+  const urgency = daysLeft <= 0 ? 'danger' : (daysLeft <= 1 ? 'warning' : 'info');
   const isTrial = license.status === 'trial';
   const msg = daysLeft <= 0
     ? (isTrial ? 'Your free trial has ended.' : 'Your Job-AI license has expired.')

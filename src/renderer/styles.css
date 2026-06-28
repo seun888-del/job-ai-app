@@ -627,21 +627,24 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
   gap: 16px;
   flex-shrink: 0;
 }
+.expiry-banner.info { background: #eff6ff; color: #1e40af; border-bottom: 1px solid #bfdbfe; }
 .expiry-banner.warning { background: #fef9c3; color: #92400e; border-bottom: 1px solid #fde68a; }
 .expiry-banner.danger { background: var(--danger-soft); color: var(--danger); border-bottom: 1px solid #fecaca; }
 .expiry-banner button {
   font-size: 12px;
   font-weight: 700;
-  padding: 4px 14px;
+  padding: 5px 16px;
   border-radius: 999px;
-  border: 1.5px solid currentColor;
-  background: transparent;
-  color: inherit;
+  border: none;
+  background: #2563eb;
+  color: #fff;
   cursor: pointer;
   white-space: nowrap;
   font-family: inherit;
 }
-.expiry-banner button:hover { opacity: 0.7; }
+.expiry-banner.warning button { background: #b45309; }
+.expiry-banner.danger button { background: var(--danger); }
+.expiry-banner button:hover { opacity: 0.88; }
 
 /* ── Nav progress dots ────────────────────────────────────────────────── */
 .nav-check {
