@@ -3,18 +3,20 @@ const path     = require('path');
 const pdfParse = require('pdf-parse');
 const mammoth  = require('mammoth');
 const { llmAvailable, llmChat } = require('./llm');
+const { sanitizeCVText } = require('../../bot/modules/cv_text_sanitizer');
 
 async function extractPdfText(filePath) {
   const buffer = fs.readFileSync(filePath);
   const data = await pdfParse(buffer);
-  return data.text;
+  // Strip undecodable glyph garbage before analysis. See cv_text_sanitizer.
+  return sanitizeCVText(data.text);
 }
 
 async function extractCVText(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.docx' || ext === '.doc') {
     const result = await mammoth.extractRawText({ path: filePath });
-    return result.value;
+    return sanitizeCVText(result.value);
   }
   return extractPdfText(filePath);
 }

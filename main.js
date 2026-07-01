@@ -113,6 +113,9 @@ app.whenReady().then(async () => {
   setInterval(maybeSendDailySummary, 30 * 60 * 1000);
   maybeSendDailySummary(); // also run immediately on launch in case it's past 6 PM
 
+  // Anonymous install beacon (once per install) — feeds the founder funnel stats
+  sendInstallBeacon();
+
   // Check for updates silently — download in background, install on next quit
   if (app.isPackaged) {
     autoUpdater.checkForUpdates().catch(() => {});
@@ -186,6 +189,53 @@ async function maybeSendDailySummary() {
     console.log('[summary] Daily summary email sent for', today);
   } catch (err) {
     console.error('[summary] Failed to send daily summary:', err.message);
+  }
+}
+
+// ── Anonymous install beacon ─────────────────────────────────────────────
+// Fires once per install so the backend can count installs for the
+// download → install → trial → subscribe funnel. No personal data: just a
+// random id generated on this machine, plus platform and app version. The
+// server dedupes by id, so re-sends are harmless; we keep a local "beaconed"
+// flag only to avoid needless network calls, and retry next launch if offline.
+function getInstallIdFile() {
+  return path.join(app.getPath('userData'), 'install_id.json');
+}
+
+async function sendInstallBeacon() {
+  try {
+    const file = getInstallIdFile();
+    let state = {};
+    try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { state = {}; }
+    if (!state.id) {
+      state.id = require('crypto').randomUUID();
+      state.beaconed = false;
+      fs.writeFileSync(file, JSON.stringify(state), 'utf8');
+    }
+    if (state.beaconed) return; // already counted
+
+    const body = JSON.stringify({ install_id: state.id, platform: process.platform, version: app.getVersion() });
+    const url = new URL(`${JOBBOT_BACKEND_URL}/v1/telemetry/install`);
+    await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: url.hostname,
+        path: url.pathname,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      }, res => {
+        res.resume();
+        res.on('end', () => (res.statusCode >= 200 && res.statusCode < 300 ? resolve() : reject(new Error('HTTP ' + res.statusCode))));
+      });
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    state.beaconed = true;
+    fs.writeFileSync(file, JSON.stringify(state), 'utf8');
+    console.log('[telemetry] Install beacon sent');
+  } catch (err) {
+    // Offline / backend down — leave beaconed=false so it retries next launch.
+    console.error('[telemetry] Install beacon failed (will retry):', err.message);
   }
 }
 
@@ -286,8 +336,65 @@ ipcMain.handle('queue:summary', () => queueReader.getQueueSummary());
 ipcMain.handle('queue:recent', (event, limit) => queueReader.getRecentApplications(limit));
 ipcMain.handle('queue:dailyApplications', (event, days) => queueReader.getDailyApplications(days || 14));
 
+// ── License gate for the agents ───────────────────────────────────────────
+// Offline-safe local check: a valid license exists, is active/trial, and has
+// not passed its expiry. Catches an ended trial even when the stored status is
+// still 'trial' (the backend only flips it to 'expired' on the next call).
+function licenseLocallyValid(license) {
+  if (!license?.license_key) return false;
+  if (!['active', 'trial'].includes(license.status)) return false;
+  if (license.expires_at && new Date(license.expires_at).getTime() <= Date.now()) return false;
+  return true;
+}
+
+// Authoritative access check before starting any agent. Local expiry is the
+// offline-safe gate; the backend re-check also catches a revoked / cancelled-
+// and-not-renewed subscription. Fails OPEN only on network error, so a paying
+// user who is briefly offline is never locked out. A 429 (daily AI quota) is
+// NOT an expiry and must not block the agents.
+async function agentAccessAllowed() {
+  const license = db.getLicense();
+  if (!licenseLocallyValid(license)) {
+    return { ok: false, reason: license?.license_key ? 'expired' : 'no_license' };
+  }
+  try {
+    const res = await fetch(`${JOBBOT_BACKEND_URL}/v1/license`, {
+      headers: { Authorization: `Bearer ${license.license_key}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.status === 429) return { ok: true }; // valid licence, just daily-throttled
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data && data.status) {
+        const status = ['trial', 'active', 'expired'].includes(data.status) ? data.status : 'expired';
+        db.saveLicense({ license_key: data.license_key, email: data.email, status, expires_at: data.expires_at });
+        const lapsed = data.expires_at && new Date(data.expires_at).getTime() <= Date.now();
+        if (!['trial', 'active'].includes(status) || lapsed) return { ok: false, reason: 'expired' };
+      }
+      return { ok: true };
+    }
+    if (res.status === 401 || res.status === 403) { // inactive per the backend
+      try { db.saveLicense({ license_key: license.license_key, email: license.email, status: 'expired', expires_at: license.expires_at }); } catch (_) {}
+      return { ok: false, reason: 'expired' };
+    }
+    return { ok: true }; // other backend errors: don't lock out a valid user
+  } catch (_) {
+    return { ok: true }; // offline: trust the local check that already passed
+  }
+}
+
 // ── Bot manager ──────────────────────────────────────────────────────────
 ipcMain.handle('bot:start', async (event, botName) => {
+  // Gate: no agent may run without a currently-valid trial or subscription.
+  const access = await agentAccessAllowed();
+  if (!access.ok) {
+    const err = new Error(access.reason === 'no_license'
+      ? 'Activate a license to start the Agents.'
+      : 'Your Job-AI access has ended. Subscribe to keep the Agents applying for you.');
+    err.code = 'license_required';
+    throw err;
+  }
+
   const userData = app.getPath('userData');
   const cdpPort = connectPorts.get(botName); // set if Chrome is still open
   if (cdpPort) {
@@ -309,6 +416,28 @@ ipcMain.handle('bot:status', () => botManager.getStatus());
 // ── License ─────────────────────────────────────────────────────────────
 ipcMain.handle('license:get', () => db.getLicense());
 ipcMain.handle('license:save', (event, fields) => db.saveLicense(fields));
+
+// Opens the Stripe billing portal (manage payment / cancel) in the browser.
+ipcMain.handle('license:manageSubscription', async () => {
+  const license = db.getLicense();
+  if (!license?.license_key) return { ok: false, error: 'no_license' };
+  let res;
+  try {
+    res = await fetch(`${JOBBOT_BACKEND_URL}/billing-portal`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${license.license_key}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {
+    return { ok: false, error: 'network_error' };
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.url) {
+    return { ok: false, error: body.error || `http_${res.status}` };
+  }
+  shell.openExternal(body.url);
+  return { ok: true };
+});
 
 ipcMain.handle('license:startTrial', async (event, email) => {
   let res;

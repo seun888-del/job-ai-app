@@ -90,5 +90,6 @@ contextBridge.exposeInMainWorld('api', {
     save: (fields) => ipcRenderer.invoke('license:save', fields),
     verify: (key) => ipcRenderer.invoke('license:verify', key),
     startTrial: (email) => ipcRenderer.invoke('license:startTrial', email),
+    manageSubscription: () => ipcRenderer.invoke('license:manageSubscription'),
   },
 });

@@ -27,6 +27,9 @@ const { llmAvailable, llmChat } = require('../../src/services/llm');
 const MAX_BULLETS_PER_ROLE = 5;
 const REFUSAL_RE = /\b(cannot|can't|i'm sorry|i am sorry|unable to|not able to|as an ai)\b/i;
 
+// Empty CV clichés that read as filler to a recruiter — banned from every rewrite.
+const CLICHE_BAN = 'Never use empty CV clichés such as "hardworking", "team player", "results-driven", "detail-oriented", "go-getter", "passionate", "self-starter", "dynamic", "proactive", "synergy" or "thought leader".';
+
 function firstLine(s) { return String(s || '').split('\n').map(x => x.trim()).find(Boolean) || ''; }
 
 // ── Subtitle ────────────────────────────────────────────────────────────────
@@ -66,9 +69,11 @@ CURRENT SUMMARY:
 ${profile}
 
 Rewrite the summary so that:
-- It positions the candidate for THIS role using the job's language where it is genuinely true of them.
+- It positions the candidate for THIS role, mirroring key terms from the job advert wherever they are genuinely true of them.
 - It foregrounds their most relevant real strengths and experience.
 - It reads as confident, natural professional prose — 2 to 4 sentences, no buzzword soup, no "I"/first-person, no bullet points.
+
+${CLICHE_BAN}
 
 Absolute rules:
 - Do NOT invent or imply any tool, technology, certification, metric, number, seniority, or years of experience the CV does not already support.
@@ -151,6 +156,36 @@ function introducesNewFacts(originalCorpus, reworded) {
   return false;
 }
 
+// ── JD keyword biasing ───────────────────────────────────────────────────────
+// Common words that carry no signal when matching a bullet to a job advert.
+const JD_STOPWORDS = new Set(
+  ('the a an and or but to of in for with on at by from as is are be been being will would ' +
+   'you your we our us they them their this that these those it its role job jobs work works working ' +
+   'team teams within across including etc via using use used able ability who which what when where ' +
+   'have has had do does did can could should would must may also more most other others any all such ' +
+   'into over under out up down off per each both than then so if not no yes new good strong ' +
+   'candidate applicant experience experienced skills skill responsibilities requirements essential ' +
+   'desirable please apply application day days week weeks month months year years ideal successful')
+    .split(/\s+/)
+);
+
+function jdKeywordSet(jdExcerpt) {
+  const set = new Set();
+  for (const w of (String(jdExcerpt).toLowerCase().match(/[a-z][a-z0-9+#.\-]{2,}/g) || [])) {
+    if (!JD_STOPWORDS.has(w)) set.add(w);
+  }
+  return set;
+}
+
+// How many DISTINCT JD terms a bullet already contains (word-boundary matches).
+function bulletJDScore(bullet, jdSet) {
+  const seen = new Set();
+  for (const w of (String(bullet).toLowerCase().match(/[a-z][a-z0-9+#.\-]{2,}/g) || [])) {
+    if (jdSet.has(w)) seen.add(w);
+  }
+  return seen.size;
+}
+
 // Select the most relevant bullets for a role AND genuinely rewrite each into
 // natural, recruiter-grade prose tuned to the JD — without ever adding facts the
 // candidate didn't state (the anti-fabrication verifier below enforces this).
@@ -158,7 +193,17 @@ async function selectAndRewordBullets(role, jdExcerpt) {
   const bullets = role.bullets || [];
   if (!bullets.length) return bullets;
 
-  const indexed   = bullets.map((b, i) => `[${i + 1}] ${b}`).join('\n');
+  // Rank the candidate's own bullets by how many job-advert terms they already
+  // contain, so both the model's choice AND the fallback favour the bullets most
+  // relevant to THIS job. This only reorders/selects existing bullets — it never
+  // changes their wording, so truthfulness is untouched.
+  const jdSet   = jdKeywordSet(jdExcerpt);
+  const ranked  = bullets
+    .map((b, i) => ({ b, i, s: bulletJDScore(b, jdSet) }))
+    .sort((a, z) => z.s - a.s || a.i - z.i);   // JD relevance desc, stable by original order
+  const ordered = ranked.map(r => r.b);
+
+  const indexed   = ordered.map((b, i) => `[${i + 1}] ${b}`).join('\n');
   const originals = bullets.join('  ');   // corpus for the anti-fabrication check
 
   const prompt = `You are rewriting CV bullet points so they read naturally and persuasively to a HUMAN recruiter for a specific job — not just to pass keyword filters. Make them genuinely strong, but stay 100% truthful to what the candidate actually did.
@@ -171,12 +216,15 @@ ORIGINAL BULLETS:
 ${indexed}
 
 Task:
-1. Choose up to ${MAX_BULLETS_PER_ROLE} bullets most relevant to this job, strongest and most relevant first.
-2. Rewrite each chosen bullet in clear, natural, professional English a recruiter would respect:
-   - Open with a strong, varied action verb (don't reuse the same opener twice).
-   - Lead with the impact or outcome when the original bullet already implies one.
-   - Use the job's own terminology wherever it genuinely means the same thing as what the candidate wrote.
-   - It should read like a person wrote it, never like a keyword list.
+1. The ORIGINAL BULLETS are already pre-ordered with the most job-relevant first. Choose up to ${MAX_BULLETS_PER_ROLE}, keeping that priority — favour the earlier (more relevant) bullets unless a later one is clearly a stronger match for this job.
+2. Rewrite each chosen bullet using this shape wherever the source supports it:
+   ACTION (what they did) → HOW (the tool, system or method they used) → PURPOSE (why) → RESULT (the outcome).
+   - Open with a strong, varied action verb (never reuse the same opener twice).
+   - Only include a HOW (tool/system/process) or a RESULT (metric/outcome) when it is ALREADY present or clearly implied in that original bullet. If the original doesn't state a tool or a result, build the bullet from the parts that ARE there — never manufacture the missing element.
+   - Use the job advert's own terminology wherever it genuinely means the same thing as what the candidate wrote.
+   - It must read like a person wrote it, never like a keyword list.
+
+${CLICHE_BAN}
 
 Strict truthfulness rules (absolute — these override everything above):
 - Do NOT invent or imply any tool, technology, certification, metric, number, employer, or achievement that is not already in that original bullet. Rephrasing only — no new facts.
@@ -198,8 +246,8 @@ Return ONLY the rewritten bullets, one per line, each starting with "- ". No num
       return safe;
     }
   } catch (_) {}
-  // Fallback: keep the first N original bullets, unmodified
-  return bullets.slice(0, MAX_BULLETS_PER_ROLE);
+  // Fallback: keep the most job-relevant original bullets, unmodified.
+  return ordered.slice(0, MAX_BULLETS_PER_ROLE);
 }
 
 // ── Skills: reorder by JD relevance, then weave missing keywords ─────────────

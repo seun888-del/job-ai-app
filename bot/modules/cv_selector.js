@@ -2,6 +2,7 @@ const fs      = require("fs");
 const path    = require("path");
 const pdfParse = require("pdf-parse");
 const mammoth  = require("mammoth");
+const { sanitizeCVText } = require("./cv_text_sanitizer");
 
 // Score a CV against a job description using keyword frequency
 function scoreCV(cv, jdText) {
@@ -38,7 +39,9 @@ function selectBestCV(jdText, cvProfiles) {
 async function extractPdfText(filePath) {
   const buffer = fs.readFileSync(filePath);
   const data   = await pdfParse(buffer);
-  return data.text;
+  // Strip undecodable glyph garbage (e.g. dates in a subsetted font with no
+  // ToUnicode map) before it can reach the tailored CV. See cv_text_sanitizer.
+  return sanitizeCVText(data.text);
 }
 
 // Extract plain text from a .docx file preserving bullet structure as • markers
@@ -57,7 +60,7 @@ async function extractDocxText(filePath) {
   html = html.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
   // Normalise whitespace
   html = html.replace(/\n{3,}/g, '\n\n').trim();
-  return html;
+  return sanitizeCVText(html);
 }
 
 // Extract text from either PDF or docx based on file extension

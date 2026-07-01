@@ -56,7 +56,10 @@ async function render(view) {
 // â”€â”€ 1. Personal Details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function renderPersonal() {
   const p = await window.api.profile.get();
-  const country = p.country || 'United Kingdom';
+  const country = p.country || 'European Union';
+  // Region is a binary US / non-US switch. Normalise any non-US value (including
+  // the legacy 'United Kingdom') to 'European Union' so the picker stays correct.
+  const region = country === 'United States' ? 'United States' : 'European Union';
   const empTypes = (p.employment_type || '').split(',').filter(Boolean);
 
   content.innerHTML = `
@@ -69,16 +72,16 @@ async function renderPersonal() {
       <h3>Your Region</h3>
       <p class="card-hint">Determines which job sites are available and how employer screening questions are answered.</p>
       <div class="country-picker">
-        <button class="country-btn${country === 'United Kingdom' ? ' active' : ''}" data-country="United Kingdom">
-          <span class="country-flag">🇬🇧</span>
-          <span class="country-name">United Kingdom</span>
+        <button class="country-btn${region === 'European Union' ? ' active' : ''}" data-country="European Union">
+          <span class="country-flag">🇪🇺</span>
+          <span class="country-name">European Union</span>
         </button>
-        <button class="country-btn${country === 'United States' ? ' active' : ''}" data-country="United States">
+        <button class="country-btn${region === 'United States' ? ' active' : ''}" data-country="United States">
           <span class="country-flag">🇺🇸</span>
           <span class="country-name">United States</span>
         </button>
       </div>
-      <input type="hidden" id="country" value="${country}">
+      <input type="hidden" id="country" value="${region}">
     </div>
 
     <div class="card">
@@ -784,6 +787,14 @@ async function renderLicense() {
       <div id="license-current">${renderLicenseStatus(license)}</div>
     </div>
 
+    ${license?.status === 'active' ? `
+    <div class="card">
+      <h3>Manage Subscription</h3>
+      <p style="font-size:14px;color:#64748b;margin-bottom:16px">Update your payment details, view invoices, or cancel your subscription in Stripe's secure portal. If you cancel, your access stays active until the end of the current billing period.</p>
+      <button class="secondary" id="manage-subscription">Manage or cancel subscription →</button>
+      <div class="status-msg" id="manage-status"></div>
+    </div>` : ''}
+
     <div class="card">
       <h3>Activate a License Key</h3>
       <div class="field"><label>License key</label><input id="license_key" placeholder="jb_..." value="${license?.license_key || ''}"></div>
@@ -851,6 +862,30 @@ async function renderLicense() {
       btn.disabled = false;
     }
   });
+
+  const manageBtn = document.getElementById('manage-subscription');
+  if (manageBtn) {
+    manageBtn.addEventListener('click', async () => {
+      const st = document.getElementById('manage-status');
+      manageBtn.disabled = true;
+      st.className = 'status-msg';
+      st.textContent = 'Opening secure billing portal…';
+      try {
+        const r = await window.api.license.manageSubscription();
+        if (r.ok) {
+          showStatus(st, 'Opened in your browser — manage or cancel there.', 'success');
+        } else if (r.error === 'no_subscription') {
+          showStatus(st, 'No paid subscription is linked to this license (trials have nothing to cancel).', 'error');
+        } else if (r.error === 'network_error') {
+          showStatus(st, 'Could not reach the server. Check your connection and try again.', 'error');
+        } else {
+          showStatus(st, 'Could not open the billing portal. Please try again.', 'error');
+        }
+      } finally {
+        manageBtn.disabled = false;
+      }
+    });
+  }
 }
 
 // â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1045,6 +1080,16 @@ function bindViewCvButtons(root = content) {
   });
 }
 
+// A license only counts for starting agents if it exists, is active/trial, and
+// hasn't passed its expiry. An ended trial still has a key, so a key alone is
+// not enough (the main process enforces the same rule authoritatively).
+function licenseIsActive(lic) {
+  if (!lic?.license_key) return false;
+  if (!['active', 'trial'].includes(lic.status)) return false;
+  if (lic.expires_at && new Date(lic.expires_at).getTime() <= Date.now()) return false;
+  return true;
+}
+
 async function renderDashboard() {
   const [summary, recent, status, license, profile, dailyApps, cvs, reedCred, liCred, gdCred, cvlibCred, tjCred, cwCred, connectedStatus] = await Promise.all([
     window.api.queue.summary(),
@@ -1064,8 +1109,8 @@ async function renderDashboard() {
   ]);
   const anyConnected = Object.values(connectedStatus || {}).some(Boolean);
   const isUS = (profile?.country || 'United Kingdom') === 'United States';
-  // License key required to start bots
-  dashboardHasLicense = !!(license?.license_key);
+  // A currently-valid license (not just any key) is required to start the agents.
+  dashboardHasLicense = licenseIsActive(license);
 
   const dashCreds = { reed: reedCred, linkedin: liCred, glassdoor: gdCred, cvlibrary: cvlibCred, totaljobs: tjCred, cwjobs: cwCred };
   // Application agents shown on the dashboard (the Scorer is hidden — it auto-runs
@@ -1129,7 +1174,7 @@ async function renderDashboard() {
     <div class="start-applying-bar">
       <button class="primary start-applying-btn" data-action="start-all"
         ${(!dashboardHasLicense || allAppRunning) ? 'disabled' : ''}
-        ${!dashboardHasLicense ? 'title="Activate a license to start the Agents"' : ''}>▶ Start applying</button>
+        ${!dashboardHasLicense ? `title="${license?.license_key ? 'Your Job-AI access has ended — subscribe to continue' : 'Activate a license to start the Agents'}"` : ''}>▶ Start applying</button>
       <button class="secondary stop-all-btn" data-action="stop-all" ${anyAppRunning ? '' : 'disabled'}>Stop</button>
       <span class="scorer-pill${scorerRunning ? ' scorer-pill-active' : ''}" id="scorer-pill" data-status="${status.scorer || 'stopped'}"
         title="The AI tailoring engine runs automatically while the Agents are applying — you don't start it yourself.">${scorerRunning ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
@@ -1252,7 +1297,11 @@ async function renderDashboard() {
         return;
       }
       if (btn.dataset.action === 'start-all' || btn.dataset.action === 'stop-all') {
-        if (btn.dataset.action === 'start-all' && !dashboardHasLicense) return;
+        if (btn.dataset.action === 'start-all' && !dashboardHasLicense) {
+          const e = document.getElementById('bot-error');
+          if (e) { e.className = 'status-msg error'; e.textContent = 'Your Job-AI access has ended. Subscribe to keep the Agents applying for you.'; }
+          return;
+        }
         const errorEl = document.getElementById('bot-error');
         errorEl.className = 'status-msg';
         errorEl.textContent = '';
@@ -1272,7 +1321,11 @@ async function renderDashboard() {
         }
         return;
       }
-      if (btn.dataset.action === 'start' && !dashboardHasLicense) return;
+      if (btn.dataset.action === 'start' && !dashboardHasLicense) {
+        const e = document.getElementById('bot-error');
+        if (e) { e.className = 'status-msg error'; e.textContent = 'Your Job-AI access has ended. Subscribe to keep the Agents applying for you.'; }
+        return;
+      }
       const errorEl = document.getElementById('bot-error');
       errorEl.className = 'status-msg';
       errorEl.textContent = '';
@@ -1857,7 +1910,7 @@ function renderHelp() {
   const faqs = [
     {
       q: 'How do I get started?',
-      a: 'Complete the 4 setup steps in order: (1) Personal Details, (2) CVs, (3) Search Preferences, (4) License. Then go to the Dashboard, click “Connect account” on each Agent card to log in to the job site, and click Start.'
+      a: 'Complete the 4 setup steps in the sidebar: (1) Personal Details, (2) CVs, (3) Search Preferences, (4) License. Then open the Dashboard, click “Connect account” on a job site card and log in once, and click “Start applying”. The “How to start applying” checklist on the Dashboard walks you through anything still missing.'
     },
     {
       q: 'Which job sites does Job-AI use?',
