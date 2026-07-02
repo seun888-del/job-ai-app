@@ -1,6 +1,6 @@
 {
   "name": "job-bot-app",
-  "version": "0.6.15",
+  "version": "0.6.16",
   "description": "Desktop app for automated job search and application",
   "main": "main.js",
   "private": true,
@@ -44,12 +44,6 @@
       "!dist",
       "!playwright-browsers",
       "!_tmp_*"
-    ],
-    "extraResources": [
-      {
-        "from": "playwright-browsers",
-        "to": "playwright-browsers"
-      }
     ],
     "win": {
       "target": [

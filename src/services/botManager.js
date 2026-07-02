@@ -108,11 +108,10 @@ function start(botName, userDataPath, opts = {}) {
     env.REED_API_KEY = opts.reedApiKey;
   }
 
-  // In a packaged app, Playwright's browsers are bundled under resources/
-  // rather than the dev-machine's ms-playwright cache.
-  if (app.isPackaged) {
-    env.PLAYWRIGHT_BROWSERS_PATH = path.join(process.resourcesPath, 'playwright-browsers');
-  }
+  // No bundled Chromium: the agents drive the user's REAL Chrome/Edge via
+  // Playwright's `channel` option, so Playwright never needs its own browser
+  // download. Not bundling it keeps the app ~150MB smaller and makes macOS
+  // codesign + notarization fast (no thousands of Chromium binaries to sign).
 
   // Hosted AI backend (test/commercial builds only): if a license key is
   // saved and active, pass it (and the backend URL) through so cv_tailor/

@@ -109,7 +109,10 @@ jobs:
   release:
     needs: [build-windows, build-mac]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    # Publish as long as Windows built — a Mac signing/notarization failure must
+    # NOT block the release (and Windows auto-update). Mac assets are included
+    # when present. always() lets this run even if build-mac failed.
+    if: always() && needs.build-windows.result == 'success' && startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
@@ -121,6 +124,7 @@ jobs:
 
       - name: Download Mac artifact
         uses: actions/download-artifact@v4
+        continue-on-error: true   # Mac may have failed/been skipped — release Windows regardless
         with:
           name: JobBot-Mac
           path: artifacts
