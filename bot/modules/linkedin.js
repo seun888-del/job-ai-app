@@ -282,6 +282,7 @@ async function applyToJob(page, job, resumePath) {
 
   let stepCount = 0;
   const MAX_STEPS = 12;
+  let cvStepSeen = false, cvUploaded = false;
   while (stepCount < MAX_STEPS) {
     stepCount++;
     await DELAY(3000);
@@ -292,8 +293,25 @@ async function applyToJob(page, job, resumePath) {
     await page.screenshot({ path: path.join(SSDIR, `apply_0${stepCount}_step.png`) });
     await fillContactFields(page);
     const uploaded = await uploadResume(page, resumePath);
-    if (uploaded) console.log('  [LinkedIn] Resume uploaded.');
+    if (uploaded) { cvUploaded = true; console.log('  [LinkedIn] Resume uploaded.'); }
+    // Track whether this application involves a résumé step — Easy Apply otherwise
+    // reuses the profile CV, so we must upload our tailored file to a résumé step.
+    if (await resumeStepPresent(page)) cvStepSeen = true;
     await answerScreeningQuestions(page, job);
+
+    // Never submit the base CV: if a résumé is involved but we haven't uploaded
+    // our tailored file, keep advancing to reach the upload control, and skip
+    // rather than submit if we can't.
+    if (cvStepSeen && !cvUploaded) {
+      const advanced = await tryNext(page, job);
+      if (!advanced) {
+        console.log('  [LinkedIn] ⚠️  Tailored CV not attached — skipping so the base CV is NOT submitted.');
+        console.log('  [[JOBBOT_NOTIFY]] Could not attach your tailored CV on LinkedIn — skipped this job instead of applying with your base CV.');
+        await dismissModal(page).catch(() => {});
+        return 'cv_not_attached';
+      }
+      continue;
+    }
 
     const submitted = await trySubmit(page, job);
     if (submitted) {
@@ -314,6 +332,18 @@ async function applyToJob(page, job, resumePath) {
   }
 
   return false;
+}
+
+// Does the current Easy Apply step involve a résumé (upload / select / shown)?
+async function resumeStepPresent(page) {
+  try {
+    return await page.evaluate(() => {
+      if (document.querySelector('input[type=file]')) return true;
+      const modal = document.querySelector('.jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
+      const t = (modal?.innerText || '').toLowerCase();
+      return /resume|\bcv\b/.test(t) && /(upload|change|select|attach|choose)/.test(t);
+    });
+  } catch { return false; }
 }
 
 // ── HELPERS ────────────────────────────────────────────────────────────────
@@ -703,11 +733,16 @@ async function _answerCheckboxes(page) {
 }
 
 async function _answerRadios(page, job) {
-  // Find radio groups — LinkedIn uses both <fieldset> and <div role="group">
-  const groups = await page.$$('fieldset, [role="group"]').catch(() => []);
+  // Find radio groups. LinkedIn's Easy Apply form-builder uses several shapes:
+  // <fieldset>, <div role="group">, <div role="radiogroup">, and the newer
+  // [data-test-form-builder-radio-button-form-component] / fb-dash-form-element.
+  let groups = await page.$$('fieldset, [role="group"], [role="radiogroup"], [data-test-form-builder-radio-button-form-component], [class*="fb-dash-form-element"]').catch(() => []);
+  // Fallback: if no known group wrapper matched, treat each radio's nearest
+  // container as a group so questions are never silently skipped.
+  if (!groups.length) groups = await page.$$('div:has(input[type="radio"])').catch(() => []);
   for (const group of groups) {
     try {
-      const question = await group.evaluate(el => {
+      let question = await group.evaluate(el => {
         // Prefer legend or an explicit question label over option labels
         const leg = el.querySelector('legend');
         if (leg) return leg.innerText.toLowerCase();
@@ -735,6 +770,18 @@ async function _answerRadios(page, job) {
           return lab ? lab.innerText.toLowerCase().trim() : '';
         }).catch(() => '');
         options.push({ radio, label: labelText });
+      }
+      // Robust fallback: if no question label was extracted from the DOM, derive
+      // it from the group's own text minus the option labels + boilerplate. This
+      // survives LinkedIn DOM changes so sponsorship/right-to-work etc. are never
+      // left blank just because the label element moved.
+      if (!question || question.replace(/[^a-z]/g, '').length < 4) {
+        const groupText = await group.evaluate(el => (el.innerText || '')).catch(() => '');
+        let q = groupText.toLowerCase();
+        for (const o of options) { if (o.label) q = q.split(o.label).join(' '); }
+        q = q.replace(/this field is required|required|select an option|please select|\byes\b|\bno\b/gi, ' ')
+             .replace(/\s+/g, ' ').trim();
+        if (q.length > 4) question = q;
       }
       let target = null;
       const _yn = sensitiveYesNo(question, job);
@@ -910,6 +957,11 @@ async function _answerTextInputs(page, job) {
       } else if (/notice period|availability|available to start|when can you start/i.test(question)) {
         const avText = { 'immediately': 'Immediately available', '1week': '1 week', '2weeks': '2 weeks', '1month': '1 month', '2months': '2 months', '3months': '3 months' };
         await _fillInput(inp, avText[cfg.APPLICANT.availability || 'immediately'] || 'Immediately available');
+      } else if (/address\s*line\s*1|street address|^address\b|postal address|\baddress\b/i.test(question)) {
+        const addr = cfg.APPLICANT.address || cfg.APPLICANT.location;
+        if (addr) await _fillInput(inp, addr);
+      } else if (/city|town/i.test(question)) {
+        if (cfg.APPLICANT.location) await _fillInput(inp, cfg.APPLICANT.location);
       } else if (/reloc/i.test(question)) {
         await _fillInput(inp, cfg.APPLICANT.willingToRelocate ? 'Yes' : 'No');
       } else {

@@ -98,6 +98,7 @@ const cfg = {
         phone: profile.phone || '',
         email: profile.email || '',
         location: profile.location || '',
+        address: profile.address || '',
         linkedin: profile.linkedin_url || '',
         yearsExperience: profile.years_experience ?? 0,
         rightToWorkCountries: (profile.right_to_work_countries || 'United Kingdom').split(',').map(s => s.trim()).filter(Boolean),

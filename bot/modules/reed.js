@@ -488,10 +488,28 @@ async function applyToJob(page, job, resumePath) {
 
   // Fill and submit the Reed application form
   await fillContactFields(page);
-  await uploadResume(page, resumePath);
+  const uploadOk = await uploadResume(page, resumePath);
 
   // Wait for Reed to process the uploaded CV
   await DELAY(3000);
+
+  // If Reed's session expired while changing the CV, we cannot attach the
+  // tailored CV — never submit with the account's saved (base) CV. Stop and
+  // flag for reconnect.
+  if (await reedSessionExpired(page)) {
+    console.log('  [Reed] ⚠️  Reed session expired during CV upload — cannot attach the tailored CV.');
+    console.log('  [[JOBBOT_NOTIFY]] Reed session expired — reconnect your Reed account so tailored CVs can be uploaded.');
+    return 'cv_not_attached';
+  }
+
+  // Only proceed if the tailored-CV upload actually completed — never silently
+  // fall back to the account's saved/base CV. (Reed pre-loads the profile CV, so
+  // if the upload control wasn't found/driven, the base CV would be submitted.)
+  if (!uploadOk) {
+    console.log('  [Reed] ⚠️  Could not attach the tailored CV (upload control not found) — skipping so the base CV is NOT submitted.');
+    console.log('  [[JOBBOT_NOTIFY]] Could not attach your tailored CV on Reed — skipped this job instead of applying with your base CV. If it persists, reconnect your Reed account.');
+    return 'cv_not_attached';
+  }
 
   // After file upload, "Update your CV" modal may show a confirmation button — click it
   const confirmSelectors = [
@@ -562,13 +580,16 @@ async function applyToJob(page, job, resumePath) {
 
 async function fillContactFields(page) {
   const { firstName, lastName, phone, email } = cfg.APPLICANT;
+  const address = cfg.APPLICANT.address || cfg.APPLICANT.location || '';
   const fills = [
     { sel: 'input[name*="firstName" i], input[id*="firstName" i], input[placeholder*="First name" i]', val: firstName },
     { sel: 'input[name*="lastName" i], input[id*="lastName" i], input[placeholder*="Last name" i]',   val: lastName  },
     { sel: 'input[name*="phone" i], input[id*="phone" i], input[type="tel"]',                          val: phone     },
     { sel: 'input[name*="email" i], input[id*="email" i], input[type="email"]',                        val: email     },
+    { sel: 'input[name*="address" i], input[id*="address" i], input[placeholder*="address" i]',        val: address   },
   ];
   for (const { sel, val } of fills) {
+    if (!val) continue;
     try {
       const el = await page.$(sel);
       if (el && await el.isVisible()) {
@@ -582,10 +603,39 @@ async function fillContactFields(page) {
       }
     } catch (_) {}
   }
+  // Label-based fallback for text fields like "Address Line 1" whose input has no
+  // address-ish name/id/placeholder — match by the visible label text.
+  if (address) await fillTextByLabel(page, /address\s*line\s*1|^address\b|street address/i, address);
+}
+
+// Fill the first empty text input/textarea whose associated label matches `re`.
+async function fillTextByLabel(page, re, value) {
+  try {
+    const inputs = await page.$$('input[type="text"], input:not([type]), textarea');
+    for (const el of inputs) {
+      if (!(await el.isVisible().catch(() => false))) continue;
+      if (await el.inputValue().catch(() => '')) continue; // don't overwrite
+      const label = await el.evaluate(node => {
+        const id = node.id;
+        const lab = (id && document.querySelector(`label[for="${id}"]`)) ||
+                    node.closest('label') ||
+                    node.closest('[class*="field"], [class*="form"]')?.querySelector('label, legend, .question-text, p');
+        return lab ? lab.innerText.trim() : (node.getAttribute('aria-label') || node.placeholder || '');
+      }).catch(() => '');
+      if (re.test(label)) {
+        await el.click({ clickCount: 3 }).catch(() => {});
+        await DELAY(80);
+        await el.fill(value).catch(() => {});
+        await DELAY(100);
+        return true;
+      }
+    }
+  } catch (_) {}
+  return false;
 }
 
 async function uploadResume(page, resumePath) {
-  if (!resumePath || !fs.existsSync(resumePath)) return;
+  if (!resumePath || !fs.existsSync(resumePath)) return false;
   try {
     // Reed shows the CV saved on the account by default and hides the file input.
     // Click "Use a different CV" / "Change" / "Upload a different CV" first to reveal the upload field.
@@ -635,7 +685,7 @@ async function uploadResume(page, resumePath) {
           await chooser.setFiles(resumePath);
           await DELAY(3000);
           console.log('  [Reed] Tailored CV uploaded successfully.');
-          return;
+          return true;
         }
       } catch (err) {
         console.log(`  [Reed] Choose file click error: ${err.message.substring(0, 80)}`);
@@ -649,14 +699,25 @@ async function uploadResume(page, resumePath) {
       await fileInput.setInputFiles(resumePath);
       await DELAY(2500);
       console.log('  [Reed] Tailored CV uploaded via file input.');
-      return;
+      return true;
     }
 
     await page.screenshot({ path: `${SSDIR}/reed_cv_upload_state.png` });
-    console.log('  [Reed] Could not upload CV — screenshot saved.');
+    console.log('  [Reed] Could not find a CV upload control — screenshot saved.');
+    return false;
   } catch (err) {
     console.log('  [Reed] CV upload error:', err.message);
+    return false;
   }
+}
+
+// Detect Reed's "session expired" state — the session must be reconnected.
+async function reedSessionExpired(page) {
+  try {
+    return await page.evaluate(() =>
+      /your session has expired|session expired|please refresh the page to continue/i.test(document.body?.innerText || '')
+    );
+  } catch { return false; }
 }
 
 async function fillCoverLetter(page, job) {
@@ -713,6 +774,11 @@ function sensitiveYesNo(question) {
 }
 
 async function answerScreeningQuestions(page) {
+  // Address Line 1 and similar text fields appear in Reed's "Application
+  // questions" modal — fill them from the profile address (fallback: location).
+  const _addr = cfg.APPLICANT.address || cfg.APPLICANT.location || '';
+  if (_addr) await fillTextByLabel(page, /address\s*line\s*1|^address\b|street address|address\s*line/i, _addr);
+
   // ── Radio buttons ────────────────────────────────────────────────────────
   try {
     const fieldsets = await page.$$('fieldset, .question-group, [class*="question-row"]');

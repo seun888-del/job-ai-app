@@ -95,6 +95,9 @@ app.whenReady().then(async () => {
   createWindow();
 
   const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent' };
+  // Persist agent logs to disk so real runs can be inspected after the fact
+  // (the in-app Agent tab only shows the live session). One file per UTC day.
+  const agentLogFile = () => path.join(app.getPath('userData'), 'logs', `agents-${new Date().toISOString().slice(0, 10)}.log`);
   botManager.setLogHandler((bot, stream, text) => {
     // Agents run minimised, so surface "human verification needed" as a desktop
     // notification (the bot emits a [[JOBBOT_NOTIFY]] marker in its log stream).
@@ -103,6 +106,11 @@ app.whenReady().then(async () => {
       const msg = text.slice(idx + 17).trim() || 'Action needed in the Agent browser window.';
       new Notification({ title: `${BOT_DISPLAY[bot] || bot}: action needed`, body: msg, silent: false }).show();
     }
+    try {
+      const file = agentLogFile();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFile(file, `[${new Date().toISOString()}] [${bot}/${stream}] ${text}`, () => {});
+    } catch (_) {}
     mainWindow?.webContents.send('bot:log', { bot, stream, text });
   });
   botManager.setStatusHandler((bot, status) => {

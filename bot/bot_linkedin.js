@@ -75,6 +75,10 @@ async function drainReadyCVs(liPage) {
         queue.update(job.jobId, { status: 'skipped' });
         queue.markApplied(job.jobId);
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Already applied');
+      } else if (applied === 'cv_not_attached') {
+        queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
+        logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
+        console.log(`  [LinkedIn Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
       } else {
         const finalStatus = applied ? 'applied' : 'apply_failed';
         queue.update(job.jobId, { status: finalStatus });
@@ -234,6 +238,13 @@ async function phase2_applyReadyCVs(liPage) {
           queue.markApplied(job.jobId);
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Already applied');
           console.log(`  [LinkedIn Bot] Already applied — skipping: ${job.title}`);
+          continue;
+        }
+
+        if (applied === 'cv_not_attached') {
+          queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
+          console.log(`  [LinkedIn Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
           continue;
         }
 

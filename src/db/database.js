@@ -109,6 +109,9 @@ async function init(userDataPath) {
   if (!profileCols.includes('country')) {
     db.exec("ALTER TABLE profile ADD COLUMN country TEXT DEFAULT 'United Kingdom'");
   }
+  if (!profileCols.includes('address')) {
+    db.exec('ALTER TABLE profile ADD COLUMN address TEXT');
+  }
   if (!profileCols.includes('experience_level')) {
     db.exec('ALTER TABLE profile ADD COLUMN experience_level TEXT');
   }

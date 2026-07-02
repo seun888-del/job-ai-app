@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS profile (
   phone TEXT,
   email TEXT,
   location TEXT,
+  address TEXT,
   linkedin_url TEXT,
   right_to_work_countries TEXT DEFAULT 'United Kingdom',
   requires_sponsorship INTEGER DEFAULT 0,

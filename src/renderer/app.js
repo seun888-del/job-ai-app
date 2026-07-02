@@ -95,6 +95,7 @@ async function renderPersonal() {
         <div class="field"><label>Email</label><input id="email" value="${p.email || ''}"></div>
       </div>
       <div class="field"><label>Location (city, state/county)</label><input id="location" value="${p.location || ''}"></div>
+      <div class="field"><label>Address (street address — used to fill "Address Line 1" on applications)</label><input id="address" value="${p.address || ''}" placeholder="e.g. 12 High Street"></div>
       <div class="field"><label>LinkedIn URL</label><input id="linkedin_url" value="${p.linkedin_url || ''}"></div>
     </div>
 
@@ -234,6 +235,7 @@ async function renderPersonal() {
       phone: document.getElementById('phone').value,
       email: document.getElementById('email').value,
       location: document.getElementById('location').value,
+      address: document.getElementById('address').value,
       linkedin_url: document.getElementById('linkedin_url').value,
       years_experience: Number(document.getElementById('years_experience').value) || 0,
       salary_expectation: document.getElementById('salary_expectation').value.trim(),

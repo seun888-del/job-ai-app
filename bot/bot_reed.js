@@ -145,6 +145,11 @@ async function drainReadyCVs(context, reedPage) {
       } else if (applied === 'external') {
         queue.update(job.jobId, { status: 'skipped', reason: 'External application site' });
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'External application site');
+      } else if (applied === 'cv_not_attached') {
+        // Never submit the base CV: skip when the tailored CV couldn't be attached.
+        queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
+        logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
+        console.log(`  [Reed Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
       } else {
         const finalStatus = applied ? 'applied' : 'apply_failed';
         queue.update(job.jobId, { status: finalStatus });
@@ -253,6 +258,14 @@ async function phase2_applyReadyCVs(context, reedPage) {
           queue.update(job.jobId, { status: 'skipped', reason: 'External application site' });
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'External application site');
           console.log(`  [Reed Bot] External site — skipping: ${job.title}`);
+          continue;
+        }
+
+        if (applied === 'cv_not_attached') {
+          // Never submit the base CV: skip when the tailored CV couldn't be attached.
+          queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
+          console.log(`  [Reed Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
           continue;
         }
 
