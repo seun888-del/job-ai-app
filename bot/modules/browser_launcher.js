@@ -3,7 +3,14 @@
 
 const { chromium } = require('playwright-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-chromium.use(StealthPlugin());
+const _stealth = StealthPlugin();
+// The 'chrome.app' evasion ships as a directory literally named "chrome.app",
+// which macOS codesign tries (and fails) to sign as an app bundle when signing
+// the packaged app. It's removed from the Mac build (see afterPack.js) and is
+// redundant here anyway — we drive the user's REAL Chrome, which natively
+// exposes window.chrome.app — so disable it to avoid a missing-module require.
+_stealth.enabledEvasions.delete('chrome.app');
+chromium.use(_stealth);
 
 let FingerprintGenerator, FingerprintInjector;
 try {

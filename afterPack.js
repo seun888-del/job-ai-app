@@ -28,6 +28,28 @@ function hoistPackages(appResourcesPath) {
   }
 }
 
+// Delete every copy of puppeteer-extra-plugin-stealth's `chrome.app` evasion
+// directory from the packaged app — a folder named *.app breaks macOS codesign.
+function removeChromeAppEvasion(appResourcesPath) {
+  const nm = path.join(appResourcesPath, 'app', 'node_modules');
+  const targets = [path.join(nm, 'puppeteer-extra-plugin-stealth', 'evasions', 'chrome.app')];
+  try {
+    for (const entry of fs.readdirSync(nm)) {
+      targets.push(path.join(nm, entry, 'node_modules', 'puppeteer-extra-plugin-stealth', 'evasions', 'chrome.app'));
+    }
+  } catch (_) {}
+  for (const t of targets) {
+    try {
+      if (fs.existsSync(t)) {
+        fs.rmSync(t, { recursive: true, force: true });
+        console.log('[afterPack] Removed codesign-incompatible dir:', t);
+      }
+    } catch (e) {
+      console.warn('[afterPack] Could not remove', t, e.message);
+    }
+  }
+}
+
 module.exports = async function afterPack(context) {
   // Hoist missing top-level packages on all platforms
   try {
@@ -39,8 +61,13 @@ module.exports = async function afterPack(context) {
       resourcesPath = path.join(context.appOutDir, 'resources');
     }
     hoistPackages(resourcesPath);
+    // macOS only: remove the stealth plugin's `chrome.app` directory. codesign
+    // treats any *.app dir as an app bundle and fails on this fake one. The
+    // evasion is disabled at runtime (browser_launcher.js) and redundant with
+    // real Chrome, so removing it is safe.
+    if (platform === 'darwin') removeChromeAppEvasion(resourcesPath);
   } catch (e) {
-    console.warn('[afterPack] Hoist step failed (non-fatal):', e.message);
+    console.warn('[afterPack] Hoist/cleanup step failed (non-fatal):', e.message);
   }
 
   if (context.electronPlatformName !== 'darwin') return;
