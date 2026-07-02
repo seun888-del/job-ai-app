@@ -51,6 +51,9 @@ jobs:
 
   build-mac:
     runs-on: macos-latest
+    # Cap the Mac job so signing/notarization can never hang indefinitely. If it
+    # exceeds this it fails, and the decoupled release still ships Windows.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
