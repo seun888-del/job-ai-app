@@ -106,6 +106,20 @@ app.whenReady().then(async () => {
       const msg = text.slice(idx + 17).trim() || 'Action needed in the Agent browser window.';
       new Notification({ title: `${BOT_DISPLAY[bot] || bot}: action needed`, body: msg, silent: false }).show();
     }
+    // When an agent hits the user's daily application limit, notify ONCE per day
+    // (the agents log this many times as they keep checking, so we de-dupe).
+    if (/daily limit reached/i.test(text) && !dailyLimitNotifiedToday() && Notification.isSupported()) {
+      markDailyLimitNotified();
+      const m = text.match(/\((\d+)\s*\/\s*(\d+)\)/);
+      const detail = m ? ` (${m[1]}/${m[2]})` : '';
+      const note = new Notification({
+        title: 'Daily application limit reached',
+        body: `Job-AI applied to your daily maximum${detail} for today and will resume tomorrow. To apply more per day, raise "Max applications per day" in Search Preferences.`,
+        silent: false,
+      });
+      note.on('click', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
+      note.show();
+    }
     try {
       const file = agentLogFile();
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -162,6 +176,17 @@ app.on('before-quit', () => {
 // ── Daily summary email ───────────────────────────────────────────────────
 function getSummaryStateFile() {
   return path.join(app.getPath('userData'), 'daily_summary_state.json');
+}
+
+// Track whether we've already shown the "daily application limit reached" notice
+// today, so it fires once per day rather than on every limit check.
+function dailyLimitStateFile() { return path.join(app.getPath('userData'), 'daily_limit_notice.json'); }
+function dailyLimitNotifiedToday() {
+  try { return JSON.parse(fs.readFileSync(dailyLimitStateFile(), 'utf8')).date === new Date().toISOString().slice(0, 10); }
+  catch { return false; }
+}
+function markDailyLimitNotified() {
+  try { fs.writeFileSync(dailyLimitStateFile(), JSON.stringify({ date: new Date().toISOString().slice(0, 10) }), 'utf8'); } catch (_) {}
 }
 
 function getLastSentDate() {

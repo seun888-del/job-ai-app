@@ -543,6 +543,10 @@ function sensitiveYesNo(question, job) {
   if (/right to work|work permit|authoris|authoriz|eligible.*work|legal.*work|work.*authoris|entitled to work|permit to work/i.test(q)) {
     return hasRightToWork(job?.description) ? 'yes' : 'no';
   }
+  if (/background check|criminal record|dbs check|security check|willing to undergo|reference check|pre.?employment (check|screening)/i.test(q)) return 'yes';
+  if (/start (immediately|right away|asap)|immediate start|available immediately|can you start|start date .*immediate/i.test(q)) {
+    return (cfg.APPLICANT.availability || 'immediately') === 'immediately' ? 'yes' : 'no';
+  }
   if (/reloc/i.test(q)) return cfg.APPLICANT.willingToRelocate ? 'yes' : 'no';
   if (/driving.*licen|licen.*driving|valid.*licen|full (uk )?licen/i.test(q)) return cfg.APPLICANT.drivingLicence ? 'yes' : 'no';
   return null;
@@ -733,32 +737,27 @@ async function _answerCheckboxes(page) {
 }
 
 async function _answerRadios(page, job) {
-  // Find radio groups. LinkedIn's Easy Apply form-builder uses several shapes:
-  // <fieldset>, <div role="group">, <div role="radiogroup">, and the newer
-  // [data-test-form-builder-radio-button-form-component] / fb-dash-form-element.
-  let groups = await page.$$('fieldset, [role="group"], [role="radiogroup"], [data-test-form-builder-radio-button-form-component], [class*="fb-dash-form-element"]').catch(() => []);
-  // Fallback: if no known group wrapper matched, treat each radio's nearest
-  // container as a group so questions are never silently skipped.
-  if (!groups.length) groups = await page.$$('div:has(input[type="radio"])').catch(() => []);
+  // Find radio groups. LinkedIn Easy Apply form-builder wraps each question in a
+  // <fieldset> / [data-test-form-builder-radio-button-form-component] / radiogroup.
+  const groups = await page.$$('fieldset, [role="radiogroup"], [data-test-form-builder-radio-button-form-component]').catch(() => []);
   for (const group of groups) {
     try {
+      // Extract the question with textContent (NOT innerText): LinkedIn renders the
+      // question label in a visually-hidden legend, so innerText returns empty.
       let question = await group.evaluate(el => {
-        // Prefer legend or an explicit question label over option labels
-        const leg = el.querySelector('legend');
-        if (leg) return leg.innerText.toLowerCase();
-        // LinkedIn form builder uses .fb-radio-group__label or similar
-        const fbLabel = el.querySelector('[class*="label"]:not(label[for])');
-        if (fbLabel && fbLabel.innerText.trim().length > 3) return fbLabel.innerText.toLowerCase();
-        // Walk up to find parent question label
-        const parentWrap = el.closest('[class*="form-element"], [class*="form-field"], [class*="FormElement"]');
-        if (parentWrap) {
-          const lab = parentWrap.querySelector('label, legend, [class*="label"]');
-          if (lab) return lab.innerText.toLowerCase();
+        const clean = s => (s || '').replace(/\brequired\b/gi, '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const sel = 'span[data-test-form-builder-radio-button-form-component__title], .fb-dash-form-element__label, legend span, legend, label:not([for])';
+        for (const node of el.querySelectorAll(sel)) {
+          const t = clean(node.textContent);
+          if (t.length > 3) return t;
         }
         return '';
       }).catch(() => '');
       const radios = await group.$$('input[type="radio"]').catch(() => []);
       if (!radios.length) continue;
+      // Skip LinkedIn's résumé picker (also radio buttons) — it's not a question.
+      const groupText = (await group.evaluate(el => (el.textContent || '').toLowerCase()).catch(() => '')) || '';
+      if (/\.pdf|\.docx|\bresume\b|\bcv\b/.test(groupText) && !/\byes\b|\bno\b/.test(question)) continue;
       const options = [];
       for (const radio of radios) {
         const labelText = await radio.evaluate(el => {
@@ -776,8 +775,7 @@ async function _answerRadios(page, job) {
       // survives LinkedIn DOM changes so sponsorship/right-to-work etc. are never
       // left blank just because the label element moved.
       if (!question || question.replace(/[^a-z]/g, '').length < 4) {
-        const groupText = await group.evaluate(el => (el.innerText || '')).catch(() => '');
-        let q = groupText.toLowerCase();
+        let q = (groupText || '').toLowerCase();
         for (const o of options) { if (o.label) q = q.split(o.label).join(' '); }
         q = q.replace(/this field is required|required|select an option|please select|\byes\b|\bno\b/gi, ' ')
              .replace(/\s+/g, ' ').trim();
@@ -845,9 +843,15 @@ async function _answerRadios(page, job) {
           ? options.find(o => /^yes/.test(o.label))
           : options.find(o => /^no/.test(o.label));
       } else {
-        // Unknown question — log it and skip rather than guessing wrong
-        // tryNext() will catch the validation error and retry
-        console.log(`  [LinkedIn] Unknown radio question: "${question || '(no label extracted)'}" — skipping`);
+        // Unknown question — log it (with a DOM snippet when the label couldn't be
+        // extracted, so we can pinpoint LinkedIn DOM changes from the agent log)
+        // and skip rather than guessing wrong; tryNext() surfaces the validation error.
+        if (!question) {
+          const snip = await group.evaluate(el => (el.outerHTML || '').replace(/\s+/g, ' ').slice(0, 320)).catch(() => '');
+          console.log(`  [LinkedIn] Radio label not extracted — DOM: ${snip}`);
+        } else {
+          console.log(`  [LinkedIn] Unknown radio question: "${question}" — skipping`);
+        }
         continue;
       }
       if (target) {
