@@ -53,8 +53,8 @@ jobs:
     runs-on: macos-latest
     # Cap the Mac job so signing/notarization can never hang indefinitely. If it
     # exceeds this it fails, and the decoupled release still ships Windows.
-    # Budget: ~6 min signed build + up to 15 min notarization per DMG (x64 + arm64).
-    timeout-minutes: 45
+    # Budget: ~6 min signed build + concurrent notarization (up to 25 min/DMG wait).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -121,29 +121,36 @@ jobs:
             exit 0
           fi
           set +e
+          CREDS="--apple-id $APPLE_ID --password $APPLE_APP_SPECIFIC_PASSWORD --team-id $APPLE_TEAM_ID"
           ok=1
+          # 1) Submit ALL DMGs first (no --wait) so Apple processes them in parallel
+          #    rather than serially (previously the 2nd didn't start until the 1st
+          #    timed out). Collect "dmg:submission-id" pairs.
+          pairs=""
           for dmg in dist/*.dmg; do
-            echo "── Notarizing $dmg ($(du -h "$dmg" | cut -f1)) — start $(date -u +%T)"
-            out=$(xcrun notarytool submit "$dmg" \
-              --apple-id "$APPLE_ID" \
-              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-              --team-id "$APPLE_TEAM_ID" \
-              --wait --timeout 15m 2>&1)
+            echo "── Submitting $dmg ($(du -h "$dmg" | cut -f1)) — $(date -u +%T)"
+            out=$(xcrun notarytool submit "$dmg" $CREDS --output-format json 2>&1)
             echo "$out"
-            sid=$(echo "$out" | awk '/^ *id:/{print $2; exit}')
-            if echo "$out" | grep -q "status: Accepted"; then
+            sid=$(echo "$out" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write((JSON.parse(s).id)||'')}catch{}})")
+            if [ -z "$sid" ]; then echo "✗ submit failed for $dmg"; ok=0; continue; fi
+            pairs="$pairs $dmg:$sid"
+          done
+          # 2) Wait for each (they process concurrently on Apple's side, so total
+          #    ≈ the slowest one, not the sum). Then staple the accepted ones.
+          for pair in $pairs; do
+            dmg=${pair%%:*}; sid=${pair##*:}
+            echo "── Waiting on $dmg ($sid) — $(date -u +%T)"
+            w=$(xcrun notarytool wait "$sid" $CREDS --timeout 25m 2>&1)
+            echo "$w"
+            if echo "$w" | grep -q "status: Accepted"; then
               if xcrun stapler staple "$dmg"; then
-                echo "✓ Notarized + stapled: $dmg — done $(date -u +%T)"
+                echo "✓ Notarized + stapled: $dmg — $(date -u +%T)"
               else
-                echo "✗ Stapling failed for $dmg (still notarized; Gatekeeper needs network)"
-                ok=0
+                echo "✗ Stapling failed for $dmg (notarized, but Gatekeeper will need network)"; ok=0
               fi
             else
               echo "✗ Notarization NOT accepted for $dmg — Apple's log:"
-              [ -n "$sid" ] && xcrun notarytool log "$sid" \
-                --apple-id "$APPLE_ID" \
-                --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-                --team-id "$APPLE_TEAM_ID" || echo "(no submission id captured)"
+              xcrun notarytool log "$sid" $CREDS || echo "(still processing — no log yet)"
               ok=0
             fi
           done
