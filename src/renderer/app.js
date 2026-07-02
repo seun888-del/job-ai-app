@@ -553,7 +553,7 @@ async function renderSearch() {
         <label for="schedule_enabled">Enable schedule</label>
       </div>
       <div id="schedule-settings" style="${prefs.schedule_enabled ? '' : 'opacity:0.4;pointer-events:none'}">
-        <div class="field-row" style="align-items:flex-end;gap:16px;margin-bottom:14px">
+        <div class="field-row" style="align-items:flex-start;gap:16px;margin-bottom:14px">
           <div class="field">
             <label>Start time</label>
             <select id="schedule_start">
@@ -964,6 +964,8 @@ function buildApplicationsGraph(dailyApps) {
     return '<div class="graph-empty">No applications recorded yet</div>';
   }
   const W = 560, H = 80, PAD = 4;
+  const LABEL_TOP = 12;   // headroom so the value label above the tallest bar isn't clipped
+  const AXIS_BOTTOM = 16; // space for the date labels beneath the bars
   const maxCount = Math.max(...dailyApps.map(d => d.count), 1);
   const barW = Math.floor((W - PAD * 2) / 14);
   // Build a 14-day window with zeroes for missing days
@@ -975,9 +977,9 @@ function buildApplicationsGraph(dailyApps) {
     days.push({ key, count: found ? found.count : 0, label: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) });
   }
   const bars = days.map((d, i) => {
-    const barH = Math.max(2, Math.round((d.count / maxCount) * (H - 20)));
+    const barH = Math.max(2, Math.round((d.count / maxCount) * (H - LABEL_TOP - AXIS_BOTTOM)));
     const x = PAD + i * barW;
-    const y = H - barH - 16;
+    const y = H - AXIS_BOTTOM - barH;
     const isToday = i === 13;
     return `<rect x="${x}" y="${y}" width="${barW - 2}" height="${barH}" class="graph-bar${isToday ? ' graph-bar-today' : ''}" rx="2">
       <title>${d.label}: ${d.count} application${d.count !== 1 ? 's' : ''}</title></rect>
@@ -1510,6 +1512,8 @@ async function renderTracker() {
 function buildAnalyticsGraph(daily30) {
   if (!daily30 || daily30.length === 0) return '<div class="graph-empty">No applications in the past 30 days</div>';
   const W = 560, H = 80, PAD = 4;
+  const LABEL_TOP = 12;   // headroom so the value label above the tallest bar isn't clipped
+  const AXIS_BOTTOM = 16; // space for the date labels beneath the bars
   const maxCount = Math.max(...daily30.map(d => d.count), 1);
   const barW = Math.floor((W - PAD * 2) / 30);
   const days = [];
@@ -1520,9 +1524,9 @@ function buildAnalyticsGraph(daily30) {
     days.push({ key, count: found ? found.count : 0, label: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) });
   }
   const bars = days.map((d, i) => {
-    const barH = Math.max(2, Math.round((d.count / maxCount) * (H - 20)));
+    const barH = Math.max(2, Math.round((d.count / maxCount) * (H - LABEL_TOP - AXIS_BOTTOM)));
     const x = PAD + i * barW;
-    const y = H - barH - 16;
+    const y = H - AXIS_BOTTOM - barH;
     const isToday = i === 29;
     return `<rect x="${x}" y="${y}" width="${barW - 1}" height="${barH}" class="graph-bar${isToday ? ' graph-bar-today' : ''}" rx="1">
       <title>${d.label}: ${d.count}</title></rect>
@@ -1778,7 +1782,7 @@ const TOUR_STEPS = [
     view: 'dashboard',
     title: 'Step 5 - Connect Your Job Site Accounts',
     tip: 'On the Dashboard, each job site (Reed, LinkedIn) has a “Connect account” button. Click it and a browser window opens - just log in as normal. Your session is saved so the Agent can apply on your behalf without ever seeing your password.',
-    action: 'Click “Connect account” on a job site card, log in, then close the browser window. You only need one connected to begin.',
+    action: 'Click “Connect account” on a job site card, log in, then close the browser window. You only need one connected to begin. Note: if you later change your password (or log out) on that job site, click “Connect account” again to reconnect — otherwise the Agent can no longer log in and will stop working for that site.',
   },
   {
     view: 'dashboard',
@@ -1914,15 +1918,15 @@ function renderHelp() {
     },
     {
       q: 'Which job sites does Job-AI use?',
-      a: 'Job-AI searches and applies across 6 job sites: Reed.co.uk, LinkedIn, Glassdoor, CV-Library, Totaljobs, and CWJobs. Each site has its own Agent card on the Dashboard.'
+      a: 'Job-AI applies through Reed.co.uk and LinkedIn — each has its own Agent card on the Dashboard. Connect the account(s) you want and Job-AI searches and applies on your behalf.'
     },
     {
       q: 'How do I connect my job site accounts?',
-      a: 'On the Dashboard, each Agent card has a “Connect account” button. Click it and a regular browser window opens on that site\'s login page - log in as you normally would. Your session is saved locally so the Agent can apply on your behalf. You only need to do this once per site (or when your session expires).'
+      a: 'On the Dashboard, each Agent card has a “Connect account” button. Click it and a regular browser window opens on that site\'s login page - log in as you normally would. Your session is saved locally so the Agent can apply on your behalf. You only need to do this once per site - but reconnect again whenever your session expires or you change your password (or log out) on that job site, otherwise the Agent can no longer log in.'
     },
     {
       q: 'What are the Agents and what do they do?',
-      a: 'Each job site (Reed, LinkedIn, Glassdoor, CV-Library, Totaljobs, CWJobs) has its own Agent that searches and submits applications. The Scorer Agent runs in the middle - it uses AI to tailor your CV for every role before it is submitted. Start the Scorer Agent first, then the job site Agents.'
+      a: 'The Reed and LinkedIn Agents search each site and submit applications for you. Behind the scenes, AI automatically scores every job and tailors your CV to it before applying — you don\'t start that separately. Just click “Start applying” on the Dashboard and both the Agents and the AI tailoring run together (you\'ll see an “AI tailoring” indicator while it works).'
     },
     {
       q: 'Why are some jobs showing as skipped?',
@@ -1930,7 +1934,7 @@ function renderHelp() {
     },
     {
       q: 'The Agent says “not logged in” - what do I do?',
-      a: 'Your session for that site has expired. Click the “Connect account” button on that Agent\'s card on the Dashboard, log in again in the browser that opens, then close it and click Start.'
+      a: 'Your session for that site has expired. Click the “Connect account” button on that Agent\'s card on the Dashboard, log in again in the browser that opens, then click “Start applying”.'
     },
     {
       q: 'How do I add more CVs?',
@@ -1958,7 +1962,11 @@ function renderHelp() {
     },
     {
       q: 'How do I cancel or manage my subscription?',
-      a: 'Reply to your trial or license email and we will sort it out for you straight away.'
+      a: 'If you have a paid subscription, open the License page and click “Manage or cancel subscription” — this opens Stripe\'s secure portal where you can cancel or update your payment details. If you cancel, your access continues until the end of the current billing period. On a free trial there is nothing to cancel. Any issues, email us and we\'ll help.'
+    },
+    {
+      q: 'The Agents open Chrome windows — what are they, and can I keep using my computer?',
+      a: 'When you click “Start applying”, each connected Agent opens its own Chrome window and works inside it automatically. These windows run minimised so they stay out of your way — keep using your computer as normal. Please don\'t close them (closing one stops that Agent). If a site shows a human-verification check, the window pops up on its own and you\'ll get a notification so you can complete it.'
     },
   ];
 

@@ -44,9 +44,15 @@ function buildProxyOpts() {
 }
 
 async function launchPersistentContext(profileDir, extraOpts = {}) {
+  // Run the window MINIMISED so the agent doesn't pop up over the user's work,
+  // while staying a real (headed) stealth browser — headless would spike bot
+  // detection and break the interactive CAPTCHA flow. Set JOBBOT_SHOW_BROWSER=1
+  // to keep it visible (useful for debugging). When a verification challenge is
+  // hit, waitForCloudflareSolve auto-restores the window so the user can solve it.
+  const minimizeArgs = process.env.JOBBOT_SHOW_BROWSER ? [] : ['--start-minimized'];
   const sharedOpts = {
     headless: false,
-    args: BASE_ARGS,
+    args: [...BASE_ARGS, ...minimizeArgs],
     viewport: { width: 1366, height: 768 },
     ...buildProxyOpts(),
     ...extraOpts,
@@ -87,7 +93,35 @@ async function launchPersistentContext(profileDir, extraOpts = {}) {
     } catch (_) {}
   }
 
+  // Minimise the window so the agent doesn't intrude on the user's screen. Done
+  // via CDP because Chrome ignores --start-minimized when automated. Skipped when
+  // JOBBOT_SHOW_BROWSER is set. Restored automatically if a challenge appears.
+  if (!process.env.JOBBOT_SHOW_BROWSER) {
+    try {
+      const p = ctx.pages()[0] || await ctx.newPage();
+      await setWindowState(p, 'minimized');
+    } catch (_) {}
+  }
+
   return ctx;
+}
+
+// Set the agent window's OS state (minimized / normal) via CDP. Chrome ignores
+// --start-minimized when automated, so we drive the window state explicitly.
+async function setWindowState(page, windowState) {
+  try {
+    const session = await page.context().newCDPSession(page);
+    const { windowId } = await session.send('Browser.getWindowForTarget');
+    await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState } });
+    await session.detach().catch(() => {});
+  } catch (_) {}
+}
+
+// Un-minimise / bring the agent's Chrome window to the front, e.g. when a human
+// verification challenge needs solving. No-op if it fails or is already normal.
+async function restoreWindow(page) {
+  await setWindowState(page, 'normal');
+  try { await page.bringToFront(); } catch (_) {}
 }
 
 // Wait for a Cloudflare challenge to auto-solve before the bot reads the page.
@@ -130,6 +164,10 @@ async function waitForCloudflareSolve(page, { maxWaitMs = 300000 } = {}) {
       if (!challenged) {
         console.log('  [Browser] ⚠️  Human verification challenge detected — please complete it in the browser window.');
         console.log('  [Browser] Waiting up to 5 minutes for you to pass the check...');
+        // The window runs minimised — restore it so the user can see/solve the
+        // challenge, and fire a desktop notification (marker parsed by main.js).
+        await restoreWindow(page);
+        console.log('  [[JOBBOT_NOTIFY]] Human verification needed — complete the check in the Agent\'s Chrome window.');
         challenged = true;
       }
       await new Promise(r => setTimeout(r, 3000));

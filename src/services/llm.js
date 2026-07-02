@@ -1,10 +1,12 @@
 // Unified LLM client for CV tailoring / scoring.
 //
-// Priority (first available wins):
-//   1. Groq  — primary backend, free, fast (hardcoded key — no user setup needed)
-//   2. Ollama — local fallback if Groq unreachable
-//   3. Claude API  — ANTHROPIC_API_KEY fallback
-//   4. Hosted mode — JOBBOT_LICENSE_KEY fallback (JobBot backend proxy)
+// Shipped builds ALWAYS use the licensed backend (inbuilt Groq) — never a local
+// Ollama or a user's own API key. This keeps every user on the same model and
+// output quality, keeps the backend as the single point of usage metering, and
+// means the license gate can't be bypassed by a locally-installed model.
+//
+// The local providers (Ollama / Claude / direct Groq) are DEV-ONLY and reachable
+// only when JOBBOT_ALLOW_LOCAL_LLM=1 is set (never in a packaged app).
 
 const { JOBBOT_BACKEND_URL } = require('../config');
 
@@ -17,8 +19,15 @@ const CLAUDE_TIMEOUT = 60000;
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
-const BACKEND_URL  = process.env.JOBBOT_BACKEND_URL || JOBBOT_BACKEND_URL;
-const LICENSE_KEY  = process.env.JOBBOT_LICENSE_KEY;
+
+// Read dynamically (not captured at load): the main process sets the license key
+// after the DB loads / on activation, and each bot child gets it via spawn env.
+function backendUrl() { return process.env.JOBBOT_BACKEND_URL || JOBBOT_BACKEND_URL; }
+function licenseKey() { return process.env.JOBBOT_LICENSE_KEY; }
+
+// Local providers (Ollama / Claude / direct Groq) are dev-only and disabled
+// unless this is explicitly set. Never set in a packaged/shipped app.
+const ALLOW_LOCAL = !!process.env.JOBBOT_ALLOW_LOCAL_LLM;
 
 const isHosted = false;
 const mode = 'groq';
@@ -165,10 +174,11 @@ async function claudeChat(prompt, timeoutMs = CLAUDE_TIMEOUT) {
 // ── Hosted (JobBot backend proxy — fallback) ──────────────────────────────
 
 async function hostedAvailable() {
+  if (!licenseKey()) return false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3000);
   try {
-    const res = await fetch(`${BACKEND_URL}/health`, { method: 'GET', signal: controller.signal });
+    const res = await fetch(`${backendUrl()}/health`, { method: 'GET', signal: controller.signal });
     return res.ok;
   } catch {
     return false;
@@ -178,11 +188,11 @@ async function hostedAvailable() {
 }
 
 async function hostedChat(prompt, timeoutMs) {
-  const res = await fetch(`${BACKEND_URL}/v1/chat`, {
+  const res = await fetch(`${backendUrl()}/v1/chat`, {
     method:  'POST',
     headers: {
       'Content-Type':  'application/json',
-      'Authorization': `Bearer ${LICENSE_KEY}`,
+      'Authorization': `Bearer ${licenseKey()}`,
     },
     body:   JSON.stringify({ prompt }),
     signal: AbortSignal.timeout(Math.min(timeoutMs, 60000)),
@@ -197,45 +207,49 @@ async function hostedChat(prompt, timeoutMs) {
 // ── Public API ────────────────────────────────────────────────────────────
 
 async function llmAvailable() {
-  // Licensed users: AI is gated by the license — only the backend counts.
-  if (LICENSE_KEY) return await hostedAvailable();
-  // No license (local dev): any direct provider will do.
-  if (await groqAvailable())                       return true;
-  if (await ollamaAvailable())                     return true;
-  if (ANTHROPIC_KEY && await claudeAvailable())    return true;
+  // Production: AI is available ONLY through the licensed backend (inbuilt Groq),
+  // regardless of any local Ollama or user API key on the machine.
+  if (licenseKey()) return await hostedAvailable();
+  // Dev-only opt-in: allow local providers when explicitly enabled.
+  if (ALLOW_LOCAL) {
+    if (await ollamaAvailable())                  return true;
+    if (await groqAvailable())                    return true;
+    if (ANTHROPIC_KEY && await claudeAvailable()) return true;
+  }
   return false;
 }
 
 async function llmChat(prompt, timeoutMs = 300000) {
-  // ── Licensed / production ────────────────────────────────────────────────
-  // When a license key is present, route AI through the backend ONLY. We do
-  // NOT fall back to Groq/Ollama/Claude here — that is deliberate: a revoked,
-  // expired, or over-limit license must lose AI access, not silently bypass the
-  // gate with the bundled key. The backend validates the license, meters usage,
-  // and returns the model output (or 401/403/429 which surfaces as an error).
-  if (LICENSE_KEY) {
-    console.log('[LLM] Using licensed backend');
+  // ── Always route through the licensed backend when a license is present ────
+  // Never fall back to Ollama / a user's own key: every user must get the same
+  // inbuilt-Groq output, and a revoked/expired/over-limit license must lose AI
+  // access (the backend surfaces 401/403/429 as an error) rather than silently
+  // bypassing the gate with a local model.
+  if (licenseKey()) {
+    console.log('[LLM] Using licensed backend (Groq)');
     return hostedChat(prompt, timeoutMs);
   }
 
-  // ── No license key (local development only) ──────────────────────────────
-  if (await ollamaAvailable()) {
-    console.log(`[LLM] Using Ollama (${OLLAMA_MODEL})`);
-    return ollamaChat(prompt, timeoutMs);
-  }
-  try {
-    if (await groqAvailable()) {
-      console.log(`[LLM] Using Groq (${GROQ_MODEL})`);
-      return await groqChat(prompt, timeoutMs);
+  // ── Local providers — DEV ONLY (JOBBOT_ALLOW_LOCAL_LLM=1), never in builds ──
+  if (ALLOW_LOCAL) {
+    if (await ollamaAvailable()) {
+      console.log(`[LLM] (dev) Ollama (${OLLAMA_MODEL})`);
+      return ollamaChat(prompt, timeoutMs);
     }
-  } catch (err) {
-    console.warn(`[LLM] Groq failed: ${err.message} — trying fallback`);
+    try {
+      if (await groqAvailable()) {
+        console.log(`[LLM] (dev) Groq (${GROQ_MODEL})`);
+        return await groqChat(prompt, timeoutMs);
+      }
+    } catch (err) {
+      console.warn(`[LLM] (dev) Groq failed: ${err.message}`);
+    }
+    if (ANTHROPIC_KEY) {
+      console.log('[LLM] (dev) Claude API');
+      return claudeChat(prompt, timeoutMs);
+    }
   }
-  if (ANTHROPIC_KEY) {
-    console.log('[LLM] Falling back to Claude API');
-    return claudeChat(prompt, timeoutMs);
-  }
-  throw new Error('No AI backend available (no license key set).');
+  throw new Error('AI requires an active licence — no JOBBOT_LICENSE_KEY set.');
 }
 
 module.exports = { llmAvailable, llmChat, isHosted, mode };

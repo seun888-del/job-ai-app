@@ -90,13 +90,21 @@ if (!gotInstanceLock) {
 
 app.whenReady().then(async () => {
   await db.init(app.getPath('userData'));
+  syncLicenseEnv(); // route main-process AI (CV analysis) through the licensed backend
   queueReader.init(app.getPath('userData'));
   createWindow();
 
+  const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent' };
   botManager.setLogHandler((bot, stream, text) => {
+    // Agents run minimised, so surface "human verification needed" as a desktop
+    // notification (the bot emits a [[JOBBOT_NOTIFY]] marker in its log stream).
+    const idx = text.indexOf('[[JOBBOT_NOTIFY]]');
+    if (idx !== -1 && Notification.isSupported()) {
+      const msg = text.slice(idx + 17).trim() || 'Action needed in the Agent browser window.';
+      new Notification({ title: `${BOT_DISPLAY[bot] || bot}: action needed`, body: msg, silent: false }).show();
+    }
     mainWindow?.webContents.send('bot:log', { bot, stream, text });
   });
-  const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent' };
   botManager.setStatusHandler((bot, status) => {
     mainWindow?.webContents.send('bot:status', { bot, status });
     if ((status === 'stopped' || status === 'error') && Notification.isSupported()) {
@@ -414,8 +422,26 @@ ipcMain.handle('bot:stop', (event, botName) => botManager.stop(botName));
 ipcMain.handle('bot:status', () => botManager.getStatus());
 
 // ── License ─────────────────────────────────────────────────────────────
+// Keep process.env in sync with the stored license so main-process AI (e.g. CV
+// analysis) routes through the licensed backend — identical to the bots, which
+// get the key via spawn env. Without this, the main process would have no key
+// and (in dev) could fall back to a local model. Called at startup and whenever
+// the license changes. llm.js reads the key dynamically, so this takes effect
+// immediately.
+function syncLicenseEnv() {
+  try {
+    const lic = db.getLicense();
+    if (lic && lic.license_key) {
+      process.env.JOBBOT_LICENSE_KEY = lic.license_key;
+      process.env.JOBBOT_BACKEND_URL = JOBBOT_BACKEND_URL;
+    } else {
+      delete process.env.JOBBOT_LICENSE_KEY;
+    }
+  } catch (_) {}
+}
+
 ipcMain.handle('license:get', () => db.getLicense());
-ipcMain.handle('license:save', (event, fields) => db.saveLicense(fields));
+ipcMain.handle('license:save', (event, fields) => { const r = db.saveLicense(fields); syncLicenseEnv(); return r; });
 
 // Opens the Stripe billing portal (manage payment / cancel) in the browser.
 ipcMain.handle('license:manageSubscription', async () => {
@@ -490,6 +516,7 @@ ipcMain.handle('license:verify', async (event, key) => {
     status,
     expires_at: data.expires_at,
   });
+  syncLicenseEnv(); // main-process AI now uses this license via the backend
 
   return {
     ok: true,

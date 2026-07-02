@@ -24,7 +24,7 @@
 
 const { llmAvailable, llmChat } = require('../../src/services/llm');
 
-const MAX_BULLETS_PER_ROLE = 5;
+const MAX_BULLETS_PER_ROLE = 4;
 const REFUSAL_RE = /\b(cannot|can't|i'm sorry|i am sorry|unable to|not able to|as an ai)\b/i;
 
 // Empty CV clichés that read as filler to a recruiter — banned from every rewrite.
@@ -206,7 +206,7 @@ async function selectAndRewordBullets(role, jdExcerpt) {
   const indexed   = ordered.map((b, i) => `[${i + 1}] ${b}`).join('\n');
   const originals = bullets.join('  ');   // corpus for the anti-fabrication check
 
-  const prompt = `You are rewriting CV bullet points so they read naturally and persuasively to a HUMAN recruiter for a specific job — not just to pass keyword filters. Make them genuinely strong, but stay 100% truthful to what the candidate actually did.
+  const prompt = `You are rewriting CV bullet points so they read naturally and persuasively to a HUMAN recruiter for a specific job — not just to pass keyword filters. Make them genuinely strong, but stay 100% truthful to what the candidate actually did. Recruiters skim in seconds, so every bullet must be short, punchy and easy to scan — never a dense wall of text.
 
 JOB DESCRIPTION (excerpt):
 ${jdExcerpt}
@@ -216,7 +216,7 @@ ORIGINAL BULLETS:
 ${indexed}
 
 Task:
-1. The ORIGINAL BULLETS are already pre-ordered with the most job-relevant first. Choose up to ${MAX_BULLETS_PER_ROLE}, keeping that priority — favour the earlier (more relevant) bullets unless a later one is clearly a stronger match for this job.
+1. The ORIGINAL BULLETS are already pre-ordered with the most job-relevant first. Choose at most ${MAX_BULLETS_PER_ROLE} (fewer is fine — a few strong bullets beat many weak ones; never pad), keeping that priority — favour the earlier (more relevant) bullets unless a later one is clearly a stronger match for this job.
 2. Rewrite each chosen bullet using this shape wherever the source supports it:
    ACTION (what they did) → HOW (the tool, system or method they used) → PURPOSE (why) → RESULT (the outcome).
    - Open with a strong, varied action verb (never reuse the same opener twice).
@@ -229,7 +229,7 @@ ${CLICHE_BAN}
 Strict truthfulness rules (absolute — these override everything above):
 - Do NOT invent or imply any tool, technology, certification, metric, number, employer, or achievement that is not already in that original bullet. Rephrasing only — no new facts.
 - Do NOT add quantified results (percentages, figures, counts) that weren't already stated.
-- Keep each bullet to ONE sentence that comfortably fits about one line (aim for 22 words or fewer).
+- Keep each bullet SHORT and scannable: ONE line, about 16 words or fewer. Cut filler words so a recruiter grasps it at a glance — never a long, multi-clause sentence.
 Return ONLY the rewritten bullets, one per line, each starting with "- ". No numbering, no commentary.`;
 
   try {
