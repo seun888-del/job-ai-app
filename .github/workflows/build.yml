@@ -53,7 +53,8 @@ jobs:
     runs-on: macos-latest
     # Cap the Mac job so signing/notarization can never hang indefinitely. If it
     # exceeds this it fails, and the decoupled release still ships Windows.
-    timeout-minutes: 30
+    # Budget: ~6 min signed build + up to 15 min notarization per DMG (x64 + arm64).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -83,11 +84,9 @@ jobs:
         run: sips -z 512 512 assets/icon.png --out assets/icon.png
 
       - name: Build Mac DMG
-        env:
-          DEBUG: electron-builder
         run: |
           if [ -n "${{ secrets.MAC_CSC_LINK }}" ]; then
-            echo "Developer ID cert found — signing (notarization temporarily OFF to isolate the signing hang)"
+            echo "Developer ID cert found — signing (notarization runs as the next explicit step)"
             export CSC_LINK="${{ secrets.MAC_CSC_LINK }}"
             export CSC_KEY_PASSWORD="${{ secrets.MAC_CSC_KEY_PASSWORD }}"
             export APPLE_ID="${{ secrets.APPLE_ID }}"
@@ -104,6 +103,69 @@ jobs:
             echo "No Developer ID cert — building ad-hoc (unsigned), same as before"
             CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac
           fi
+
+      # Explicit notarization: electron-builder's built-in (-c.mac.notarize=true)
+      # uploads silently with no timeout and hung every build for 30+ min.
+      # notarytool prints progress, enforces a hard timeout, and on rejection we
+      # fetch Apple's log so the reason lands in CI output. Best-effort: if the
+      # notary service is down we still ship SIGNED DMGs (continue-on-error).
+      - name: Notarize + staple Mac DMGs
+        continue-on-error: true
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_ID" ]; then
+            echo "No Apple credentials — skipping notarization"
+            exit 0
+          fi
+          set +e
+          ok=1
+          for dmg in dist/*.dmg; do
+            echo "── Notarizing $dmg ($(du -h "$dmg" | cut -f1)) — start $(date -u +%T)"
+            out=$(xcrun notarytool submit "$dmg" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait --timeout 15m 2>&1)
+            echo "$out"
+            sid=$(echo "$out" | awk '/^ *id:/{print $2; exit}')
+            if echo "$out" | grep -q "status: Accepted"; then
+              if xcrun stapler staple "$dmg"; then
+                echo "✓ Notarized + stapled: $dmg — done $(date -u +%T)"
+              else
+                echo "✗ Stapling failed for $dmg (still notarized; Gatekeeper needs network)"
+                ok=0
+              fi
+            else
+              echo "✗ Notarization NOT accepted for $dmg — Apple's log:"
+              [ -n "$sid" ] && xcrun notarytool log "$sid" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" || echo "(no submission id captured)"
+              ok=0
+            fi
+          done
+          # Stapling changes DMG bytes; electron-updater verifies latest-mac.yml's
+          # sha512, so recompute the hashes/sizes for whatever is on disk now.
+          # written into the workspace so require('js-yaml') resolves from node_modules
+          cat > _fix-latest-mac.js <<'EOF'
+          const fs = require('fs'), crypto = require('crypto'), yaml = require('js-yaml');
+          const p = 'dist/latest-mac.yml';
+          if (!fs.existsSync(p)) { console.log('no latest-mac.yml — skipping'); process.exit(0); }
+          const doc = yaml.load(fs.readFileSync(p, 'utf8'));
+          const h = f => crypto.createHash('sha512').update(fs.readFileSync('dist/' + f)).digest('base64');
+          for (const f of doc.files || []) {
+            if (fs.existsSync('dist/' + f.url)) { f.sha512 = h(f.url); f.size = fs.statSync('dist/' + f.url).size; }
+          }
+          if (doc.path && fs.existsSync('dist/' + doc.path)) doc.sha512 = h(doc.path);
+          fs.writeFileSync(p, yaml.dump(doc, { lineWidth: 0 }));
+          console.log('latest-mac.yml hashes updated');
+          EOF
+          node _fix-latest-mac.js
+          rm -f _fix-latest-mac.js
+          [ $ok -eq 1 ] || { echo "Notarization incomplete — shipping signed-only DMGs"; exit 1; }
 
       - name: Upload Mac artifact
         uses: actions/upload-artifact@v4
