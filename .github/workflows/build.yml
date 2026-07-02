@@ -83,19 +83,23 @@ jobs:
         run: sips -z 512 512 assets/icon.png --out assets/icon.png
 
       - name: Build Mac DMG
+        env:
+          DEBUG: electron-builder
         run: |
           if [ -n "${{ secrets.MAC_CSC_LINK }}" ]; then
-            echo "Developer ID cert found — signing + notarizing"
+            echo "Developer ID cert found — signing (notarization temporarily OFF to isolate the signing hang)"
             export CSC_LINK="${{ secrets.MAC_CSC_LINK }}"
             export CSC_KEY_PASSWORD="${{ secrets.MAC_CSC_KEY_PASSWORD }}"
             export APPLE_ID="${{ secrets.APPLE_ID }}"
             export APPLE_APP_SPECIFIC_PASSWORD="${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}"
             export APPLE_TEAM_ID="${{ secrets.APPLE_TEAM_ID }}"
+            echo "signing start: $(date -u +%T)"
             npm run dist:mac -- \
               -c.mac.hardenedRuntime=true \
               -c.mac.entitlements=build/entitlements.mac.plist \
               -c.mac.entitlementsInherit=build/entitlements.mac.plist \
-              -c.mac.notarize=true
+              -c.mac.notarize=false
+            echo "signing done: $(date -u +%T)"
           else
             echo "No Developer ID cert — building ad-hoc (unsigned), same as before"
             CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac
