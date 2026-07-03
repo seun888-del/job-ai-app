@@ -643,7 +643,10 @@ function copyDirSync(src, dst) {
 }
 
 ipcMain.handle('session:importChrome', async (event, botName) => {
-  const chromeData = path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
+  // Chrome's profile lives in a different place on macOS vs Windows.
+  const chromeData = process.platform === 'darwin'
+    ? path.join(process.env.HOME || '', 'Library', 'Application Support', 'Google', 'Chrome')
+    : path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
   if (!fs.existsSync(chromeData)) {
     return { ok: false, error: 'Google Chrome not found on this machine.' };
   }
@@ -705,15 +708,26 @@ ipcMain.handle('site:connect', async (event, { site, loginUrl }) => {
     try { fs.unlinkSync(path.join(profileDir, f)); } catch (_) {}
   }
 
-  // Find real Chrome or Edge — must match what the bot will use
-  const candidates = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Microsoft\\Edge\\Application\\msedge.exe'),
-  ];
+  // Find real Chrome or Edge — must match what the bot will use. Paths differ
+  // by OS: on macOS the browsers live in .app bundles under /Applications, not
+  // in Windows Program Files (the old Windows-only list made Mac wrongly report
+  // "Chrome or Edge not found" even when both were installed).
+  const HOME = process.env.HOME || '';
+  const candidates = process.platform === 'darwin'
+    ? [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        path.join(HOME, 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        path.join(HOME, 'Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
+      ]
+    : [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        path.join(process.env.LOCALAPPDATA || '', 'Microsoft\\Edge\\Application\\msedge.exe'),
+      ];
   const browserPath = candidates.find(p => { try { return fs.existsSync(p); } catch (_) { return false; } });
   if (!browserPath) return { success: false, error: 'Chrome or Edge not found on this computer.' };
 

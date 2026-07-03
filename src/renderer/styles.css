@@ -307,6 +307,21 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .status-msg.success { color: var(--success); }
 .status-msg.error { color: var(--danger); }
 
+/* Prominent Save confirmation toast — top-centre, auto-dismiss */
+.app-toast {
+  position: fixed; top: 20px; left: 50%;
+  transform: translate(-50%, -18px);
+  display: flex; align-items: center;
+  background: var(--success); color: #fff;
+  font-size: 14px; font-weight: 700; white-space: nowrap;
+  padding: 12px 22px; border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28);
+  z-index: 4000; opacity: 0; pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.app-toast.error { background: var(--danger); }
+.app-toast.show { opacity: 1; transform: translate(-50%, 0); }
+
 /* ── Badges ───────────────────────────────────────────────────────────── */
 .badge {
   display: inline-block;

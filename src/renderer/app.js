@@ -28,6 +28,17 @@ function showStatus(el, msg, type = 'success') {
   }, 4000);
 }
 
+// Prominent, unmissable confirmation for Save actions (the inline status text
+// was too easy to miss). Slides in top-centre and auto-dismisses.
+function showToast(msg, type = 'success') {
+  let t = document.getElementById('app-toast');
+  if (!t) { t = document.createElement('div'); t.id = 'app-toast'; document.body.appendChild(t); }
+  t.textContent = (type === 'success' ? '✓  ' : '⚠  ') + msg;
+  t.className = 'app-toast ' + type + ' show';
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => { t.className = 'app-toast ' + type; }, 2800);
+}
+
 async function render(view) {
   let fn;
   switch (view) {
@@ -252,6 +263,7 @@ async function renderPersonal() {
       eeo_veteran: document.getElementById('eeo_veteran').value,
     });
     showStatus(document.getElementById('status'), 'Saved');
+    showToast('Personal details saved');
   });
 }
 
@@ -638,6 +650,7 @@ async function renderSearch() {
       seek_sponsorship: document.getElementById('seek_sponsorship').checked ? 1 : 0,
     });
     showStatus(document.getElementById('status'), 'Saved');
+    showToast('Search preferences saved');
   });
 
   document.getElementById('add-term').addEventListener('click', async () => {
@@ -712,6 +725,7 @@ async function renderSearch() {
       schedule_end: Number(document.getElementById('schedule_end').value),
     });
     showStatus(document.getElementById('status-schedule'), 'Schedule saved');
+    showToast('Schedule saved');
   });}
 
 // â”€â”€ 5. License â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
