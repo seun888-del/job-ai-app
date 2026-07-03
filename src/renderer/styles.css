@@ -222,7 +222,7 @@ main::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 }
 .card-hint { font-size: 13px; color: var(--text-muted); margin: -6px 0 14px; }
 
-.empty-state { text-align: center; color: var(--text-muted); padding: 28px; font-size: 14px; }
+.empty-state { text-align: center; color: var(--text-muted); padding: 18px; font-size: 14px; }
 
 .empty-upload {
   display: flex;
@@ -275,6 +275,7 @@ button.primary {
   color: #fff;
   border: none;
   padding: 10px 22px;
+  margin-top: 18px;   /* breathing room above form action buttons (Save, Activate, etc.) */
   border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 600;

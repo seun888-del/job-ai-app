@@ -579,7 +579,7 @@ async function renderSearch() {
           </div>
         </div>
       </div>
-      <button class="primary" id="save-schedule" style="margin-top:16px">Save Schedule</button>
+      <button class="primary" id="save-schedule">Save Schedule</button>
       <div class="status-msg" id="status-schedule"></div>
     </div>
 
@@ -758,7 +758,7 @@ function renderLicenseStatus(license, usage) {
   }
 
   return `
-    <div class="stat-row"><span class="stat-label">Email</span><span class="stat-value">${license.email || '—'}</span></div>
+    <div class="stat-row"><span class="stat-label">Email</span><span class="stat-value">${license.email || 'N/A'}</span></div>
     <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value"><span class="badge ${licenseBadgeClass(license.status)}">${license.status}</span></span></div>
     <div class="stat-row"><span class="stat-label">Expires</span><span class="stat-value">${expires}</span></div>
     ${usageRow}
@@ -805,9 +805,9 @@ async function renderLicense() {
         <input id="diagnostics_toggle" type="checkbox" ${diagOn ? 'checked' : ''}>
         <span>Send anonymous diagnostics to help fix bugs</span>
       </label>
-      <p style="font-size:13px;color:#64748b;margin-top:8px">
+      <p style="font-size:13px;color:#64748b;margin-top:16px;padding-top:4px;line-height:1.55">
         When enabled, Job-AI reports errors it hits (with the message and where it happened) so we can fix them.
-        It never includes your name, email, license key, passwords, or any job data — only an anonymous install id.
+        It never includes your name, email, license key, passwords, or any job data, only an anonymous install id.
         You can turn this off at any time.
       </p>
       <div class="status-msg" id="diagnostics-status"></div>
@@ -828,7 +828,7 @@ async function renderLicense() {
       try {
         const now = await window.api.diagnostics.set(diagToggle.checked);
         diagToggle.checked = now;
-        showStatus(statusEl, now ? 'Diagnostics on — thanks, this helps us fix bugs.' : 'Diagnostics off — no error reports will be sent.', 'success');
+        showStatus(statusEl, now ? 'Diagnostics on. Thanks, this helps us fix bugs.' : 'Diagnostics off. No error reports will be sent.', 'success');
       } catch {
         showStatus(statusEl, 'Could not save that setting.', 'error');
       }
@@ -848,7 +848,7 @@ async function renderLicense() {
       const result = await window.api.license.verify(key);
       if (result.ok) {
         document.getElementById('license-current').innerHTML = renderLicenseStatus(result.license, result.usage);
-        showStatus(statusEl, 'License activated — Agents are now unlocked', 'success');
+        showStatus(statusEl, 'License activated. Agents are now unlocked.', 'success');
         dashboardHasLicense = true;
       } else {
         showStatus(statusEl, LICENSE_ERRORS[result.error] || `Error: ${result.error}`, 'error');
@@ -868,7 +868,7 @@ async function renderLicense() {
       try {
         const r = await window.api.license.manageSubscription();
         if (r.ok) {
-          showStatus(st, 'Opened in your browser — manage or cancel there.', 'success');
+          showStatus(st, 'Opened in your browser. Manage or cancel there.', 'success');
         } else if (r.error === 'no_subscription') {
           showStatus(st, 'No paid subscription is linked to this license (trials have nothing to cancel).', 'error');
         } else if (r.error === 'network_error') {
