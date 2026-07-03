@@ -641,7 +641,7 @@ async function fillTextByLabel(page, re, value) {
 //   2. the distinctive filename shown on the page ({Title}_{Company}_{NNpct}…
 //      — underscored, so it can never match JD prose like the old check did).
 async function verifyCvUploaded(page, resumePath) {
-  const base  = path.basename(resumePath);
+  const base  = String(resumePath).split(/[\\/]/).pop(); // path-free: reed.js doesn't import `path`
   const noExt = base.replace(/\.[^.]+$/, '');
   const needle = noExt.slice(0, 25); // display may truncate long names
   try {

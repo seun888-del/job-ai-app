@@ -130,10 +130,19 @@ function parseCV(cvText, opts = {}) {
     }
     const header = parseJobHeader(line);
     if (header) { experience.push(header); continue; }
-    // Continuation of previous bullet (wrapped line with no bullet char)
+    // A body line under a role with NO bullet marker. Many CVs (and PDF text
+    // extraction that drops the • glyph) render bullets as plain paragraphs, so
+    // we must still capture them: start a NEW bullet when the previous one ended
+    // a sentence (bullet boundary), otherwise treat it as a wrapped continuation.
     const last = experience[experience.length - 1];
-    if (last && last.bullets.length) {
-      last.bullets[last.bullets.length - 1] += ' ' + line;
+    if (last) {
+      const prev = last.bullets[last.bullets.length - 1];
+      const endsSentence = prev && /[.!?]["'’)\]]?\s*$/.test(prev);
+      if (!last.bullets.length || endsSentence) {
+        last.bullets.push(line);
+      } else {
+        last.bullets[last.bullets.length - 1] += ' ' + line;
+      }
     }
   }
   // Collapse internal whitespace inside bullets

@@ -216,8 +216,12 @@ async function processJob(job) {
     let rendered = false;
     try {
       const baseStruct     = parseCV(bestRawCvText, pdfOpts);
-      if (!baseStruct.experience.length && !baseStruct.profile) {
-        throw new Error('parser found no usable structure');
+      // A CV with no parsed work experience renders as a near-blank shell (just
+      // a name + profile line). Never submit that. Throw so we fall back to the
+      // full-text CV render below, which keeps the candidate's real content.
+      const _bulletCount = (baseStruct.experience || []).reduce((n, r) => n + (r.bullets ? r.bullets.length : 0), 0);
+      if (!baseStruct.experience.length || _bulletCount === 0) {
+        throw new Error('parser found no work experience — using full-text fallback');
       }
       const tailoredStruct = await tailorStructured(
         baseStruct, jobTitle, job.description, bestMissing, bestRawCvText
