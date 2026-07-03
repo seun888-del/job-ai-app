@@ -9,7 +9,7 @@ const botManager = require('./src/services/botManager');
 const https = require('https');
 const { JOBBOT_BACKEND_URL } = require('./src/config');
 
-autoUpdater.setFeedURL({ provider: 'github', owner: 'seun888-del', repo: 'jobbot-app' });
+autoUpdater.setFeedURL({ provider: 'github', owner: 'seun888-del', repo: 'job-ai-app' });
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 

@@ -33,7 +33,7 @@
     "publish": {
       "provider": "github",
       "owner": "seun888-del",
-      "repo": "jobbot-app"
+      "repo": "job-ai-app"
     },
     "asar": false,
     "directories": {
