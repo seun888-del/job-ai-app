@@ -193,6 +193,7 @@ async function hostedChat(prompt, timeoutMs) {
     headers: {
       'Content-Type':  'application/json',
       'Authorization': `Bearer ${licenseKey()}`,
+      ...(process.env.JOBBOT_MACHINE_ID ? { 'X-Machine-Id': process.env.JOBBOT_MACHINE_ID } : {}),
     },
     body:   JSON.stringify({ prompt }),
     signal: AbortSignal.timeout(Math.min(timeoutMs, 60000)),

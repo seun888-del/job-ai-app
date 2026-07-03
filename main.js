@@ -8,6 +8,11 @@ const cvAnalyzer = require('./src/services/cvAnalyzer');
 const botManager = require('./src/services/botManager');
 const https = require('https');
 const { JOBBOT_BACKEND_URL } = require('./src/config');
+const { machineId } = require('./src/services/machineId');
+
+// Stable device id for anti-abuse (one free trial per machine). Exposed via env
+// so spawned bots inherit it and llm.js can attach it to backend AI calls.
+process.env.JOBBOT_MACHINE_ID = machineId();
 
 autoUpdater.setFeedURL({ provider: 'github', owner: 'seun888-del', repo: 'job-ai-app' });
 autoUpdater.autoDownload = true;
@@ -114,7 +119,7 @@ app.whenReady().then(async () => {
       const detail = m ? ` (${m[1]}/${m[2]})` : '';
       const note = new Notification({
         title: 'Daily application limit reached',
-        body: `Job-AI applied to your daily maximum${detail} for today and will resume tomorrow. To apply more per day, raise "Max applications per day" in Search Preferences.`,
+        body: `Job-AI applied to your daily maximum${detail} and has stopped the agents for today. Start them again tomorrow to apply more, or raise "Max applications per day" in Search Preferences.`,
         silent: false,
       });
       note.on('click', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
@@ -400,7 +405,7 @@ async function agentAccessAllowed() {
   }
   try {
     const res = await fetch(`${JOBBOT_BACKEND_URL}/v1/license`, {
-      headers: { Authorization: `Bearer ${license.license_key}` },
+      headers: { Authorization: `Bearer ${license.license_key}`, 'X-Machine-Id': machineId() },
       signal: AbortSignal.timeout(10000),
     });
     if (res.status === 429) return { ok: true }; // valid licence, just daily-throttled
@@ -503,7 +508,7 @@ ipcMain.handle('license:startTrial', async (event, email) => {
   try {
     res = await fetch(`${JOBBOT_BACKEND_URL}/trial`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Machine-Id': machineId() },
       body: JSON.stringify({ email }),
       signal: AbortSignal.timeout(15000),
     });
@@ -526,7 +531,7 @@ ipcMain.handle('license:verify', async (event, key) => {
   let res;
   try {
     res = await fetch(`${JOBBOT_BACKEND_URL}/v1/license`, {
-      headers: { Authorization: `Bearer ${licenseKey}` },
+      headers: { Authorization: `Bearer ${licenseKey}`, 'X-Machine-Id': machineId() },
       signal: AbortSignal.timeout(10000),
     });
   } catch {

@@ -369,11 +369,29 @@ async function main() {
       process.exit(1);
     }
 
+    // When the shared daily application cap is reached, stop the WHOLE agent —
+    // not just applications. Otherwise it keeps searching + scoring/tailoring
+    // CVs it can't apply to today, piling up an unappliable backlog and burning
+    // AI credits. Exiting cleanly also auto-stops the Scorer (see botManager).
+    const stopIfDailyLimit = async () => {
+      const n = queue.countAppliedToday();
+      if (n >= cfg.MAX_APPLICATIONS_PER_DAY) {
+        // "Daily limit reached" in the log also triggers the desktop notification (main.js).
+        console.log(`  [Reed Bot] Daily limit reached (${n}/${cfg.MAX_APPLICATIONS_PER_DAY}) — stopping agent until tomorrow`);
+        if (closeGuard) closeGuard.intentional = true;
+        await context.close().catch(() => {});
+        process.exit(0);
+      }
+    };
+
     try {
       while (true) {
+        await stopIfDailyLimit();
         await phase2_applyReadyCVs(context, reedPage);
+        await stopIfDailyLimit();                 // stop before wasting a search/score cycle
         reedPage = await phase1_searchAndQueue(context, reedPage);
         await phase2_applyReadyCVs(context, reedPage);
+        await stopIfDailyLimit();
         logger.printSummary();
         console.log('\n  [Reed Bot] Cycle complete. Waiting 1 min before next search...');
         await DELAY(60 * 1000);

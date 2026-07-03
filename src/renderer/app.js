@@ -726,6 +726,9 @@ const LICENSE_ERRORS = {
   invalid_email: 'Enter a valid email address',
   already_registered: 'A license is already registered to this email — check your inbox',
   server_error: 'Something went wrong on our end — please try again',
+  device_trial_used: 'This device has already used its free trial. Subscribe to keep using Job-AI.',
+  disposable_email: 'Please use a permanent email address (temporary inboxes aren’t accepted)',
+  too_many_trials: 'Too many trials started from your network today — please try again later',
 };
 
 function licenseBadgeClass(status) {

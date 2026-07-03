@@ -321,11 +321,29 @@ async function main() {
     process.exit(1);
   }
 
+  // When the shared daily application cap is reached, stop the WHOLE agent — not
+  // just applications — so it doesn't keep searching + scoring/tailoring CVs it
+  // can't apply to today (backlog buildup + wasted AI credits). Exiting cleanly
+  // also auto-stops the Scorer (see botManager).
+  const stopIfDailyLimit = async () => {
+    const n = queue.countAppliedToday();
+    if (n >= cfg.MAX_APPLICATIONS_PER_DAY) {
+      // "Daily limit reached" in the log also triggers the desktop notification (main.js).
+      console.log(`  [LinkedIn Bot] Daily limit reached (${n}/${cfg.MAX_APPLICATIONS_PER_DAY}) — stopping agent until tomorrow`);
+      closeGuard.intentional = true;
+      await context.close().catch(() => {});
+      process.exit(0);
+    }
+  };
+
   try {
     while (true) {
+      await stopIfDailyLimit();
       await phase2_applyReadyCVs(liPage);
+      await stopIfDailyLimit();                 // stop before wasting a search/score cycle
       await phase1_searchAndQueue(liPage);
       await phase2_applyReadyCVs(liPage);
+      await stopIfDailyLimit();
       logger.printSummary();
       console.log('\n  [LinkedIn Bot] Cycle complete. Waiting 1 min before next search...');
       await DELAY(60 * 1000);
