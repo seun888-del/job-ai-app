@@ -743,16 +743,16 @@ function licenseBadgeClass(status) {
 
 function renderLicenseStatus(license, usage) {
   if (!license || !license.license_key) {
-    return '<div class="empty-state">No license activated. Start a free trial or enter a license key above to enable AI CV tailoring.</div>';
+    return '<div class="empty-state">No license activated. Enter your license key above to enable AI CV tailoring.</div>';
   }
-  const expires = license.expires_at ? new Date(license.expires_at).toLocaleString() : '—';
+  const expires = license.expires_at ? new Date(license.expires_at).toLocaleString() : 'N/A';
 
   let usageRow = '';
   if (usage) {
     usageRow = `
       <div class="stat-row">
         <span class="stat-label">Usage today</span>
-        <span class="stat-value">${usage.usage_today} / ${usage.daily_limit} calls (~$${usage.cost_today_usd.toFixed(4)})</span>
+        <span class="stat-value">${usage.usage_today} / ${usage.daily_limit} applications tailored</span>
       </div>
     `;
   }
@@ -771,23 +771,13 @@ async function renderLicense() {
   let diagOn = true;
   try { diagOn = await window.api.diagnostics.get(); } catch (_) {}
 
-  const trialCard = hasLicense ? '' : `
-    <div class="card">
-      <h3>Start Free Trial</h3>
-      <p style="font-size:14px;color:#64748b;margin-bottom:16px">Try Job-AI free for 7 days — no card required. Enter your email and we'll send you a license key instantly.</p>
-      <div class="field"><label>Your email</label><input id="trial_email" type="email" placeholder="you@example.com"></div>
-      <button class="primary" id="start-trial">Start 7-day free trial</button>
-      <div class="status-msg" id="trial-status"></div>
-    </div>
-  `;
-
+  // Trial signup happens on the website before download; showing an email
+  // trial box in the app confused testers who already have a key. Removed.
   content.innerHTML = `
     <div class="page-header">
       <h2>License</h2>
-      <p>A license key is required to start the Agents. Start a free trial or enter your key below.</p>
+      <p>A license key is required to start the Agents. Enter the key from your welcome email below.</p>
     </div>
-
-    ${trialCard}
 
     <div class="card">
       <h3>Current License</h3>
@@ -845,37 +835,7 @@ async function renderLicense() {
     });
   }
 
-  if (!hasLicense) {
-    document.getElementById('start-trial').addEventListener('click', async () => {
-      const email = document.getElementById('trial_email').value.trim();
-      const statusEl = document.getElementById('trial-status');
-      const btn = document.getElementById('start-trial');
-      btn.disabled = true;
-      statusEl.className = 'status-msg';
-      statusEl.textContent = 'Sending trial key...';
-      try {
-        const result = await window.api.license.startTrial(email);
-        if (result.ok) {
-          const verify = await window.api.license.verify(result.license_key);
-          if (verify.ok) {
-            document.getElementById('license-current').innerHTML = renderLicenseStatus(verify.license, verify.usage);
-            document.getElementById('license_key').value = result.license_key;
-            document.querySelector('.card').style.display = 'none';
-            dashboardHasLicense = true;
-            statusEl.className = 'status-msg success';
-            statusEl.innerHTML = 'Trial activated! Your key has been saved. <button class="preflight-link" data-view="dashboard">Go to Dashboard →</button>';
-            statusEl.querySelector('[data-view]').addEventListener('click', () => navigate('dashboard'));
-          }
-        } else {
-          showStatus(statusEl, LICENSE_ERRORS[result.error] || `Error: ${result.error}`, 'error');
-          btn.disabled = false;
-        }
-      } catch {
-        showStatus(statusEl, 'Something went wrong. Please try again.', 'error');
-        btn.disabled = false;
-      }
-    });
-  }
+  // (In-app trial signup removed — users arrive with a key from their welcome email.)
 
   document.getElementById('activate').addEventListener('click', async () => {
     const key = document.getElementById('license_key').value.trim();
@@ -1791,39 +1751,39 @@ async function updateNavProgress() {
 const TOUR_STEPS = [
   {
     view: 'personal',
-    title: 'Step 1 - Your Personal Details',
-    tip: 'Your name, email, phone, location, and right-to-work status are used to fill in application forms automatically. The more complete this is, the fewer forms the Agent leaves blank.',
+    title: 'Step 1: Your personal details',
+    tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this section is, the fewer forms the Agent leaves blank.',
     action: 'Fill in every field and click Save before moving on.',
   },
   {
     view: 'cvs',
-    title: 'Step 2 - Upload Your CV',
-    tip: 'Upload your CV as a PDF. Before each application, the AI rewrites your professional summary and your bullet points to match that specific job - naturally, so it reads well to a recruiter, not just keyword-stuffed.',
-    action: 'Click “Add CV” and upload at least one PDF. You can add multiple CVs for different role types and the Agent picks the best one per job.',
+    title: 'Step 2: Upload your CV',
+    tip: 'Upload your CV as a PDF. Before each application, the AI rewrites your professional summary and bullet points to match that specific job, so it reads naturally to a recruiter rather than being stuffed with keywords.',
+    action: 'Click "Add CV" and upload at least one PDF. You can add several CVs for different role types and the Agent picks the best one for each job.',
   },
   {
     view: 'search',
-    title: 'Step 3 - Search Preferences',
-    tip: 'Add the job titles you want to apply for - for example “IT Support Analyst” or “Service Desk Engineer”. Every Agent uses these terms when searching across all job sites.',
+    title: 'Step 3: Search preferences',
+    tip: 'Add the job titles you want to apply for, for example "IT Support Analyst" or "Service Desk Engineer". Every Agent uses these terms when searching across all job sites.',
     action: 'Add at least one search term, set your preferred work type and salary, then click Save.',
   },
   {
     view: 'license',
-    title: 'Step 4 - Activate Your License',
-    tip: 'Start your free trial or enter a license key. The AI that tailors your CV runs on our cloud - nothing extra to install.',
-    action: 'Click “Start Free Trial” or paste your license key and click Activate.',
+    title: 'Step 4: Activate your license',
+    tip: 'Enter the license key from your welcome email. The AI that tailors your CV runs on our cloud, so there is nothing extra to install.',
+    action: 'Paste your license key into the box and click Activate.',
   },
   {
     view: 'dashboard',
-    title: 'Step 5 - Connect Your Job Site Accounts',
-    tip: 'On the Dashboard, each job site (Reed, LinkedIn) has a “Connect account” button. Click it and a browser window opens - just log in as normal. Your session is saved so the Agent can apply on your behalf without ever seeing your password.',
-    action: 'Click “Connect account” on a job site card, log in, then close the browser window. You only need one connected to begin. Note: if you later change your password (or log out) on that job site, click “Connect account” again to reconnect — otherwise the Agent can no longer log in and will stop working for that site.',
+    title: 'Step 5: Connect your job site accounts',
+    tip: 'On the Dashboard, each job site such as Reed or LinkedIn has a "Connect account" button. Click it and a browser window opens. Log in as you normally would. Your session is saved so the Agent can apply on your behalf without ever seeing your password.',
+    action: 'Click "Connect account" on a job site card, log in, then close the browser window. You only need one connected to begin. If you later change your password or log out on that job site, click "Connect account" again to reconnect, otherwise the Agent can no longer log in and will stop working for that site.',
   },
   {
     view: 'dashboard',
-    title: 'All Set - Start Applying',
-    tip: 'When you click Start applying, the Agents open a Chrome window for each connected job site and work inside it automatically - searching, tailoring your CV, and applying to matching roles on their own.',
-    action: 'Click “Start applying” (the checklist flags anything missing). ⚠️ Important: the Chrome windows that open are the Agent working - they are NOT your own browser. Leave them alone: do not click, type in, or close them. Just minimise them and carry on with your day - closing a window stops that Agent.',
+    title: 'All set: start applying',
+    tip: 'When you click Start applying, the Agents open a Chrome window for each connected job site and work inside it automatically, searching, tailoring your CV, and applying to matching roles on their own.',
+    action: 'Click "Start applying" and the checklist flags anything still missing. Important: the Chrome windows that open are the Agent working, not your own browser. Please leave them alone. Do not click, type in, or close them. Simply minimise them and carry on with your day. Closing a window stops that Agent.',
   },
 ];
 
@@ -1860,7 +1820,7 @@ function startTour() {
         <div class="tour-action">${s.action}</div>
         <div class="tour-nav">
           <button class="tour-skip" id="tour-skip">Skip tour</button>
-          <button class="tour-next" id="tour-next">${isLast ? 'Finish setup' : 'Next ->'}</button>
+          <button class="tour-next" id="tour-next">${isLast ? 'Finish setup' : 'Next'}</button>
         </div>
       </div>
     `;
@@ -1926,14 +1886,14 @@ function initOnboarding() {
   const modal = document.createElement('div');
   modal.className = 'welcome-modal';
   modal.innerHTML = `
-    <div class=”welcome-logo”></div>
+    <div class="welcome-logo"></div>
     <h2>Welcome to Job-AI</h2>
-    <p>Your fully automated job application assistant. Set up once - the Agents find, tailor, and apply to jobs across multiple sites for you, around the clock.</p>
-    <div class=”welcome-features”>
-      <div class=”welcome-feature”><strong>6 Job Sites</strong><span>Reed, LinkedIn, Glassdoor, CV-Library, Totaljobs &amp; CWJobs</span></div>
-      <div class=”welcome-feature”><strong>AI CV Tailoring</strong><span>Powered by Groq AI — no API key needed, works out of the box</span></div>
-      <div class=”welcome-feature”><strong>Secure Login</strong><span>Log in once per site - session saved locally, never shared</span></div>
-      <div class=”welcome-feature”><strong>Auto Apply</strong><span>Fills forms, uploads your tailored CV, and submits — hands free</span></div>
+    <p>Your automated job application assistant. Set it up once and the Agents search, tailor your CV, and apply to jobs across multiple sites for you, around the clock.</p>
+    <div class="welcome-features">
+      <div class="welcome-feature"><strong>6 Job Sites</strong><span>Reed, LinkedIn, Glassdoor, CV-Library, Totaljobs and CWJobs</span></div>
+      <div class="welcome-feature"><strong>AI CV Tailoring</strong><span>Every CV is rewritten to match the job before it is submitted</span></div>
+      <div class="welcome-feature"><strong>Secure Login</strong><span>Log in once per site. Your session is saved locally and never shared</span></div>
+      <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
     </div>
   `;
   modal.appendChild(actions);

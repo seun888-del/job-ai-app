@@ -77,8 +77,20 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src/renderer/index.html'));
 }
 
-// We render our own menu in the navy title bar, so remove the native one.
-Menu.setApplicationMenu(null);
+// We render our own menu in the navy title bar. On Windows we drop the native
+// menu entirely. On macOS, though, the standard clipboard shortcuts (Cmd+C/V/X,
+// Cmd+A) are wired through the application menu's Edit roles — with no menu,
+// paste stops working in inputs (testers couldn't paste their license key).
+// So on macOS we keep a minimal native menu that provides those Edit roles.
+if (process.platform === 'darwin') {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu' },
+    { role: 'editMenu' },   // Undo/Redo/Cut/Copy/Paste/Select All — enables Cmd+V
+    { role: 'windowMenu' },
+  ]));
+} else {
+  Menu.setApplicationMenu(null);
+}
 
 // Actions invoked by the custom in-title-bar menu (File/Edit/View/Window/Help).
 ipcMain.handle('win:action', (_e, action) => {
