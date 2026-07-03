@@ -1,6 +1,6 @@
 {
   "name": "job-bot-app",
-  "version": "0.6.24",
+  "version": "0.6.25",
   "description": "Desktop app for automated job search and application",
   "main": "main.js",
   "private": true,
@@ -63,6 +63,13 @@
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "x64",
             "arm64"

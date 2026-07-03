@@ -180,6 +180,7 @@ jobs:
           name: JobBot-Mac
           path: |
             dist/*.dmg
+            dist/*.zip
             dist/latest-mac.yml
 
   release:
