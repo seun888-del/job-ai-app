@@ -226,6 +226,34 @@ async function processJob(job) {
       const tailoredStruct = await tailorStructured(
         baseStruct, jobTitle, job.description, bestMissing, bestRawCvText
       );
+
+      // Header hardening. PDF text extraction can corrupt the header (mangled
+      // email, glyph junk like "™"/"ÖW'", or a heading such as "SUMMARY WORK
+      // EXPERIENCE" wrongly used as the subtitle). We already hold the user's
+      // real details in Personal Details, so build a clean, correct header from
+      // those instead of trusting the extracted text.
+      const _A = cfg.APPLICANT || {};
+      const _contact = [_A.location, _A.phone, _A.email]
+        .map(s => String(s || '').trim()).filter(Boolean).join('   |   ');
+      if (_contact) tailoredStruct.contact = _contact;
+      const _sub = String(tailoredStruct.subtitle || '').trim();
+      const _subLooksBad = !_sub
+        || /[™®]|[^\x00-\x7F]/.test(_sub)                         // glyph junk / non-ASCII
+        || /\bsummary\b|work experience|\bprofile\b|\beducation\b|\bskills\b/i.test(_sub); // a section heading, not a headline
+      if (_subLooksBad) tailoredStruct.subtitle = jobTitle;
+
+      // Scrub stray merged-heading text ("SUMMARY … WORK EXPERIENCE") and glyph
+      // junk that PDF extraction can leave in the profile paragraph. Conservative:
+      // only removes the known heading pattern and trademark glyphs, so legit
+      // content (£, accents, real summary text) is untouched.
+      if (tailoredStruct.profile) {
+        const _p = String(tailoredStruct.profile)
+          .replace(/\bsummary\b[\s™®]*\bwork experience\b/gi, ' ')
+          .replace(/[™®]/g, '')
+          .replace(/\s{2,}/g, ' ').trim();
+        tailoredStruct.profile = _p;
+      }
+
       await writeStructuredPDF(tailoredStruct, paths.saved, pdfOpts);
       await writeStructuredPDF(tailoredStruct, paths.upload, pdfOpts);
       console.log(`  [Scorer Bot] ✓ Tailored CV rendered (reference layout): ${paths.saved}`);
