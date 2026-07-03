@@ -92,4 +92,30 @@ contextBridge.exposeInMainWorld('api', {
     startTrial: (email) => ipcRenderer.invoke('license:startTrial', email),
     manageSubscription: () => ipcRenderer.invoke('license:manageSubscription'),
   },
+  diagnostics: {
+    get: () => ipcRenderer.invoke('diagnostics:get'),
+    set: (enabled) => ipcRenderer.invoke('diagnostics:set', enabled),
+    reportError: (payload) => ipcRenderer.invoke('telemetry:error', payload),
+  },
+});
+
+// Forward uncaught renderer errors to the main process (anonymous, opt-out).
+window.addEventListener('error', (e) => {
+  try {
+    ipcRenderer.invoke('telemetry:error', {
+      name: e.error?.name || 'Error',
+      message: e.message || String(e.error || ''),
+      stack: e.error?.stack || '',
+    });
+  } catch (_) {}
+});
+window.addEventListener('unhandledrejection', (e) => {
+  try {
+    const r = e.reason;
+    ipcRenderer.invoke('telemetry:error', {
+      name: r?.name || 'UnhandledRejection',
+      message: r?.message || String(r || ''),
+      stack: r?.stack || '',
+    });
+  } catch (_) {}
 });

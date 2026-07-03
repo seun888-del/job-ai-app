@@ -476,6 +476,29 @@ async function fillContactFields(page) {
   }
 }
 
+// Confirm the tailored file is REALLY attached — never trust setFiles alone
+// (a hidden/wrong input or silent rejection previously made us report success
+// and Easy Apply fell back to the profile/base CV). Two signals, either proves
+// it: a file input holding the exact tailored filename, or the distinctive
+// underscored filename rendered in the résumé card (can't match JD prose).
+async function verifyCvUploaded(page, resumePath) {
+  const base  = path.basename(resumePath);
+  const noExt = base.replace(/\.[^.]+$/, '');
+  const needle = noExt.slice(0, 25); // card display may truncate long names
+  try {
+    await page.waitForFunction(({ base, needle }) => {
+      for (const inp of document.querySelectorAll('input[type="file"]')) {
+        for (const f of inp.files || []) if (f.name === base) return true;
+      }
+      const modal = document.querySelector('.jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
+      return ((modal || document.body).innerText || '').includes(needle);
+    }, { base, needle }, { timeout: 10000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function uploadResume(page, resumePath) {
   if (!resumePath || !fs.existsSync(resumePath)) return false;
   try {
@@ -484,8 +507,12 @@ async function uploadResume(page, resumePath) {
     if (fileInput) {
       await fileInput.setInputFiles(resumePath);
       await DELAY(2000);
-      console.log(`  [LinkedIn] CV uploaded via file input: ${path.basename(resumePath)}`);
-      return true;
+      if (await verifyCvUploaded(page, resumePath)) {
+        console.log(`  [LinkedIn] CV uploaded + verified attached: ${path.basename(resumePath)}`);
+        return true;
+      }
+      console.log('  [LinkedIn] ⚠ File input set but tailored CV NOT confirmed attached — treating as failed.');
+      return false;
     }
 
     // LinkedIn shows a "Change" or "Upload resume" button when no hidden input visible
@@ -506,8 +533,12 @@ async function uploadResume(page, resumePath) {
         ]);
         await chooser.setFiles(resumePath);
         await DELAY(2000);
-        console.log(`  [LinkedIn] CV uploaded via "${sel}": ${path.basename(resumePath)}`);
-        return true;
+        if (await verifyCvUploaded(page, resumePath)) {
+          console.log(`  [LinkedIn] CV uploaded via "${sel}" + verified attached: ${path.basename(resumePath)}`);
+          return true;
+        }
+        console.log('  [LinkedIn] ⚠ Upload set but tailored CV NOT confirmed attached — treating as failed.');
+        return false;
       } catch (_) {}
     }
   } catch (_) {}

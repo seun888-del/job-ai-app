@@ -238,6 +238,11 @@ Return ONLY the rewritten bullets, one per line, each starting with "- ". No num
     let lines = out.split('\n')
       .map(l => l.replace(/^\s*(?:\[\d+\]|[-•*]|\d+[.)])\s*/, '').trim())
       .filter(l => l.length > 15);
+    // Guideline hard-check: bullets must be short and scannable (~16 words).
+    // The prompt asks for it, but a model can drift — reject word-heavy lines
+    // outright so the ranked originals take their place instead.
+    const MAX_BULLET_WORDS = 24;
+    lines = lines.filter(l => l.split(/\s+/).length <= MAX_BULLET_WORDS);
     // Drop any line that smuggles in a new tool/number/fact
     let safe = lines.filter(rw => !introducesNewFacts(originals, rw)).slice(0, MAX_BULLETS_PER_ROLE);
     if (safe.length >= Math.min(2, bullets.length)) {

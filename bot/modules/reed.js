@@ -634,6 +634,29 @@ async function fillTextByLabel(page, re, value) {
   return false;
 }
 
+// Confirm the tailored file is REALLY attached — never trust setFiles alone
+// (a hidden/wrong input or a silent site rejection previously made us report
+// success and submit the base CV). Two signals, either proves it:
+//   1. a file input whose .files contains the exact tailored filename, or
+//   2. the distinctive filename shown on the page ({Title}_{Company}_{NNpct}…
+//      — underscored, so it can never match JD prose like the old check did).
+async function verifyCvUploaded(page, resumePath) {
+  const base  = path.basename(resumePath);
+  const noExt = base.replace(/\.[^.]+$/, '');
+  const needle = noExt.slice(0, 25); // display may truncate long names
+  try {
+    await page.waitForFunction(({ base, needle }) => {
+      for (const inp of document.querySelectorAll('input[type="file"]')) {
+        for (const f of inp.files || []) if (f.name === base) return true;
+      }
+      return document.body.innerText.includes(needle);
+    }, { base, needle }, { timeout: 10000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function uploadResume(page, resumePath) {
   if (!resumePath || !fs.existsSync(resumePath)) return false;
   try {
@@ -684,8 +707,13 @@ async function uploadResume(page, resumePath) {
           ]);
           await chooser.setFiles(resumePath);
           await DELAY(3000);
-          console.log('  [Reed] Tailored CV uploaded successfully.');
-          return true;
+          if (await verifyCvUploaded(page, resumePath)) {
+            console.log('  [Reed] Tailored CV uploaded + verified attached.');
+            return true;
+          }
+          console.log('  [Reed] ⚠ Upload set but tailored CV NOT confirmed attached — treating as failed.');
+          await page.screenshot({ path: `${SSDIR}/reed_cv_verify_failed.png` }).catch(() => {});
+          return false;
         }
       } catch (err) {
         console.log(`  [Reed] Choose file click error: ${err.message.substring(0, 80)}`);
@@ -698,8 +726,13 @@ async function uploadResume(page, resumePath) {
       await page.evaluate(el => { el.style.display = 'block'; el.style.visibility = 'visible'; }, fileInput);
       await fileInput.setInputFiles(resumePath);
       await DELAY(2500);
-      console.log('  [Reed] Tailored CV uploaded via file input.');
-      return true;
+      if (await verifyCvUploaded(page, resumePath)) {
+        console.log('  [Reed] Tailored CV uploaded via file input + verified attached.');
+        return true;
+      }
+      console.log('  [Reed] ⚠ File input set but tailored CV NOT confirmed attached — treating as failed.');
+      await page.screenshot({ path: `${SSDIR}/reed_cv_verify_failed.png` }).catch(() => {});
+      return false;
     }
 
     await page.screenshot({ path: `${SSDIR}/reed_cv_upload_state.png` });

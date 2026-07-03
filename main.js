@@ -9,10 +9,37 @@ const botManager = require('./src/services/botManager');
 const https = require('https');
 const { JOBBOT_BACKEND_URL } = require('./src/config');
 const { machineId } = require('./src/services/machineId');
+const errorReporter = require('./src/services/errorReporter');
 
 // Stable device id for anti-abuse (one free trial per machine). Exposed via env
 // so spawned bots inherit it and llm.js can attach it to backend AI calls.
 process.env.JOBBOT_MACHINE_ID = machineId();
+
+// Anonymous error observability: report main-process crashes/rejections (and,
+// below, renderer + agent errors) so field failures are visible. Reporting is
+// opt-out and PII-scrubbed; it never changes app behaviour beyond logging.
+process.on('uncaughtException', (err) => {
+  errorReporter.report({ source: 'main', name: err?.name || 'Error', message: err?.message || String(err), stack: err?.stack });
+  console.error('[uncaughtException]', err);
+});
+process.on('unhandledRejection', (reason) => {
+  const e = reason instanceof Error ? reason : new Error(String(reason));
+  errorReporter.report({ source: 'main', name: e.name || 'UnhandledRejection', message: e.message, stack: e.stack });
+  console.error('[unhandledRejection]', reason);
+});
+app.on('render-process-gone', (_e, _wc, details) => {
+  errorReporter.report({ source: 'renderer', name: 'render-process-gone', message: details?.reason || 'crashed' });
+});
+app.on('child-process-gone', (_e, details) => {
+  if (details?.reason && details.reason !== 'clean-exit') {
+    errorReporter.report({ source: 'main', name: 'child-process-gone', message: `${details.type || ''} ${details.reason}`.trim() });
+  }
+});
+// Renderer forwards its window.onerror / unhandledrejection here; plus the
+// diagnostics opt-out toggle (Settings → Privacy).
+ipcMain.handle('telemetry:error', (_e, p) => errorReporter.report({ source: 'renderer', name: p?.name, message: p?.message, stack: p?.stack }));
+ipcMain.handle('diagnostics:get', () => errorReporter.diagnosticsEnabled());
+ipcMain.handle('diagnostics:set', (_e, enabled) => errorReporter.setDiagnosticsEnabled(enabled));
 
 autoUpdater.setFeedURL({ provider: 'github', owner: 'seun888-del', repo: 'job-ai-app' });
 autoUpdater.autoDownload = true;
@@ -124,6 +151,12 @@ app.whenReady().then(async () => {
       });
       note.on('click', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
       note.show();
+    }
+    // Report agent fatal errors for observability (high-signal only — the bots
+    // log "Fatal error:" right before a crash-exit). Deduped/scrubbed downstream.
+    const fatal = text.match(/Fatal error:?\s*(.+)/i);
+    if (fatal) {
+      errorReporter.report({ source: 'agent', name: `${bot}-fatal`, message: fatal[1].slice(0, 300) });
     }
     try {
       const file = agentLogFile();

@@ -237,7 +237,11 @@ async function processJob(job) {
         try {
           await lightTailorDocx(bestCVObj.path, docxPath, bestRawCvText, jobTitle, bestMissing);
         } catch (err) {
-          fs.copyFileSync(bestCVObj.path, docxPath);
+          // Do NOT copy the base docx here — converting an untailored copy
+          // would submit the base CV as if it were tailored. Skip instead.
+          console.warn(`  [Scorer Bot] Docx tailoring failed (${err.message}) — skipping job (base CV must never be submitted)`);
+          queue.update(job.jobId, { status: 'skipped', reason: 'CV tailoring failed (docx)' });
+          return;
         }
         try {
           await convertDocxToPdf(docxPath, paths.saved);
@@ -251,8 +255,12 @@ async function processJob(job) {
           await writePDF(bestCvText, paths.saved, pdfOpts);
           await writePDF(bestCvText, paths.upload, pdfOpts);
         } catch (err) {
-          fs.copyFileSync(bestCVObj.path, paths.saved);
-          fs.copyFileSync(bestCVObj.path, paths.upload);
+          // NEVER fall back to copying the base CV into the tailored path —
+          // that would submit an untailored CV under a tailored filename.
+          // Skip the job instead; it can be retried on a later cycle.
+          console.warn(`  [Scorer Bot] CV render failed entirely (${err.message}) — skipping job (base CV must never be submitted)`);
+          queue.update(job.jobId, { status: 'skipped', reason: 'CV tailoring/render failed' });
+          return;
         }
       }
     }

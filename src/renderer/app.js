@@ -768,6 +768,8 @@ function renderLicenseStatus(license, usage) {
 async function renderLicense() {
   const license = await window.api.license.get();
   const hasLicense = !!(license?.license_key);
+  let diagOn = true;
+  try { diagOn = await window.api.diagnostics.get(); } catch (_) {}
 
   const trialCard = hasLicense ? '' : `
     <div class="card">
@@ -806,6 +808,20 @@ async function renderLicense() {
       <button class="primary" id="activate">Activate</button>
       <div class="status-msg" id="status"></div>
     </div>
+
+    <div class="card">
+      <h3>Privacy</h3>
+      <label class="checkbox-label" style="align-items:flex-start">
+        <input id="diagnostics_toggle" type="checkbox" ${diagOn ? 'checked' : ''}>
+        <span>Send anonymous diagnostics to help fix bugs</span>
+      </label>
+      <p style="font-size:13px;color:#64748b;margin-top:8px">
+        When enabled, Job-AI reports errors it hits (with the message and where it happened) so we can fix them.
+        It never includes your name, email, license key, passwords, or any job data — only an anonymous install id.
+        You can turn this off at any time.
+      </p>
+      <div class="status-msg" id="diagnostics-status"></div>
+    </div>
   `;
 
   if (license?.license_key) {
@@ -813,6 +829,20 @@ async function renderLicense() {
     if (result.ok) {
       document.getElementById('license-current').innerHTML = renderLicenseStatus(result.license, result.usage);
     }
+  }
+
+  const diagToggle = document.getElementById('diagnostics_toggle');
+  if (diagToggle) {
+    diagToggle.addEventListener('change', async () => {
+      const statusEl = document.getElementById('diagnostics-status');
+      try {
+        const now = await window.api.diagnostics.set(diagToggle.checked);
+        diagToggle.checked = now;
+        showStatus(statusEl, now ? 'Diagnostics on — thanks, this helps us fix bugs.' : 'Diagnostics off — no error reports will be sent.', 'success');
+      } catch {
+        showStatus(statusEl, 'Could not save that setting.', 'error');
+      }
+    });
   }
 
   if (!hasLicense) {
