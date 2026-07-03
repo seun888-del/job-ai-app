@@ -660,6 +660,21 @@ async function verifyCvUploaded(page, resumePath) {
 async function uploadResume(page, resumePath) {
   if (!resumePath || !fs.existsSync(resumePath)) return false;
   try {
+    // Reed's apply modal shows "CV loading…" with a spinner while it fetches the
+    // saved CV. The Update / upload controls only render AFTER that finishes, so
+    // if we look for them too early we find nothing and wrongly skip the job.
+    // Wait for the loading state to clear (and the CV controls to appear) first.
+    try {
+      await page.waitForFunction(() => {
+        const t = document.body.innerText || '';
+        if (/CV loading/i.test(t)) return false;              // still loading
+        // ready once an Update/Change control or a file input is present
+        return /\b(Update|Use a different CV|Change CV|Upload a different CV)\b/i.test(t)
+               || !!document.querySelector('input[type="file"]');
+      }, { timeout: 20000 });
+    } catch (_) { /* fall through and try anyway */ }
+    await DELAY(700);
+
     // Reed shows the CV saved on the account by default and hides the file input.
     // Click "Use a different CV" / "Change" / "Upload a different CV" first to reveal the upload field.
     // Reed's apply modal shows the saved CV with an "Update" link — click it to replace
