@@ -139,6 +139,9 @@ app.whenReady().then(async () => {
   createWindow();
 
   const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent' };
+  // The user-facing job-site agents. The scorer runs alongside them but is an
+  // internal helper, so it never triggers a "finished" notification of its own.
+  const JOB_SITE_KEYS = ['reed', 'linkedin'];
   // Persist agent logs to disk so real runs can be inspected after the fact
   // (the in-app Agent tab only shows the live session). One file per UTC day.
   const agentLogFile = () => path.join(app.getPath('userData'), 'logs', `agents-${new Date().toISOString().slice(0, 10)}.log`);
@@ -179,13 +182,32 @@ app.whenReady().then(async () => {
   });
   botManager.setStatusHandler((bot, status) => {
     mainWindow?.webContents.send('bot:status', { bot, status });
-    if ((status === 'stopped' || status === 'error') && Notification.isSupported()) {
+    if (!Notification.isSupported()) return;
+
+    // A crashed agent is worth flagging on its own — surface errors per agent.
+    if (status === 'error') {
       const label = BOT_DISPLAY[bot] || bot;
-      new Notification({
-        title: status === 'error' ? `${label} stopped with an error` : `${label} finished`,
-        body: status === 'error' ? 'Check the Agent logs for details.' : 'The Agent has completed its run.',
-        silent: false,
-      }).show();
+      new Notification({ title: `${label} stopped with an error`, body: 'Check the Agent logs for details.', silent: false }).show();
+      return;
+    }
+
+    // One clean "run finished" notice instead of a separate ping per agent:
+    // fire only when the LAST job-site agent stops (the scorer stops itself and
+    // never notifies). If the daily cap caused the stop, the "Daily application
+    // limit reached" notice already fired today — stay silent to avoid a double
+    // notification and keep the cap message as the single source of truth.
+    if (status === 'stopped' && JOB_SITE_KEYS.includes(bot)) {
+      const s = botManager.getStatus();
+      const stillRunning = JOB_SITE_KEYS.some(k => s[k] === 'running');
+      if (!stillRunning && !dailyLimitNotifiedToday()) {
+        const note = new Notification({
+          title: 'Job-AI finished for now',
+          body: 'Your agents have finished this run. Open Job-AI to review your Recent Activity.',
+          silent: false,
+        });
+        note.on('click', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
+        note.show();
+      }
     }
   });
 

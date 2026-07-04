@@ -813,27 +813,47 @@ async function _answerRadios(page, job) {
         return out
           .replace(/this field is required|is required|select an option|please select|learn more|not sure how to answer[^?]*\??/gi, ' ')
           .replace(/\byes\b|\bno\b/gi, ' ')
+          // Option labels concatenate with no whitespace in textContent ("YesNo"),
+          // so the word-boundary strips above miss them — remove the fused form too.
+          .replace(/\b(?:yes|no)+\b/gi, ' ')
           .replace(/\s+/g, ' ').trim();
       };
       let question = '';
-      // 1) strongest signal — a "?"-terminated clause in the group text
-      const qMatches = gtLower.match(/[^.?!]*\?/g);
-      if (qMatches) {
-        const cand = qMatches.map(stripOpts).filter(s => s.replace(/[^a-z]/g, '').length > 5);
-        if (cand.length) question = cand.sort((a, b) => b.length - a.length)[0];
-      }
-      // 2) explicit label element
-      if (!question) {
-        const label = await group.evaluate(el => {
-          const clean = s => (s || '').replace(/\s+/g, ' ').trim();
-          const sel = 'span[data-test-form-builder-radio-button-form-component__title], .fb-dash-form-element__label, legend span, legend, label:not([for])';
-          for (const node of el.querySelectorAll(sel)) {
+      // 1) explicit question label from the ENCLOSING form-element wrapper. LinkedIn
+      //    renders the question as a <span>/<legend> that is frequently a sibling of
+      //    the radio group, OUTSIDE it — so searching only the group text yields just
+      //    "YesNo" (the old "Unknown radio question: yesno" skips). Search the wrapper
+      //    and its parent, taking the first meaningful (non-"YesNo") label.
+      const labelText = await group.evaluate(el => {
+        const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+        const container = el.closest(
+          '.jobs-easy-apply-form-element, .fb-dash-form-element, [data-test-form-builder-radio-button-form-component], [class*="form-element"]'
+        ) || el;
+        const sel = [
+          'span[data-test-form-builder-radio-button-form-component__title]',
+          '.fb-dash-form-element__label',
+          '.jobs-easy-apply-form-element__label',
+          'legend span', 'legend',
+          '[class*="form-element__label"]',
+          'label:not([for])',
+        ].join(',');
+        for (const scope of [container, container.parentElement].filter(Boolean)) {
+          for (const node of scope.querySelectorAll(sel)) {
             const t = clean(node.textContent);
-            if (t.replace(/[^a-z]/gi, '').length > 5 && !/^(yesno|noyes)$/i.test(t.replace(/[^a-z]/gi, ''))) return t;
+            const letters = t.replace(/[^a-z]/gi, '');
+            if (letters.length > 5 && !/^(?:yesno|noyes)+$/i.test(letters)) return t;
           }
-          return '';
-        }).catch(() => '');
-        if (label) question = stripOpts(label);
+        }
+        return '';
+      }).catch(() => '');
+      if (labelText) question = stripOpts(labelText);
+      // 2) a "?"-terminated clause anywhere in the group text
+      if (!question || question.replace(/[^a-z]/g, '').length < 5) {
+        const qMatches = gtLower.match(/[^.?!]*\?/g);
+        if (qMatches) {
+          const cand = qMatches.map(stripOpts).filter(s => s.replace(/[^a-z]/g, '').length > 5);
+          if (cand.length) question = cand.sort((a, b) => b.length - a.length)[0];
+        }
       }
       // 3) last resort — whole group text minus options/boilerplate
       if (!question || question.replace(/[^a-z]/g, '').length < 5) question = stripOpts(gtLower);
