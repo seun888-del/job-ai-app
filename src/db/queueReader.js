@@ -46,8 +46,20 @@ function getQueueSummary() {
 }
 
 function getRecentApplications(limit = 50) {
+  // Recent Activity shows OUTCOMES THAT MATTER: applications, failures, and the
+  // actionable skips the user needs to act on (e.g. "reconnect account" when the
+  // tailored CV couldn't be attached). Routine skips (below score, external site,
+  // wrong work type, already applied, duplicate, training course) are noise that
+  // buries the real activity, so they're excluded here — the aggregate count is
+  // still shown in the stats tile and the full detail is in the Agent Logs.
   return withQueueDb(db => all(db, `
-    SELECT * FROM queue WHERE status IN ('applied','skipped')
+    SELECT * FROM queue
+    WHERE status IN ('applied','apply_failed')
+       OR (status = 'skipped' AND (
+             reason LIKE '%not attached%'
+             OR reason LIKE '%reconnect%'
+             OR reason LIKE '%session%'
+       ))
     ORDER BY updated_at DESC LIMIT ?
   `, [limit]), []);
 }

@@ -331,6 +331,22 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .app-toast.error { background: var(--danger); }
 .app-toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* Themed confirmation dialog */
+.confirm-overlay {
+  position: fixed; inset: 0; z-index: 4500;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.confirm-modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 24px; max-width: 440px; width: 100%;
+}
+.confirm-modal h3 { margin: 0 0 12px; font-size: 17px; font-weight: 700; }
+.confirm-body { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.confirm-actions button { margin-top: 0; }
+
 /* ── Badges ───────────────────────────────────────────────────────────── */
 .badge {
   display: inline-block;

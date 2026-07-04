@@ -39,6 +39,32 @@ function showToast(msg, type = 'success') {
   showToast._timer = setTimeout(() => { t.className = 'app-toast ' + type; }, 2800);
 }
 
+// Themed confirmation dialog. Returns a Promise<boolean>.
+function showConfirm({ title, bodyHtml = '', confirmText = 'Confirm', cancelText = 'Cancel' }) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-modal">
+        <h3>${title}</h3>
+        <div class="confirm-body">${bodyHtml}</div>
+        <div class="confirm-actions">
+          <button class="secondary" data-confirm="0">${cancelText}</button>
+          <button class="primary" data-confirm="1">${confirmText}</button>
+        </div>
+      </div>`;
+    const done = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    const onKey = (e) => { if (e.key === 'Escape') done(false); };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) return done(false);
+      const b = e.target.closest('[data-confirm]');
+      if (b) done(b.dataset.confirm === '1');
+    });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+  });
+}
+
 async function render(view) {
   let fn;
   switch (view) {
@@ -455,8 +481,18 @@ async function renderCVs() {
 
   content.querySelectorAll('button[data-cv-id]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      await window.api.cvs.addSuggestedTerms(Number(btn.dataset.cvId));
-      showStatus(document.getElementById('status'), 'Search terms added — see Search Preferences');
+      const cvId = Number(btn.dataset.cvId);
+      const cv = cvs.find(c => c.id === cvId);
+      const roles = (cv && cv.suggested_roles) || [];
+      const bodyHtml = roles.length
+        ? `<p style="margin:0 0 10px">These roles will be added to your <strong>Search Preferences</strong>, so the Agents search for them across all job sites:</p>
+           <div class="tag-list">${roles.map(r => `<div class="tag">${r}</div>`).join('')}</div>`
+        : `<p style="margin:0">Add the suggested roles from this CV to your Search Preferences?</p>`;
+      const ok = await showConfirm({ title: 'Add search terms', bodyHtml, confirmText: 'Add terms' });
+      if (!ok) return;
+      await window.api.cvs.addSuggestedTerms(cvId);
+      showToast('Search terms added');
+      showStatus(document.getElementById('status'), 'Search terms added — see Search Preferences.');
     });
   });
 
