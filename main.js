@@ -703,8 +703,10 @@ ipcMain.handle('site:connect', async (event, { site, loginUrl }) => {
     await new Promise(r => setTimeout(r, 500));
   }
 
-  // Remove stale Chrome lock files so a fresh instance opens cleanly
-  for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+  // Remove stale Chrome lock files so a fresh instance opens cleanly, plus the
+  // version markers that make older Chrome (e.g. on macOS 12) show "Something
+  // went wrong when opening your profile" on a perceived downgrade.
+  for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'Last Version', 'Last Browser']) {
     try { fs.unlinkSync(path.join(profileDir, f)); } catch (_) {}
   }
 

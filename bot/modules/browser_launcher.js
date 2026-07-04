@@ -51,6 +51,19 @@ function buildProxyOpts() {
 }
 
 async function launchPersistentContext(profileDir, extraOpts = {}) {
+  // On older macOS (e.g. macOS 12, which Google Chrome no longer updates) Chrome
+  // shows "Something went wrong when opening your profile. Some features may be
+  // unavailable." when the profile carries a "Last Version" marker newer than
+  // the running Chrome (a version downgrade). That can leave the session
+  // unusable so the agent can't log in / apply. Removing the version markers
+  // makes Chrome open the profile cleanly; cookies and session data are kept.
+  try {
+    const _fs = require('fs'), _path = require('path');
+    for (const _f of ['Last Version', 'Last Browser']) {
+      try { _fs.rmSync(_path.join(profileDir, _f), { force: true }); } catch (_) {}
+    }
+  } catch (_) {}
+
   // Run the window MINIMISED so the agent doesn't pop up over the user's work,
   // while staying a real (headed) stealth browser — headless would spike bot
   // detection and break the interactive CAPTCHA flow. Set JOBBOT_SHOW_BROWSER=1
