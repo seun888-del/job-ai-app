@@ -572,7 +572,12 @@ function sensitiveYesNo(question, job) {
     return needs ? 'yes' : 'no';
   }
   if (/right to work|work permit|authoris|authoriz|eligible.*work|legal.*work|work.*authoris|entitled to work|permit to work/i.test(q)) {
-    return hasRightToWork(job?.description) ? 'yes' : 'no';
+    if (hasRightToWork(job?.description)) return 'yes';
+    // Safety net: someone who doesn't need sponsorship has the right to work in
+    // their home country (UK by default), so don't answer a disqualifying "no"
+    // just because the right-to-work list wasn't filled in precisely.
+    if (!cfg.APPLICANT.requiresSponsorship && inferJobCountry(job?.description) === 'United Kingdom') return 'yes';
+    return 'no';
   }
   if (/background check|criminal record|dbs check|security check|willing to undergo|reference check|pre.?employment (check|screening)/i.test(q)) return 'yes';
   if (/start (immediately|right away|asap)|immediate start|available immediately|can you start|start date .*immediate/i.test(q)) {
@@ -773,22 +778,14 @@ async function _answerRadios(page, job) {
   const groups = await page.$$('fieldset, [role="radiogroup"], [data-test-form-builder-radio-button-form-component]').catch(() => []);
   for (const group of groups) {
     try {
-      // Extract the question with textContent (NOT innerText): LinkedIn renders the
-      // question label in a visually-hidden legend, so innerText returns empty.
-      let question = await group.evaluate(el => {
-        const clean = s => (s || '').replace(/\brequired\b/gi, '').replace(/\s+/g, ' ').trim().toLowerCase();
-        const sel = 'span[data-test-form-builder-radio-button-form-component__title], .fb-dash-form-element__label, legend span, legend, label:not([for])';
-        for (const node of el.querySelectorAll(sel)) {
-          const t = clean(node.textContent);
-          if (t.length > 3) return t;
-        }
-        return '';
-      }).catch(() => '');
       const radios = await group.$$('input[type="radio"]').catch(() => []);
       if (!radios.length) continue;
+
+      const groupText = (await group.evaluate(el => (el.textContent || '')).catch(() => '')) || '';
+      const gtLower = groupText.toLowerCase();
       // Skip LinkedIn's résumé picker (also radio buttons) — it's not a question.
-      const groupText = (await group.evaluate(el => (el.textContent || '').toLowerCase()).catch(() => '')) || '';
-      if (/\.pdf|\.docx|\bresume\b|\bcv\b/.test(groupText) && !/\byes\b|\bno\b/.test(question)) continue;
+      if (/\.pdf|\.docx|\bresume\b|\bcv\b/.test(gtLower) && !/\byes\b|\bno\b/.test(gtLower)) continue;
+
       const options = [];
       for (const radio of radios) {
         const labelText = await radio.evaluate(el => {
@@ -797,21 +794,49 @@ async function _answerRadios(page, job) {
                       el.closest('label') ||
                       el.parentElement?.querySelector('label') ||
                       el.nextElementSibling;
-          return lab ? lab.innerText.toLowerCase().trim() : '';
+          return lab ? (lab.innerText || lab.textContent || '').toLowerCase().trim() : '';
         }).catch(() => '');
         options.push({ radio, label: labelText });
       }
-      // Robust fallback: if no question label was extracted from the DOM, derive
-      // it from the group's own text minus the option labels + boilerplate. This
-      // survives LinkedIn DOM changes so sponsorship/right-to-work etc. are never
-      // left blank just because the label element moved.
-      if (!question || question.replace(/[^a-z]/g, '').length < 4) {
-        let q = (groupText || '').toLowerCase();
-        for (const o of options) { if (o.label) q = q.split(o.label).join(' '); }
-        q = q.replace(/this field is required|required|select an option|please select|\byes\b|\bno\b/gi, ' ')
-             .replace(/\s+/g, ' ').trim();
-        if (q.length > 4) question = q;
+
+      // Derive the QUESTION robustly. LinkedIn hides the label in a legend/span
+      // and the option labels ("Yes"/"No") are easily mistaken for the question
+      // (that produced the old "Unknown radio question: yesno" skips). Strip the
+      // option labels + boilerplate, and prefer the clause that ends in "?".
+      const stripOpts = (s) => {
+        let out = ' ' + (s || '').toLowerCase() + ' ';
+        for (const o of options) {
+          if (o.label && o.label.length >= 2) {
+            out = out.replace(new RegExp('\\b' + o.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi'), ' ');
+          }
+        }
+        return out
+          .replace(/this field is required|is required|select an option|please select|learn more|not sure how to answer[^?]*\??/gi, ' ')
+          .replace(/\byes\b|\bno\b/gi, ' ')
+          .replace(/\s+/g, ' ').trim();
+      };
+      let question = '';
+      // 1) strongest signal — a "?"-terminated clause in the group text
+      const qMatches = gtLower.match(/[^.?!]*\?/g);
+      if (qMatches) {
+        const cand = qMatches.map(stripOpts).filter(s => s.replace(/[^a-z]/g, '').length > 5);
+        if (cand.length) question = cand.sort((a, b) => b.length - a.length)[0];
       }
+      // 2) explicit label element
+      if (!question) {
+        const label = await group.evaluate(el => {
+          const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+          const sel = 'span[data-test-form-builder-radio-button-form-component__title], .fb-dash-form-element__label, legend span, legend, label:not([for])';
+          for (const node of el.querySelectorAll(sel)) {
+            const t = clean(node.textContent);
+            if (t.replace(/[^a-z]/gi, '').length > 5 && !/^(yesno|noyes)$/i.test(t.replace(/[^a-z]/gi, ''))) return t;
+          }
+          return '';
+        }).catch(() => '');
+        if (label) question = stripOpts(label);
+      }
+      // 3) last resort — whole group text minus options/boilerplate
+      if (!question || question.replace(/[^a-z]/g, '').length < 5) question = stripOpts(gtLower);
       let target = null;
       const _yn = sensitiveYesNo(question, job);
       if (_yn) {
