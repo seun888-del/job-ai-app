@@ -360,6 +360,11 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .bot-card-actions { display: flex; gap: 8px; }
 .bot-card-actions button { margin-top: 0; }
 
+/* Per-site run toggle — pick which job sites launch on "Start applying" */
+.agent-run-toggle { display: flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
+.agent-run-toggle input { width: 17px; height: 17px; accent-color: var(--primary); cursor: pointer; flex-shrink: 0; margin: 0; }
+.agent-run-toggle strong { line-height: 1; }
+
 .bot-status {
   font-size: 11px;
   font-weight: 700;

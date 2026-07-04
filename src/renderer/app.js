@@ -1174,10 +1174,14 @@ async function renderDashboard() {
         </div>`;
     }
 
+    const isEnabled = localStorage.getItem('agent_enabled_' + key) !== '0';
     return `
       <div class="card bot-card${isRunning ? ' bot-card-running' : ''}" id="bot-card-${key}">
         <div class="bot-card-header">
-          <strong>${label}</strong>
+          <label class="agent-run-toggle" title="Tick to include this job site when you click Start applying">
+            <input type="checkbox" class="agent-enabled" data-bot="${key}" ${isEnabled ? 'checked' : ''}>
+            <strong>${label}</strong>
+          </label>
           <span class="bot-status bot-status-${status[key]}" id="status-${key}">${status[key]}</span>
         </div>
         <div class="bot-card-actions">
@@ -1265,6 +1269,14 @@ async function renderDashboard() {
 
   bindViewCvButtons();
 
+  // Per-site run toggles: remember which job sites the user wants included when
+  // they click Start applying (default: all on).
+  content.querySelectorAll('.agent-enabled').forEach(cb => {
+    cb.addEventListener('change', () => {
+      try { localStorage.setItem('agent_enabled_' + cb.dataset.bot, cb.checked ? '1' : '0'); } catch (_) {}
+    });
+  });
+
   content.querySelectorAll('a[data-view]').forEach(a => {
     a.addEventListener('click', e => { e.preventDefault(); navigate(a.dataset.view); });
   });
@@ -1339,6 +1351,15 @@ async function renderDashboard() {
         errorEl.className = 'status-msg';
         errorEl.textContent = '';
         const op = btn.dataset.action === 'start-all' ? 'start' : 'stop';
+        // Only start the job sites the user has ticked. Stop always applies to all.
+        const targetKeys = op === 'start'
+          ? appAgentKeys.filter(k => localStorage.getItem('agent_enabled_' + k) !== '0')
+          : appAgentKeys;
+        if (op === 'start' && targetKeys.length === 0) {
+          errorEl.className = 'status-msg error';
+          errorEl.textContent = 'Select at least one job site to run — tick a box on a card below.';
+          return;
+        }
         // First time someone starts: warn that the Agent drives its own Chrome
         // windows and they must be left alone (not used as a normal browser).
         if (op === 'start' && !localStorage.getItem('browser_notice_seen')) {
@@ -1346,7 +1367,7 @@ async function renderDashboard() {
           try { localStorage.setItem('browser_notice_seen', '1'); } catch (_) {}
         }
         btn.disabled = true;
-        for (const key of appAgentKeys) {
+        for (const key of targetKeys) {
           try { await window.api.bot[op](key); } catch (err) {
             errorEl.className = 'status-msg error';
             errorEl.textContent = `Error starting ${BOT_LABELS[key]}: ${err.message}`;
@@ -1818,8 +1839,8 @@ const TOUR_STEPS = [
   {
     view: 'dashboard',
     title: 'All set: start applying',
-    tip: 'When you click Start applying, the Agents open a Chrome window for each connected job site and work inside it automatically, searching, tailoring your CV, and applying to matching roles on their own.',
-    action: 'Click "Start applying" and the checklist flags anything still missing. Important: the Chrome windows that open are the Agent working, not your own browser. Please leave them alone. Do not click, type in, or close them. Simply minimise them and carry on with your day. Closing a window stops that Agent.',
+    tip: 'Each connected job site has a tick box on its card. Tick the sites you want the Agents to run and untick any you want to skip. When you click Start applying, only the ticked sites launch, opening a Chrome window for each and working inside it automatically, searching, tailoring your CV, and applying to matching roles on their own.',
+    action: 'Tick the job sites you want to run, then click "Start applying" (the checklist flags anything still missing). Important: the Chrome windows that open are the Agent working, not your own browser. Please leave them alone. Do not click, type in, or close them. Simply minimise them and carry on with your day. Closing a window stops that Agent.',
   },
 ];
 
