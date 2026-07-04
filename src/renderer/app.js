@@ -295,19 +295,12 @@ async function renderPersonal() {
 
 // â”€â”€ 2. Job Site Login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function renderLogin() {
-  const [reedCred, liCred, gdCred, cvlibCred, tjCred, cwCred] = await Promise.all([
-    window.api.credentials.get('reed'),
-    window.api.credentials.get('linkedin'),
-    window.api.credentials.get('glassdoor'),
-    window.api.credentials.get('cvlibrary'),
-    window.api.credentials.get('totaljobs'),
-    window.api.credentials.get('cwjobs'),
-  ]);
+  const reedCred = await window.api.credentials.get('reed');
 
   content.innerHTML = `
     <div class="page-header">
       <h2>Job Site Login</h2>
-      <p>Used by the Agent to sign in and submit applications on your behalf. Stored encrypted on this device.</p>
+      <p>Used by the Agents to sign in and submit applications on your behalf. Stored encrypted on this device.</p>
     </div>
 
     <div class="card">
@@ -322,34 +315,6 @@ async function renderLogin() {
       <h3>LinkedIn</h3>
       <p style="font-size:13px;color:#64748b;margin:0 0 12px">LinkedIn uses a persistent browser session instead of a stored password. Use the <strong>Connect account</strong> button on the Dashboard — log in once and the session is saved automatically.</p>
       <button class="secondary" id="go-dashboard-li">Go to Dashboard →</button>
-    </div>
-
-    <div class="card">
-      <h3>Glassdoor</h3>
-      <p style="color:#888;font-size:13px;margin:0 0 12px">Click Connect to open a Chrome window and log in to Glassdoor. The Agent will reuse that session automatically — no bot detection.</p>
-      <button class="primary" id="connect-gd">Connect Glassdoor Account</button>
-      <div class="status-msg" id="status-gd"></div>
-    </div>
-
-    <div class="card">
-      <h3>CV-Library</h3>
-      <p style="color:#888;font-size:13px;margin:0 0 12px">Click Connect to open a Chrome window and log in to CV-Library. The Agent will reuse that session automatically — no bot detection.</p>
-      <button class="primary" id="connect-cvlib">Connect CV-Library Account</button>
-      <div class="status-msg" id="status-cvlib"></div>
-    </div>
-
-    <div class="card">
-      <h3>Totaljobs</h3>
-      <p style="color:#888;font-size:13px;margin:0 0 12px">Click Connect to open a Chrome window and log in to Totaljobs. The Agent will reuse that session automatically — no bot detection.</p>
-      <button class="primary" id="connect-tj">Connect Totaljobs Account</button>
-      <div class="status-msg" id="status-tj"></div>
-    </div>
-
-    <div class="card">
-      <h3>CWJobs</h3>
-      <p style="color:#888;font-size:13px;margin:0 0 12px">Click Connect to open a Chrome window and log in to CWJobs. The Agent will reuse that session automatically — no bot detection.</p>
-      <button class="primary" id="connect-cw">Connect CWJobs Account</button>
-      <div class="status-msg" id="status-cw"></div>
     </div>
   `;
 
@@ -369,36 +334,6 @@ async function renderLogin() {
     saveCredential('reed', 'reed_email', 'reed_pass', 'status-reed', 'Saved — Reed Agent will open a login window on first start to verify'));
 
   document.getElementById('go-dashboard-li').addEventListener('click', () => navigate('dashboard'));
-
-  const connectSite = async (site, loginUrl, btnId, statusId) => {
-    const btn = document.getElementById(btnId);
-    const statusEl = document.getElementById(statusId);
-    btn.disabled = true;
-    btn.textContent = 'Opening Chrome...';
-    showStatus(statusEl, 'Log in to the site in the Chrome window, then close it when done.', 'info');
-    const result = await window.api.site.connect(site, loginUrl);
-    btn.disabled = false;
-    btn.textContent = btn.dataset.label;
-    if (result.success) {
-      showStatus(statusEl, 'Session saved — Agent will start already logged in next time.');
-    } else {
-      showStatus(statusEl, `Error: ${result.error}`, 'error');
-    }
-  };
-
-  document.getElementById('connect-gd').dataset.label    = 'Connect Glassdoor Account';
-  document.getElementById('connect-cvlib').dataset.label = 'Connect CV-Library Account';
-  document.getElementById('connect-tj').dataset.label    = 'Connect Totaljobs Account';
-  document.getElementById('connect-cw').dataset.label    = 'Connect CWJobs Account';
-
-  document.getElementById('connect-gd').addEventListener('click', () =>
-    connectSite('glassdoor', 'https://www.glassdoor.co.uk', 'connect-gd', 'status-gd'));
-  document.getElementById('connect-cvlib').addEventListener('click', () =>
-    connectSite('cvlibrary', 'https://www.cv-library.co.uk/login', 'connect-cvlib', 'status-cvlib'));
-  document.getElementById('connect-tj').addEventListener('click', () =>
-    connectSite('totaljobs', 'https://www.totaljobs.com/en-GB/candidate/login', 'connect-tj', 'status-tj'));
-  document.getElementById('connect-cw').addEventListener('click', () =>
-    connectSite('cwjobs',    'https://www.cwjobs.co.uk/', 'connect-cw', 'status-cw'));
 }
 
 // â”€â”€ 3. CVs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -425,7 +360,8 @@ async function renderCVs() {
             <div class="cv-card-section">
               <strong>Suggested roles</strong>
               <div class="tag-list">${cv.suggested_roles.map(r => `<div class="tag">${r}</div>`).join('')}</div>
-              <button class="secondary" data-cv-id="${cv.id}">+ Add these as search terms</button>
+              <p class="cv-suggest-hint">Add these to your search so the Agents look for them on Reed and LinkedIn.</p>
+              <button class="primary cv-add-terms-btn" data-cv-id="${cv.id}">＋ Add these as search terms</button>
             </div>` : ''}
           ${cv.extracted_keywords.length ? `
             <div class="cv-card-section">
@@ -485,7 +421,7 @@ async function renderCVs() {
       const cv = cvs.find(c => c.id === cvId);
       const roles = (cv && cv.suggested_roles) || [];
       const bodyHtml = roles.length
-        ? `<p style="margin:0 0 10px">These roles will be added to your <strong>Search Preferences</strong>, so the Agents search for them across all job sites:</p>
+        ? `<p style="margin:0 0 10px">These roles will be added to your <strong>Search Preferences</strong>, so the Agents search for them on Reed and LinkedIn:</p>
            <div class="tag-list">${roles.map(r => `<div class="tag">${r}</div>`).join('')}</div>`
         : `<p style="margin:0">Add the suggested roles from this CV to your Search Preferences?</p>`;
       const ok = await showConfirm({ title: 'Add search terms', bodyHtml, confirmText: 'Add terms' });
@@ -1214,12 +1150,13 @@ async function renderDashboard() {
     return `
       <div class="card bot-card${isRunning ? ' bot-card-running' : ''}" id="bot-card-${key}">
         <div class="bot-card-header">
-          <label class="agent-run-toggle" title="Tick to include this job site when you click Start applying">
+          <label class="agent-run-toggle" title="Tick to run this site when you press Start applying — untick to skip it">
             <input type="checkbox" class="agent-enabled" data-bot="${key}" ${isEnabled ? 'checked' : ''}>
             <strong>${label}</strong>
           </label>
           <span class="bot-status bot-status-${status[key]}" id="status-${key}">${status[key]}</span>
         </div>
+        <div class="agent-run-state ${isEnabled ? 'on' : 'off'}" id="run-state-${key}">${isEnabled ? '✓ Included — runs when you press Start applying' : '○ Unticked — this site will be skipped'}</div>
         <div class="bot-card-actions">
           ${needsCreds ? `<button class="btn-connect" data-bot="${key}" data-action="connect">Connect account</button>` : ''}
           ${!needsCreds && CONNECT_URLS[key] ? `<button class="btn-connect" data-bot="${key}" data-action="connect-session">Connect account</button>` : ''}
@@ -1253,6 +1190,7 @@ async function renderDashboard() {
         title="The AI tailoring engine runs automatically while the Agents are applying — you don't start it yourself.">${scorerRunning ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
     </div>
 
+    <p class="bot-controls-hint">Tick the box on a site to include it, then press <strong>Start applying</strong>. Untick any site you want to skip.</p>
     <div class="bot-controls">
       ${appAgentKeys.map(key => buildBotCard(key, BOT_LABELS[key])).join('')}
     </div>
@@ -1310,6 +1248,13 @@ async function renderDashboard() {
   content.querySelectorAll('.agent-enabled').forEach(cb => {
     cb.addEventListener('change', () => {
       try { localStorage.setItem('agent_enabled_' + cb.dataset.bot, cb.checked ? '1' : '0'); } catch (_) {}
+      const state = document.getElementById('run-state-' + cb.dataset.bot);
+      if (state) {
+        state.className = 'agent-run-state ' + (cb.checked ? 'on' : 'off');
+        state.textContent = cb.checked
+          ? '✓ Included — runs when you press Start applying'
+          : '○ Unticked — this site will be skipped';
+      }
     });
   });
 
@@ -1345,9 +1290,7 @@ async function renderDashboard() {
         const tip = document.createElement('p');
         tip.id = `connect-tip-${site}`;
         tip.style.cssText = 'font-size:11px;color:var(--text-muted);margin:4px 0 0;text-align:center;';
-        tip.textContent = site === 'glassdoor'
-          ? 'Two tabs opened: log into Indeed (tab 1) then Glassdoor (tab 2), then click Start.'
-          : 'Log in to the site, then click Start - the browser closes automatically.';
+        tip.textContent = 'Log in to the site, then click Start - the browser closes automatically.';
         const card = btn.closest('.bot-card');
         if (card && !card.querySelector(`#connect-tip-${site}`)) card.appendChild(tip);
         return;
@@ -1851,13 +1794,13 @@ const TOUR_STEPS = [
   {
     view: 'cvs',
     title: 'Step 2: Upload your CV',
-    tip: 'Upload your CV as a PDF. Before each application, the AI rewrites your professional summary and bullet points to match that specific job, so it reads naturally to a recruiter rather than being stuffed with keywords.',
-    action: 'Click "Add CV" and upload at least one PDF. You can add several CVs for different role types and the Agent picks the best one for each job.',
+    tip: 'Upload your CV as a Word document (.docx) for the best results — it is read most accurately, so your tailored CV keeps every detail. PDF also works but can occasionally be misread. Before each application, the AI rewrites your professional summary and bullet points to match that specific job, so it reads naturally to a recruiter rather than being stuffed with keywords.',
+    action: 'Click "Add CV" and upload at least one CV, ideally a Word (.docx) file. You can add several CVs for different role types and the Agent picks the best one for each job.',
   },
   {
     view: 'search',
     title: 'Step 3: Search preferences',
-    tip: 'Add the job titles you want to apply for, for example "IT Support Analyst" or "Service Desk Engineer". Every Agent uses these terms when searching across all job sites.',
+    tip: 'Add the job titles you want to apply for, for example "IT Support Analyst" or "Service Desk Engineer". Both the Reed and LinkedIn Agents use these terms when searching.',
     action: 'Add at least one search term, set your preferred work type and salary, then click Save.',
   },
   {
@@ -1874,9 +1817,15 @@ const TOUR_STEPS = [
   },
   {
     view: 'dashboard',
+    title: 'Step 6: Choose which sites to run',
+    tip: 'Each job site card has a tick box in its top-left corner, next to the site name. A ticked box means that site runs when you press Start applying; unticking it skips that site. Under the box, the card tells you plainly whether the site is "Included" or "Unticked — skipped", so you are never guessing. Both Reed and LinkedIn are ticked by default.',
+    action: 'Leave both ticked to run Reed and LinkedIn, or untick one if you only want the other. The line under the tick box updates to confirm your choice.',
+  },
+  {
+    view: 'dashboard',
     title: 'All set: start applying',
-    tip: 'Each connected job site has a tick box on its card. Tick the sites you want the Agents to run and untick any you want to skip. When you click Start applying, only the ticked sites launch, opening a Chrome window for each and working inside it automatically, searching, tailoring your CV, and applying to matching roles on their own.',
-    action: 'Tick the job sites you want to run, then click "Start applying" (the checklist flags anything still missing). Important: the Chrome windows that open are the Agent working, not your own browser. Please leave them alone. Do not click, type in, or close them. Simply minimise them and carry on with your day. Closing a window stops that Agent.',
+    tip: 'When you click Start applying, only the ticked sites launch — each opens a Chrome window and works inside it automatically, searching, tailoring your CV, and applying to matching roles on its own.',
+    action: 'Click "Start applying" (the checklist flags anything still missing). Important: the Chrome windows that open are the Agent working, not your own browser. Please leave them alone. Do not click, type in, or close them. Simply minimise them and carry on with your day. Closing a window stops that Agent.',
   },
 ];
 
@@ -1981,9 +1930,9 @@ function initOnboarding() {
   modal.innerHTML = `
     <div class="welcome-logo"></div>
     <h2>Welcome to Job-AI</h2>
-    <p>Your automated job application assistant. Set it up once and the Agents search, tailor your CV, and apply to jobs across multiple sites for you, around the clock.</p>
+    <p>Your automated job application assistant. Set it up once and the Agents search, tailor your CV, and apply to jobs on Reed and LinkedIn for you, around the clock.</p>
     <div class="welcome-features">
-      <div class="welcome-feature"><strong>6 Job Sites</strong><span>Reed, LinkedIn, Glassdoor, CV-Library, Totaljobs and CWJobs</span></div>
+      <div class="welcome-feature"><strong>2 Job Sites</strong><span>Reed and LinkedIn, each with its own Agent</span></div>
       <div class="welcome-feature"><strong>AI CV Tailoring</strong><span>Every CV is rewritten to match the job before it is submitted</span></div>
       <div class="welcome-feature"><strong>Secure Login</strong><span>Log in once per site. Your session is saved locally and never shared</span></div>
       <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>

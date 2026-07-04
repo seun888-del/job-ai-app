@@ -376,10 +376,19 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .bot-card-actions { display: flex; gap: 8px; }
 .bot-card-actions button { margin-top: 0; }
 
+/* One-line explainer above the site cards so the tick boxes aren't a mystery */
+.bot-controls-hint { font-size: 13px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.45; }
+
 /* Per-site run toggle — pick which job sites launch on "Start applying" */
+.bot-card-header { margin-bottom: 6px; }
 .agent-run-toggle { display: flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
-.agent-run-toggle input { width: 17px; height: 17px; accent-color: var(--primary); cursor: pointer; flex-shrink: 0; margin: 0; }
+.agent-run-toggle input { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; flex-shrink: 0; margin: 0; }
 .agent-run-toggle strong { line-height: 1; }
+
+/* Plain-language confirmation of what the tick box means, updated live */
+.agent-run-state { font-size: 12px; font-weight: 600; margin: 0 0 14px; letter-spacing: 0.01em; }
+.agent-run-state.on { color: var(--success, #16a34a); }
+.agent-run-state.off { color: var(--text-faint); }
 
 .bot-status {
   font-size: 11px;
@@ -468,6 +477,20 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .cv-card-file { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
 .cv-card-section { margin-top: 14px; }
 .cv-card-section strong { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* "Add these as search terms" — a primary call to action so users notice it */
+.cv-suggest-hint { font-size: 12.5px; color: var(--text-muted); margin: 10px 0 8px; line-height: 1.4; }
+.cv-add-terms-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-weight: 600; padding: 9px 16px; margin-top: 0;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.28);
+  animation: cvAddPulse 2.6s ease-in-out 3;
+}
+.cv-add-terms-btn:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(37, 99, 235, 0.35); }
+@keyframes cvAddPulse {
+  0%, 100% { box-shadow: 0 1px 3px rgba(37, 99, 235, 0.28); }
+  50%      { box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18); }
+}
 
 /* ── Tags ─────────────────────────────────────────────────────────────── */
 .tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
