@@ -805,6 +805,10 @@ async function renderLicense() {
     const result = await window.api.license.verify(license.license_key);
     if (result.ok) {
       document.getElementById('license-current').innerHTML = renderLicenseStatus(result.license, result.usage);
+      dashboardHasLicense = licenseIsActive(result.license);
+      // Reconcile the expiry banner in case the status changed server-side
+      // (e.g. a renewed subscription or an extended trial) since app launch.
+      await refreshExpiryBanner();
     }
   }
 
@@ -856,8 +860,14 @@ async function renderLicense() {
       if (result.ok) {
         document.getElementById('license-current').innerHTML = renderLicenseStatus(result.license, result.usage);
         showStatus(statusEl, 'License activated. Agents are now unlocked.', 'success');
-        dashboardHasLicense = true;
+        dashboardHasLicense = licenseIsActive(result.license);
         lockKey();   // key is now active — make the field read-only + greyed
+        // Refresh every license-dependent surface immediately so the app works
+        // without a restart: clear the stale "trial ended" banner and update the
+        // nav progress. The dashboard re-reads the license on its next render, so
+        // the Start-applying gate opens the moment the user returns to it.
+        await refreshExpiryBanner();
+        await updateNavProgress();
       } else {
         showStatus(statusEl, LICENSE_ERRORS[result.error] || `Error: ${result.error}`, 'error');
       }
@@ -1720,14 +1730,24 @@ function openCredModal(botName, existingEmail = '') {
 }
 
 // â”€â”€ Expiry banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-async function initExpiryBanner() {
+// Idempotent: safe to call at startup AND after a license is activated/changed.
+// It always resolves to the correct state — including CLEARING a stale banner
+// once a valid license appears (previously it early-returned and left the old
+// "trial ended" banner on screen until the app was restarted).
+async function refreshExpiryBanner() {
+  const banner = document.getElementById('expiry-banner');
+  if (!banner) return;
+  const clear = () => { banner.className = 'expiry-banner'; banner.innerHTML = ''; banner.style.display = 'none'; };
+
   const license = await window.api.license.get();
-  if (!license?.license_key || !license.expires_at) return;
+  if (!license?.license_key || !license.expires_at) return clear();
 
   const daysLeft = Math.ceil((new Date(license.expires_at) - Date.now()) / (1000 * 60 * 60 * 24));
-  if (daysLeft > 14) return;
+  // A comfortably-valid license needs no banner. This is what makes activation
+  // instant: the moment a paid/renewed key is active with runway to spare, any
+  // lingering expiry banner disappears without a restart.
+  if (licenseIsActive(license) && daysLeft > 14) return clear();
 
-  const banner = document.getElementById('expiry-banner');
   // Professional, calm by default: brand blue while the trial is active, a
   // single amber nudge on the final day, red only once actually expired.
   const urgency = daysLeft <= 0 ? 'danger' : (daysLeft <= 1 ? 'warning' : 'info');
@@ -1738,6 +1758,7 @@ async function initExpiryBanner() {
         ? `Your free trial expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`
         : `Your license expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`);
 
+  banner.style.display = '';
   banner.className = `expiry-banner ${urgency}`;
   banner.innerHTML = `
     <span>${msg}</span>
@@ -2077,7 +2098,7 @@ if (window.api?.onUpdateReady) {
 // Initial view
 render('personal').then(() => {
   updateNavProgress();
-  initExpiryBanner();
+  refreshExpiryBanner();
   initOnboarding();
 }).catch(err => {
   content.innerHTML = `<div style="padding:40px;color:#e74c3c;font-family:sans-serif"><h3>Failed to load</h3><p>${err.message}</p><p>Try restarting the app.</p></div>`;
