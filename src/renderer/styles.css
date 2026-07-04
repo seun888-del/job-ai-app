@@ -250,6 +250,15 @@ main::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
   color: var(--text);
   transition: border-color var(--transition), box-shadow var(--transition);
 }
+/* Activated license key: read-only + visibly greyed so it can't be edited by accident */
+.field input.input-locked {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  border-style: dashed;
+}
+.field input.input-locked:focus { border-color: var(--border); box-shadow: none; }
+
 .field input:focus, .field select:focus {
   outline: none;
   border-color: var(--primary);

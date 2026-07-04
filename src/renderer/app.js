@@ -810,6 +810,7 @@ async function renderLicense() {
       <h3>Activate a License Key</h3>
       <div class="field"><label>License key</label><input id="license_key" placeholder="jb_..." value="${license?.license_key || ''}"></div>
       <button class="primary" id="activate">Activate</button>
+      <button class="btn-text-muted" id="change-key" style="display:none">Change key</button>
       <div class="status-msg" id="status"></div>
     </div>
 
@@ -851,11 +852,31 @@ async function renderLicense() {
 
   // (In-app trial signup removed — users arrive with a key from their welcome email.)
 
-  document.getElementById('activate').addEventListener('click', async () => {
-    const key = document.getElementById('license_key').value.trim();
+  // Once a key is activated, lock the field (read-only + greyed) so it can't be
+  // changed by accident. "Change key" re-enables editing for a new/renewed key.
+  const _keyInput = document.getElementById('license_key');
+  const _activateBtn = document.getElementById('activate');
+  const _changeBtn = document.getElementById('change-key');
+  const lockKey = () => {
+    _keyInput.readOnly = true;
+    _keyInput.classList.add('input-locked');
+    _activateBtn.style.display = 'none';
+    _changeBtn.style.display = '';
+  };
+  const unlockKey = () => {
+    _keyInput.readOnly = false;
+    _keyInput.classList.remove('input-locked');
+    _changeBtn.style.display = 'none';
+    _activateBtn.style.display = '';
+    _keyInput.focus();
+  };
+  if (hasLicense) lockKey();
+  _changeBtn.addEventListener('click', unlockKey);
+
+  _activateBtn.addEventListener('click', async () => {
+    const key = _keyInput.value.trim();
     const statusEl = document.getElementById('status');
-    const btn = document.getElementById('activate');
-    btn.disabled = true;
+    _activateBtn.disabled = true;
     statusEl.className = 'status-msg';
     statusEl.textContent = 'Checking...';
     try {
@@ -864,11 +885,12 @@ async function renderLicense() {
         document.getElementById('license-current').innerHTML = renderLicenseStatus(result.license, result.usage);
         showStatus(statusEl, 'License activated. Agents are now unlocked.', 'success');
         dashboardHasLicense = true;
+        lockKey();   // key is now active — make the field read-only + greyed
       } else {
         showStatus(statusEl, LICENSE_ERRORS[result.error] || `Error: ${result.error}`, 'error');
       }
     } finally {
-      btn.disabled = false;
+      _activateBtn.disabled = false;
     }
   });
 
