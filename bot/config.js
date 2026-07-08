@@ -13,10 +13,14 @@ if (!USER_DATA) {
   throw new Error('JOBBOT_USERDATA environment variable is required');
 }
 
-// Hard ceiling on applications/day (total across all agents). Enforced here so a
-// tampered DB or stale high value can never exceed it. Keep in sync with the UI
-// dropdown in src/renderer/app.js.
+// Hard ceilings on applications/day (total across all agents), gated by plan.
+// Enforced here so a tampered DB or stale high value can never exceed the plan's
+// cap. Keep in sync with the UI dropdown in src/renderer/app.js.
+//   • Paid (license status 'active') → 25/day
+//   • Free trial (anything else)     → 10/day
+// This is a soft/local cap; the backend AI daily quota is the real backstop.
 const DAILY_APPLICATION_CAP = 25;
+const TRIAL_APPLICATION_CAP = 10;
 
 // ── Static paths — available synchronously at require-time ──
 const OUTPUT_DIR = path.join(USER_DATA, 'output');
@@ -141,10 +145,19 @@ const cfg = {
       cfg.JOB_AGE = prefs.job_age || 'r1209600';
 
       cfg.SKIP_EXTERNAL_SITES = !!profile.skip_external_sites;
-      // Respect the user's chosen daily limit, but hard-cap at 25/day regardless
-      // of what's stored (protects the shared proxy IP and the user's accounts —
-      // can't be bypassed by editing the DB).
-      cfg.MAX_APPLICATIONS_PER_DAY = Math.min(profile.max_applications_per_day ?? 15, DAILY_APPLICATION_CAP);
+      // Plan-gated daily cap: paid ('active') → 25, free trial → 10. Default to the
+      // TRIAL cap if the licence status can't be read, so we never over-grant.
+      let planCap = TRIAL_APPLICATION_CAP;
+      try {
+        const lic = get('SELECT status FROM license WHERE id = 1');
+        if (lic && lic.status === 'active') planCap = DAILY_APPLICATION_CAP;
+      } catch (_) { /* no license table → treat as trial */ }
+      // Respect the user's chosen daily limit, but hard-cap at the plan ceiling
+      // (protects the shared proxy IP and the user's accounts — can't be bypassed
+      // by editing the stored value).
+      cfg.MAX_APPLICATIONS_PER_DAY = Math.min(profile.max_applications_per_day ?? 15, planCap);
+      cfg.PLAN_CAP = planCap;
+      console.log(`[Config] Daily application cap: ${cfg.MAX_APPLICATIONS_PER_DAY}/day (plan ceiling ${planCap} — ${planCap === DAILY_APPLICATION_CAP ? 'paid' : 'trial'})`);
       cfg.MIN_SCORE = profile.min_match_score ?? 0;
 
       cfg.SCHEDULE_ENABLED = !!(prefs.schedule_enabled);

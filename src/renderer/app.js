@@ -602,12 +602,27 @@ async function renderSearch() {
 
   // Pre-fill profile-backed fields
   const profile = await window.api.profile.get();
-  // Snap any stored value (incl. legacy values above the cap) to a valid option ≤ 25
-  const allowedApps = [5, 10, 15, 20, 25];
-  const storedApps = Math.min(Number(profile.max_applications_per_day) || 15, 25);
-  document.getElementById('max_apps').value = String(
-    allowedApps.reduce((a, b) => Math.abs(b - storedApps) <= Math.abs(a - storedApps) ? b : a, 15)
+  // Plan-gated daily application cap: free trial = 10/day, paid ('active') = 25/day.
+  const license = await window.api.license.get().catch(() => null);
+  const planCap = (license && license.status === 'active') ? 25 : 10;
+  const maxAppsSel = document.getElementById('max_apps');
+  // Trial users see the higher options as locked "(Pro)".
+  Array.from(maxAppsSel.options).forEach(o => {
+    if (Number(o.value) > planCap) { o.disabled = true; if (!/Pro/.test(o.text)) o.text = `${o.value} (Pro)`; }
+  });
+  // Snap any stored value (incl. legacy values above the cap) to a valid option ≤ planCap
+  const allowedApps = [5, 10, 15, 20, 25].filter(v => v <= planCap);
+  const storedApps = Math.min(Number(profile.max_applications_per_day) || Math.min(15, planCap), planCap);
+  maxAppsSel.value = String(
+    allowedApps.reduce((a, b) => Math.abs(b - storedApps) <= Math.abs(a - storedApps) ? b : a, allowedApps[allowedApps.length - 1])
   );
+  // Hint doubles as an upgrade nudge on the trial.
+  const maxAppsHint = maxAppsSel.parentElement.querySelector('.field-hint');
+  if (maxAppsHint) {
+    maxAppsHint.textContent = planCap === 25
+      ? 'Total across all agents. Capped at 25/day to protect your accounts and keep applications looking human.'
+      : 'Free trial: up to 10 applications/day. Upgrade to Pro for up to 25/day.';
+  }
   document.getElementById('min_score').value = profile.min_match_score ?? '';
   document.getElementById('seek_sponsorship').checked = !!profile.seek_sponsorship;
 
@@ -619,7 +634,7 @@ async function renderSearch() {
       job_age: document.getElementById('job_age').value,
     });
     await window.api.profile.save({
-      max_applications_per_day: Math.min(Number(document.getElementById('max_apps').value) || 15, 25),
+      max_applications_per_day: Math.min(Number(document.getElementById('max_apps').value) || 15, planCap),
       min_match_score: document.getElementById('min_score').value !== '' ? Number(document.getElementById('min_score').value) : null,
       seek_sponsorship: document.getElementById('seek_sponsorship').checked ? 1 : 0,
     });
@@ -2023,10 +2038,6 @@ function renderHelp() {
     {
       q: 'Windows shows a security warning when I install Job-AI - is it safe?',
       a: 'Yes, this is normal for new software that has not yet been code-signed. Click “More info” then “Run anyway” to proceed. Your device is not at risk.'
-    },
-    {
-      q: 'Mac shows “unidentified developer” - what do I do?',
-      a: 'Go to System Settings → Privacy & Security, scroll down and click “Open Anyway”. This is a standard Mac security prompt for new apps and is safe to bypass.'
     },
     {
       q: 'Are my login sessions shared or stored online?',
