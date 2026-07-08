@@ -125,6 +125,7 @@ async function renderPersonal() {
       <h3>Contact Information</h3>
       <div class="field-row">
         <div class="field"><label>First name</label><input id="first_name" value="${p.first_name || ''}"></div>
+        <div class="field"><label>Middle name <span class="field-note">optional</span></label><input id="middle_name" value="${p.middle_name || ''}" placeholder="Leave blank if you have none"></div>
         <div class="field"><label>Last name</label><input id="last_name" value="${p.last_name || ''}"></div>
       </div>
       <div class="field-row">
@@ -268,6 +269,7 @@ async function renderPersonal() {
     await window.api.profile.save({
       country: document.getElementById('country').value,
       first_name: document.getElementById('first_name').value,
+      middle_name: document.getElementById('middle_name').value.trim(),
       last_name: document.getElementById('last_name').value,
       phone: document.getElementById('phone').value,
       email: document.getElementById('email').value,
@@ -1073,12 +1075,20 @@ const CONNECT_URLS = {
 };
 const CRED_SITE_NAMES = { reed: 'Reed.co.uk', linkedin: 'LinkedIn' };
 
+// Some stored job titles contain the whole scraped card blob (title + company +
+// location + "Easy Apply" …). The real title is the first non-empty line — show
+// only that, and drop LinkedIn's "… with verification" a11y suffix.
+function cleanTitle(t) {
+  const first = String(t || '').split('\n').map(s => s.trim()).find(Boolean) || '';
+  return first.replace(/\s+with verification$/i, '');
+}
+
 // Recent Activity rows — shared by the initial render and the 5 s poll so the
 // table stays in sync in real time, not just on page load.
 function recentRowsHtml(recent) {
   return (recent || []).map(r => `
             <tr>
-              <td>${r.title || ''}</td>
+              <td>${cleanTitle(r.title)}</td>
               <td>${r.company || ''}</td>
               <td><span class="badge ${statusBadgeClass(r.status)}">${r.status}</span></td>
               <td class="cv-name-cell">${r.cv_name || '—'}</td>
@@ -1490,6 +1500,7 @@ async function renderTracker() {
       <div class="card"><div class="empty-state">No applications tracked yet. The tracker syncs automatically once Agents start applying.</div></div>
     ` : `
     <div class="card card-wide">
+      <div class="table-scroll">
       <table class="data-table tracker-table">
         <thead>
           <tr><th>Role</th><th>Company</th><th>Source</th><th>Applied</th><th>Stage</th><th>Notes</th><th></th></tr>
@@ -1497,16 +1508,17 @@ async function renderTracker() {
         <tbody>
           ${entries.map(e => `
             <tr data-id="${e.id}">
-              <td class="tracker-title">${e.title ? `<a href="${e.url || '#'}" class="tracker-link" data-url="${e.url || ''}">${e.title}</a>` : '—'}</td>
+              <td class="tracker-title">${e.title ? `<a href="${e.url || '#'}" class="tracker-link" data-url="${e.url || ''}">${cleanTitle(e.title)}</a>` : '—'}</td>
               <td>${e.company || '—'}</td>
               <td>${e.source ? `<span class="tracker-source-badge" style="background:${SOURCE_BADGE[e.source] || '#2563eb'}">${e.source}</span>` : '—'}</td>
               <td>${e.applied_at ? e.applied_at.slice(0, 10) : '—'}</td>
               <td>${stageHtml(e.id, e.stage || 'applied')}</td>
-              <td><input class="tracker-notes-input" data-id="${e.id}" value="${(e.notes || '').replace(/"/g, '&quot;')}" placeholder="Add notes..."></td>
+              <td><textarea class="tracker-notes-input" data-id="${e.id}" rows="1" placeholder="Add notes...">${(e.notes || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea></td>
               <td><button class="tracker-delete-btn" data-id="${e.id}">×</button></td>
             </tr>`).join('')}
         </tbody>
       </table>
+      </div>
     </div>`}
   `;
 
@@ -1524,12 +1536,14 @@ async function renderTracker() {
     });
   });
 
+  // Notes: auto-growing textarea — expands with the text (up to the CSS max, then
+  // scrolls). Enter inserts a newline; it saves when the field loses focus.
+  const autoGrowNotes = (el) => { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px'; };
   content.querySelectorAll('.tracker-notes-input').forEach(inp => {
+    autoGrowNotes(inp); // size to any existing note on render
+    inp.addEventListener('input', () => autoGrowNotes(inp));
     inp.addEventListener('blur', async () => {
       await window.api.tracker.update(Number(inp.dataset.id), { notes: inp.value });
-    });
-    inp.addEventListener('keydown', async e => {
-      if (e.key === 'Enter') { inp.blur(); }
     });
   });
 

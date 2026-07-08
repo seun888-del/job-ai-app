@@ -2,6 +2,7 @@ module.exports = `
 CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   first_name TEXT,
+  middle_name TEXT,
   last_name TEXT,
   phone TEXT,
   email TEXT,

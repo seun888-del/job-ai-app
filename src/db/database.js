@@ -92,6 +92,9 @@ async function init(userDataPath) {
 
   // Migration: add new profile columns
   const profileCols = db.prepare('PRAGMA table_info(profile)').all().map(c => c.name);
+  if (!profileCols.includes('middle_name')) {
+    db.exec('ALTER TABLE profile ADD COLUMN middle_name TEXT');
+  }
   if (!profileCols.includes('salary_expectation')) {
     db.exec('ALTER TABLE profile ADD COLUMN salary_expectation TEXT');
   }

@@ -94,6 +94,7 @@ const cfg = {
 
       cfg.APPLICANT = {
         firstName: profile.first_name || '',
+        middleName: profile.middle_name || '',
         lastName: profile.last_name || '',
         phone: profile.phone || '',
         email: profile.email || '',

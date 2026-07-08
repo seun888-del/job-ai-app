@@ -3,6 +3,8 @@ const fs      = require('fs');
 const path    = require('path');
 const stealth = require('./stealth');
 const captcha = require('./captcha_solver');
+const ai      = require('./question_ai'); // LLM fallback for unknown screening questions
+const cvValidate = require('./cv_validate'); // reject corrupt/empty CVs before attaching
 
 const SSDIR = cfg.SCREENSHOTS_DIR;
 const DELAY = (ms) => new Promise(r => setTimeout(r, ms));
@@ -99,7 +101,13 @@ async function searchJobs(page, searchTerm, limit = 10) {
       const companyEl = card && card.querySelector(
         '[class*="company-name"], [class*="subtitle"], .artdeco-entity-lockup__subtitle'
       );
-      const title   = (titleEl   ? titleEl.innerText   : a.innerText || 'Unknown').trim();
+      // LinkedIn's obfuscated classes often make the title selector miss, so we fall
+      // back to the anchor text — which is the WHOLE card. The real title is always
+      // the first non-empty line; keep only that (and drop LinkedIn's a11y duplicate
+      // "<title> with verification" suffix) so we don't store the full description.
+      const firstLine = (s) => (String(s || '').split('\n').map(x => x.trim()).find(Boolean) || 'Unknown');
+      const rawTitle = titleEl ? titleEl.innerText : (a.getAttribute('aria-label') || a.innerText);
+      const title   = firstLine(rawTitle).replace(/\s+with verification$/i, '').trim();
       const company = (companyEl ? companyEl.innerText : 'Unknown').trim().split('\n')[0];
 
       return { title, company, url: fullUrl, jobId };
@@ -423,9 +431,10 @@ function buildTextareaAnswer(label, job) {
 }
 
 async function fillContactFields(page) {
-  const { firstName, lastName, phone, email, location } = cfg.APPLICANT;
+  const { firstName, middleName, lastName, phone, email, location } = cfg.APPLICANT;
   const simpleFields = [
     { sel: 'input[id*="firstName"], input[name*="firstName"]', val: firstName },
+    { sel: 'input[id*="middleName"], input[name*="middleName"]', val: middleName },
     { sel: 'input[id*="lastName"],  input[name*="lastName"]',  val: lastName  },
     { sel: 'input[id*="phone"],     input[name*="phone"]',     val: phone     },
     { sel: 'input[id*="email"],     input[name*="email"]',     val: email     },
@@ -501,6 +510,14 @@ async function verifyCvUploaded(page, resumePath) {
 
 async function uploadResume(page, resumePath) {
   if (!resumePath || !fs.existsSync(resumePath)) return false;
+  // Never attach a corrupt / empty / truncated CV to a real application. Stale
+  // queue entries from an earlier build can point at a bad PDF; validate here and
+  // refuse — the caller's "skip rather than send a bad CV" contract takes over.
+  const cvCheck = await cvValidate.validateCvPdf(resumePath);
+  if (!cvCheck.ok) {
+    console.log(`  [LinkedIn] ⚠ Tailored CV invalid (${cvCheck.reason}) — refusing to attach: ${path.basename(resumePath)}`);
+    return false;
+  }
   try {
     // Hidden file input — most reliable: set files directly without clicking
     const fileInput = await page.$('input[type="file"]');
@@ -588,7 +605,7 @@ function sensitiveYesNo(question, job) {
   return null;
 }
 
-function resolveDropdownChoice(question, options, job) {
+async function resolveDropdownChoice(question, options, job) {
   const q = question.toLowerCase();
   const yr = cfg.APPLICANT.yearsExperience ?? 0;
 
@@ -674,9 +691,17 @@ function resolveDropdownChoice(question, options, job) {
     }
     return options[Math.floor(options.length / 2)] || null;
   }
-  // Unknown — default to Yes, then first option
+  // Unknown question — try the AI fallback before the blunt default. (Sensitive
+  // questions were already handled above and are refused inside aiPickOption.)
+  const aiPick = await ai.aiPickOption({ question, options, job, kind: 'dropdown' });
+  if (aiPick) {
+    console.log(`  [LinkedIn] AI answered dropdown: "${question}" → "${aiPick.text}"`);
+    return aiPick;
+  }
+
+  // Unknown and AI unavailable/declined — default to Yes, then first option
   const fallback = options.find(o => /^yes/.test(o.text)) || options[0] || null;
-  if (q) console.log(`  [LinkedIn] Unknown dropdown: "${question}" — selected: "${fallback?.text}"`);
+  if (q) console.log(`  [LinkedIn] Unknown dropdown (no AI): "${question}" — selected: "${fallback?.text}"`);
   return fallback;
 }
 
@@ -721,7 +746,7 @@ async function _answerCustomDropdowns(page, job) { // page may be a modal Elemen
         continue;
       }
 
-      const chosen = resolveDropdownChoice(question, options, job);
+      const chosen = await resolveDropdownChoice(question, options, job);
       if (chosen) {
         const clicked = await page.evaluate((targetText) => {
           const opts = Array.from(document.querySelectorAll(
@@ -773,36 +798,55 @@ async function _answerCheckboxes(page) {
 }
 
 async function _answerRadios(page, job) {
-  // Find radio groups. LinkedIn Easy Apply form-builder wraps each question in a
-  // <fieldset> / [data-test-form-builder-radio-button-form-component] / radiogroup.
+  // Find radio groups. LinkedIn Easy Apply wraps each question in a <fieldset> /
+  // [role="radiogroup"] / [data-test-form-builder-radio-button-form-component].
   const groups = await page.$$('fieldset, [role="radiogroup"], [data-test-form-builder-radio-button-form-component]').catch(() => []);
   for (const group of groups) {
     try {
-      const radios = await group.$$('input[type="radio"]').catch(() => []);
+      // Only process LEAF groups — a wrapper that also contains a nested fieldset/
+      // radiogroup would merge two questions' options. Skip it; the inner group is
+      // iterated separately.
+      const isLeaf = await group.evaluate(el => !el.querySelector('fieldset, [role="radiogroup"]')).catch(() => true);
+      if (!isLeaf) continue;
+
+      // Collect options — support BOTH native <input type="radio"> AND LinkedIn's
+      // newer ARIA <div role="radio"> widgets (obfuscated classes, no <input>).
+      // Prefer the ARIA element: LinkedIn's React handlers listen on it, so
+      // clicking a hidden native input often doesn't register the selection.
+      let radios = await group.$$('[role="radio"]').catch(() => []);
+      const ariaMode = radios.length > 0;
+      if (!ariaMode) radios = await group.$$('input[type="radio"]').catch(() => []);
       if (!radios.length) continue;
 
       const groupText = (await group.evaluate(el => (el.textContent || '')).catch(() => '')) || '';
       const gtLower = groupText.toLowerCase();
-      // Skip LinkedIn's résumé picker (also radio buttons) — it's not a question.
+      // Skip LinkedIn's résumé picker (also radios) — it's not a question.
       if (/\.pdf|\.docx|\bresume\b|\bcv\b/.test(gtLower) && !/\byes\b|\bno\b/.test(gtLower)) continue;
 
       const options = [];
       for (const radio of radios) {
         const labelText = await radio.evaluate(el => {
+          const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+          // ARIA radio: its own label is aria-label or its visible text.
+          if (el.getAttribute('role') === 'radio') {
+            return clean(el.getAttribute('aria-label') || el.textContent).toLowerCase();
+          }
           const id = el.id;
           const lab = (id && document.querySelector(`label[for="${id}"]`)) ||
                       el.closest('label') ||
                       el.parentElement?.querySelector('label') ||
                       el.nextElementSibling;
-          return lab ? (lab.innerText || lab.textContent || '').toLowerCase().trim() : '';
+          return clean(el.getAttribute('aria-label') || (lab ? (lab.innerText || lab.textContent) : '')).toLowerCase();
         }).catch(() => '');
-        options.push({ radio, label: labelText });
+        options.push({ radio, label: labelText, aria: ariaMode });
       }
 
-      // Derive the QUESTION robustly. LinkedIn hides the label in a legend/span
-      // and the option labels ("Yes"/"No") are easily mistaken for the question
-      // (that produced the old "Unknown radio question: yesno" skips). Strip the
-      // option labels + boilerplate, and prefer the clause that ends in "?".
+      // Derive the QUESTION robustly and CLASS-AGNOSTICALLY (LinkedIn renames its
+      // CSS classes often — the old class-only extraction returned empty on the new
+      // DOM, which meant even sponsorship/commute went unanswered). Try, in order:
+      // ARIA labelling → known label classes → the wrapper's non-option text (the
+      // question is usually a sibling above the options). Options + boilerplate are
+      // stripped out.
       const stripOpts = (s) => {
         let out = ' ' + (s || '').toLowerCase() + ' ';
         for (const o of options) {
@@ -819,13 +863,21 @@ async function _answerRadios(page, job) {
           .replace(/\s+/g, ' ').trim();
       };
       let question = '';
-      // 1) explicit question label from the ENCLOSING form-element wrapper. LinkedIn
-      //    renders the question as a <span>/<legend> that is frequently a sibling of
-      //    the radio group, OUTSIDE it — so searching only the group text yields just
-      //    "YesNo" (the old "Unknown radio question: yesno" skips). Search the wrapper
-      //    and its parent, taking the first meaningful (non-"YesNo") label.
       const labelText = await group.evaluate(el => {
         const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+        const meaningful = (t) => {
+          const c = clean(t);
+          const letters = c.replace(/[^a-z]/gi, '');
+          return (letters.length > 5 && !/^(?:yesno|noyes)+$/i.test(letters)) ? c : '';
+        };
+        // (a) ARIA labelling on the group — most robust, immune to class churn.
+        const lb = el.getAttribute('aria-labelledby');
+        if (lb) {
+          const txt = lb.split(/\s+/).map(id => { const n = document.getElementById(id); return n ? n.textContent : ''; }).join(' ');
+          const m = meaningful(txt); if (m) return m;
+        }
+        const al = meaningful(el.getAttribute('aria-label')); if (al) return al;
+        // (b) known label classes (older DOM).
         const container = el.closest(
           '.jobs-easy-apply-form-element, .fb-dash-form-element, [data-test-form-builder-radio-button-form-component], [class*="form-element"]'
         ) || el;
@@ -839,15 +891,29 @@ async function _answerRadios(page, job) {
         ].join(',');
         for (const scope of [container, container.parentElement].filter(Boolean)) {
           for (const node of scope.querySelectorAll(sel)) {
-            const t = clean(node.textContent);
-            const letters = t.replace(/[^a-z]/gi, '');
-            if (letters.length > 5 && !/^(?:yesno|noyes)+$/i.test(letters)) return t;
+            const m = meaningful(node.textContent); if (m) return m;
           }
+        }
+        // (c) class-agnostic fallback: the question is the wrapper's text that is
+        // NOT inside a radio option and isn't error/boilerplate. Prefer a clause
+        // ending in "?", else the longest candidate, scanning tightest scope first.
+        for (const scope of [el.parentElement, container, container.parentElement].filter(Boolean)) {
+          let best = '';
+          for (const node of scope.querySelectorAll('span, label, legend, p, h3, h4, div')) {
+            if (node.querySelector('[role="radio"], input[type="radio"]')) continue; // skip option containers
+            if (node.closest('[role="radio"]')) continue;                            // skip option internals
+            const c = clean(node.textContent);
+            if (/required|select an option|not sure how to answer/i.test(c)) continue;
+            const m = meaningful(c); if (!m) continue;
+            if (/\?/.test(m)) return m;
+            if (m.replace(/[^a-z]/gi, '').length > best.replace(/[^a-z]/gi, '').length) best = m;
+          }
+          if (best) return best;
         }
         return '';
       }).catch(() => '');
       if (labelText) question = stripOpts(labelText);
-      // 2) a "?"-terminated clause anywhere in the group text
+      // fallback: a "?"-terminated clause anywhere in the group text
       if (!question || question.replace(/[^a-z]/g, '').length < 5) {
         const qMatches = gtLower.match(/[^.?!]*\?/g);
         if (qMatches) {
@@ -855,7 +921,7 @@ async function _answerRadios(page, job) {
           if (cand.length) question = cand.sort((a, b) => b.length - a.length)[0];
         }
       }
-      // 3) last resort — whole group text minus options/boilerplate
+      // last resort — whole group text minus options/boilerplate
       if (!question || question.replace(/[^a-z]/g, '').length < 5) question = stripOpts(gtLower);
       let target = null;
       const _yn = sensitiveYesNo(question, job);
@@ -918,8 +984,22 @@ async function _answerRadios(page, job) {
         target = cfg.APPLICANT.drivingLicence
           ? options.find(o => /^yes/.test(o.label))
           : options.find(o => /^no/.test(o.label));
-      } else {
-        // Unknown question — log it (with a DOM snippet when the label couldn't be
+      } else if (question && !ai.isSensitiveQuestion(question)) {
+        // Unknown non-sensitive question — ask the LLM to pick from the options
+        // instead of skipping (which left it blank → validation error → abandon).
+        const picked = await ai.aiPickOption({
+          question,
+          options: options.map(o => ({ text: o.label, radio: o.radio })),
+          job,
+          kind: 'radio',
+        });
+        if (picked) {
+          target = { radio: picked.radio, label: picked.text };
+          console.log(`  [LinkedIn] AI answered radio: "${question}" → "${picked.text}"`);
+        }
+      }
+      if (!target) {
+        // Still unanswered — log (with a DOM snippet when the label couldn't be
         // extracted, so we can pinpoint LinkedIn DOM changes from the agent log)
         // and skip rather than guessing wrong; tryNext() surfaces the validation error.
         if (!question) {
@@ -931,18 +1011,56 @@ async function _answerRadios(page, job) {
         continue;
       }
       if (target) {
-        const already = await target.radio.isChecked().catch(() => false);
-        if (!already) {
+        // Works for BOTH ARIA radios (aria-checked) and native inputs (checked).
+        // Also treats a checked hidden <input> inside an ARIA widget as success.
+        const isChecked = () => target.radio.evaluate(el => {
+          if (el.getAttribute('role') === 'radio') {
+            if (el.getAttribute('aria-checked') === 'true') return true;
+            const inp = el.querySelector('input[type="radio"]');
+            return !!(inp && inp.checked);
+          }
+          return !!el.checked;
+        }).catch(() => false);
+        if (!(await isChecked())) {
           await target.radio.scrollIntoViewIfNeeded().catch(() => {});
-          // LinkedIn uses custom-styled radio buttons — click the parent <label>
-          // rather than the hidden <input> so the UI actually registers the selection.
-          const clicked = await target.radio.evaluate(el => {
-            const lab = el.closest('label') || el.parentElement?.querySelector('label');
-            if (lab) { lab.click(); return true; }
-            el.click();
-            return false;
-          }).catch(() => false);
-          if (!clicked) await target.radio.click().catch(() => {});
+          // Custom ARIA radios don't always react to a plain click and re-render
+          // asynchronously — try a cascade, settling between attempts:
+          //   1) Playwright actionable click on the widget
+          //   2) Space-key activation (the standard ARIA radio keyboard pattern)
+          //   3) JS click on the widget/label + flip any hidden native <input>
+          const attempts = [
+            async () => { await target.radio.click({ timeout: 3000 }); },
+            async () => { await target.radio.press('Space'); },
+            async () => {
+              await target.radio.evaluate(el => {
+                const widget = el.getAttribute('role') === 'radio'
+                  ? el
+                  : ((el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label') || el);
+                widget.click();
+                const inp = el.querySelector?.('input[type="radio"]')
+                  || el.closest('[role="radio"]')?.querySelector('input[type="radio"]');
+                if (inp && !inp.checked) {
+                  inp.checked = true;
+                  inp.dispatchEvent(new Event('input',  { bubbles: true }));
+                  inp.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              });
+            },
+          ];
+          for (const attempt of attempts) {
+            try { await attempt(); } catch (_) {}
+            await DELAY(400);
+            if (await isChecked()) break;
+          }
+          if (await isChecked()) {
+            console.log(`  [LinkedIn] Set radio "${(question || '').slice(0, 45)}" → "${target.label}"`);
+          } else {
+            // Still not set — dump the option's real DOM so we can pinpoint the widget.
+            const dom = await target.radio.evaluate(el =>
+              ((el.closest('[role="radio"]') || el).outerHTML || '').replace(/\s+/g, ' ').slice(0, 400)
+            ).catch(() => '(detached)');
+            console.log(`  [LinkedIn] ⚠ Radio not set: "${(question || '').slice(0, 50)}" — OPT DOM: ${dom}`);
+          }
         }
       }
     } catch (err) {
@@ -967,7 +1085,7 @@ async function _answerSelects(page, job) {
       );
       const nonEmpty = opts.filter(o => o.value && o.text && !/select an option|please select/.test(o.text));
       if (!nonEmpty.length) continue;
-      const chosen = resolveDropdownChoice(question, nonEmpty, job);
+      const chosen = await resolveDropdownChoice(question, nonEmpty, job);
       if (chosen) await sel.selectOption({ value: chosen.value }).catch(() => {});
     }
   } catch (_) {}
@@ -1044,14 +1162,35 @@ async function _answerTextInputs(page, job) {
         if (cfg.APPLICANT.location) await _fillInput(inp, cfg.APPLICANT.location);
       } else if (/reloc/i.test(question)) {
         await _fillInput(inp, cfg.APPLICANT.willingToRelocate ? 'Yes' : 'No');
+      } else if (/middle\s*name|middle\s*initial/i.test(question)) {
+        // Fill the user's middle name, or leave BLANK if they have none. Never let
+        // a name field reach the AI fallback — it would invent a random name.
+        if (cfg.APPLICANT.middleName) await _fillInput(inp, cfg.APPLICANT.middleName);
+      } else if (/first\s*name|given\s*name|forename/i.test(question)) {
+        if (cfg.APPLICANT.firstName) await _fillInput(inp, cfg.APPLICANT.firstName);
+      } else if (/last\s*name|surname|family\s*name/i.test(question)) {
+        if (cfg.APPLICANT.lastName) await _fillInput(inp, cfg.APPLICANT.lastName);
+      } else if (/full\s*name|your\s*name|legal\s*name|preferred\s*name/i.test(question)) {
+        const full = [cfg.APPLICANT.firstName, cfg.APPLICANT.middleName, cfg.APPLICANT.lastName].filter(Boolean).join(' ');
+        if (full) await _fillInput(inp, full);
       } else {
         if (type === 'number') {
           await _fillInput(inp, cfg.APPLICANT.yearsExperience ?? 0);
         } else {
-          // Unknown text field — use yearsExperience as the safest numeric default
-          const yr = String(cfg.APPLICANT.yearsExperience ?? 0);
-          await _fillInput(inp, yr);
-          console.log(`  [LinkedIn] Unknown text field: "${question || '(no label)'}" — filled with yearsExperience (${yr})`);
+          // Unknown text field — ask the LLM for a short answer before falling
+          // back to yearsExperience (the old blunt default).
+          let val = null;
+          if (question && !ai.isSensitiveQuestion(question)) {
+            val = await ai.aiTextAnswer({ question, job, long: false });
+          }
+          if (val) {
+            await _fillInput(inp, val);
+            console.log(`  [LinkedIn] AI answered text field: "${question || '(no label)'}" → "${val}"`);
+          } else {
+            const yr = String(cfg.APPLICANT.yearsExperience ?? 0);
+            await _fillInput(inp, yr);
+            console.log(`  [LinkedIn] Unknown text field (no AI): "${question || '(no label)'}" — filled with yearsExperience (${yr})`);
+          }
         }
       }
     }
@@ -1074,7 +1213,17 @@ async function _answerTextareas(page, job) {
         return { required: el.required, label: (labelEl.innerText || '').trim() };
       });
       if (!ctx.required && !ctx.label) continue;
-      const text = buildTextareaAnswer(ctx.label, job || {});
+      // Cover letters use the pre-generated tailored letter; everything else
+      // (open "describe a time…" prompts) gets an AI answer, falling back to the
+      // canned template if AI is unavailable/declined.
+      const lblLower = (ctx.label || '').toLowerCase();
+      let text;
+      if (/cover letter|covering letter|cover note/.test(lblLower)) {
+        text = buildTextareaAnswer(ctx.label, job || {});
+      } else {
+        text = (!ai.isSensitiveQuestion(ctx.label) && await ai.aiTextAnswer({ question: ctx.label, job, long: true }))
+          || buildTextareaAnswer(ctx.label, job || {});
+      }
       if (text) {
         await ta.click().catch(() => {}); await DELAY(80);
         await ta.fill(text).catch(() => {});
@@ -1141,8 +1290,9 @@ async function tryNext(page, job) {
       let errors = await getVisibleErrorFields(page);
       if (!errors.length) return true;
 
-      // Form has errors — log them, try to fill the missed fields and retry once
-      console.log(`  [LinkedIn] Required field(s) unmet: ${errors.join(', ')} — retrying fill`);
+      // Form has errors — the missed fields are still empty, so re-running the
+      // answerers now escalates them to the AI fallback (#2). Retry once.
+      console.log(`  [LinkedIn] Required field(s) unmet: ${errors.join(', ')} — re-answering (AI escalation)`);
       await answerScreeningQuestions(page, job);
       await DELAY(1000);
 
@@ -1196,4 +1346,4 @@ async function ensureLoggedIn(page) {
   console.log('  [LinkedIn] Session active');
 }
 
-module.exports = { ensureLoggedIn, login, searchJobs, getJobDescription, applyToJob, dismissModal };
+module.exports = { ensureLoggedIn, login, searchJobs, getJobDescription, applyToJob, dismissModal, answerScreeningQuestions, uploadResume };

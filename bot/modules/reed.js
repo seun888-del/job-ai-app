@@ -5,6 +5,8 @@ const captcha   = require('./captcha_solver');
 const salary    = require('./salary_filter');
 const queue     = require('./queue_manager');
 const atsFiller = require('./ats_filler');
+const ai        = require('./question_ai'); // LLM fallback for unknown screening questions
+const cvValidate = require('./cv_validate'); // reject corrupt/empty CVs before attaching
 
 const SSDIR        = cfg.SCREENSHOTS_DIR;
 const SESSION_FILE = cfg.SESSION_FILE;
@@ -565,6 +567,14 @@ async function applyToJob(page, job, resumePath) {
   await answerScreeningQuestions(page);
   await fillCoverLetter(page, job);
 
+  // #2 retry escalation: if Reed flags unmet required questions, answer again —
+  // the still-empty fields now escalate to the AI fallback inside the answerers.
+  if (await hasReedFormErrors(page)) {
+    console.log('  [Reed] Required question(s) flagged — re-answering (AI escalation)');
+    await answerScreeningQuestions(page);
+    await fillCoverLetter(page, job);
+  }
+
   await page.screenshot({ path: `${SSDIR}/reed_pre_submit.png` });
 
   const submitted = await trySubmit(page);
@@ -659,6 +669,14 @@ async function verifyCvUploaded(page, resumePath) {
 
 async function uploadResume(page, resumePath) {
   if (!resumePath || !fs.existsSync(resumePath)) return false;
+  // Never attach a corrupt / empty / truncated CV to a real application. Stale
+  // queue entries from an earlier build can point at a bad PDF; validate here and
+  // refuse — applyToJob then skips rather than submitting the account's base CV.
+  const cvCheck = await cvValidate.validateCvPdf(resumePath);
+  if (!cvCheck.ok) {
+    console.log(`  [Reed] ⚠ Tailored CV invalid (${cvCheck.reason}) — refusing to attach: ${require('path').basename(resumePath)}`);
+    return false;
+  }
   try {
     // Reed's apply modal shows "CV loading…" with a spinner while it fetches the
     // saved CV. The Update / upload controls only render AFTER that finishes, so
@@ -821,6 +839,22 @@ function sensitiveYesNo(question) {
   return null;
 }
 
+// Are there visible required-field validation errors on Reed's application form?
+// Drives the #2 retry escalation — if true, we re-answer so the still-empty
+// fields get the AI fallback. Broad selector set (Reed's markup varies); a false
+// negative just means no retry (AI already ran once), a false positive re-runs
+// the idempotent answerers (filled fields are skipped), so both directions are safe.
+async function hasReedFormErrors(page) {
+  try {
+    return await page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll(
+        '.form-group--error, .field-validation-error, [class*="error-message"], [class*="validation-error"], [aria-invalid="true"], .qa-error'
+      ));
+      return els.some(el => el.offsetParent !== null && ((el.innerText || el.textContent || '').trim().length > 0 || el.getAttribute('aria-invalid') === 'true'));
+    });
+  } catch { return false; }
+}
+
 async function answerScreeningQuestions(page) {
   // Address Line 1 and similar text fields appear in Reed's "Application
   // questions" modal — fill them from the profile address (fallback: location).
@@ -886,6 +920,19 @@ async function answerScreeningQuestions(page) {
         target = options.find(o => o.label.startsWith('yes'));
       } else if (/british|uk citizen|nationality/i.test(question)) {
         target = options.find(o => o.label.startsWith('yes'));
+      } else if (question && !ai.isSensitiveQuestion(question)) {
+        // Unknown non-sensitive question — ask the LLM to pick before defaulting.
+        const picked = await ai.aiPickOption({
+          question,
+          options: options.map(o => ({ text: o.label, radio: o.radio })),
+          kind: 'radio',
+        });
+        if (picked) {
+          target = { radio: picked.radio, label: picked.text };
+          console.log(`  [Reed] AI answered radio: "${question}" → "${picked.text}"`);
+        } else {
+          target = options.find(o => o.label.startsWith('yes')) || options[0];
+        }
       } else {
         target = options.find(o => o.label.startsWith('yes')) || options[0];
       }
@@ -959,7 +1006,14 @@ async function answerScreeningQuestions(page) {
           ? nonEmpty.find(o => o.text.startsWith('yes')) || nonEmpty[0]
           : nonEmpty.find(o => o.text.startsWith('no')) || nonEmpty[0];
       } else {
-        chosen = nonEmpty.find(o => o.text === 'yes' || o.text.startsWith('yes')) || nonEmpty[0];
+        if (question && !ai.isSensitiveQuestion(question)) {
+          const picked = await ai.aiPickOption({ question, options: nonEmpty, kind: 'dropdown' });
+          if (picked) {
+            chosen = picked;
+            console.log(`  [Reed] AI answered dropdown: "${question}" → "${picked.text}"`);
+          }
+        }
+        if (!chosen) chosen = nonEmpty.find(o => o.text === 'yes' || o.text.startsWith('yes')) || nonEmpty[0];
       }
 
       if (chosen) await sel.selectOption({ value: chosen.value }).catch(() => {});
@@ -994,9 +1048,28 @@ async function answerScreeningQuestions(page) {
         await inp.fill(String(cfg.APPLICANT.yearsExperience || 0)).catch(() => {});
       } else if (/salary|expected|compensation/i.test(question)) {
         if (cfg.APPLICANT.salaryExpectation) await inp.fill(cfg.APPLICANT.salaryExpectation).catch(() => {});
+      } else if (/middle\s*name|middle\s*initial/i.test(question)) {
+        // Fill the middle name or leave BLANK if none — never send a name field to AI.
+        if (cfg.APPLICANT.middleName) await inp.fill(cfg.APPLICANT.middleName).catch(() => {});
+      } else if (/first\s*name|given\s*name|forename/i.test(question)) {
+        if (cfg.APPLICANT.firstName) await inp.fill(cfg.APPLICANT.firstName).catch(() => {});
+      } else if (/last\s*name|surname|family\s*name/i.test(question)) {
+        if (cfg.APPLICANT.lastName) await inp.fill(cfg.APPLICANT.lastName).catch(() => {});
+      } else if (/full\s*name|your\s*name|legal\s*name|preferred\s*name/i.test(question)) {
+        const full = [cfg.APPLICANT.firstName, cfg.APPLICANT.middleName, cfg.APPLICANT.lastName].filter(Boolean).join(' ');
+        if (full) await inp.fill(full).catch(() => {});
       } else {
         const type = await inp.getAttribute('type');
-        if (type === 'number') await inp.fill(String(cfg.APPLICANT.yearsExperience || 0)).catch(() => {});
+        let val = null;
+        if (type !== 'number' && question && !ai.isSensitiveQuestion(question)) {
+          val = await ai.aiTextAnswer({ question, long: false });
+        }
+        if (val) {
+          await inp.fill(val).catch(() => {});
+          console.log(`  [Reed] AI answered text field: "${question}" → "${val}"`);
+        } else if (type === 'number') {
+          await inp.fill(String(cfg.APPLICANT.yearsExperience || 0)).catch(() => {});
+        }
       }
     }
   } catch (_) {}
@@ -1047,4 +1120,4 @@ async function trySubmit(page) {
   return submitted;
 }
 
-module.exports = { ensureLoggedIn, searchJobs, getJobDescription, applyToJob };
+module.exports = { ensureLoggedIn, searchJobs, getJobDescription, applyToJob, answerScreeningQuestions };

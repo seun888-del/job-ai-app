@@ -969,6 +969,9 @@ li.active .nav-icon-check::after, li.active .nav-icon-chart::after { color: #fff
 /* ── Interview Tracker ────────────────────────────────────────────────── */
 .tracker-table th, .tracker-table td { vertical-align: middle; padding: 10px 12px; }
 .tracker-table { width: 100%; }
+/* Keep a wide table contained: on a narrow (non-maximised) window it scrolls
+   horizontally inside the card instead of spilling past the edge. */
+.table-scroll { overflow-x: auto; max-width: 100%; }
 .tracker-title { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tracker-link { color: var(--primary); text-decoration: none; font-weight: 500; }
 .tracker-link:hover { text-decoration: underline; }
@@ -999,11 +1002,20 @@ li.active .nav-icon-check::after, li.active .nav-icon-chart::after { color: #fff
   border-radius: var(--radius-sm);
   padding: 4px 8px;
   font-size: 12px;
-  width: 140px;
+  width: 160px;
   font-family: inherit;
+  line-height: 1.4;
   color: var(--text-muted);
   background: var(--surface-alt);
   transition: border-color var(--transition);
+  /* Auto-growing multi-line notes: compact by default, expands with text (JS caps
+     the height at 160px, then this scrolls); user can also drag to resize. */
+  resize: vertical;
+  overflow-y: auto;
+  min-height: 28px;
+  max-height: 160px;
+  vertical-align: top;
+  box-sizing: border-box;
 }
 .tracker-notes-input:focus { outline: none; border-color: var(--primary); background: var(--surface); color: var(--text); }
 .tracker-delete-btn {
