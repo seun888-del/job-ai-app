@@ -75,6 +75,27 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, 'src/renderer/index.html'));
+
+  // Right-click context menu with clipboard actions. Electron has no context menu
+  // by default, so a user who doesn't know Ctrl/Cmd+V has no way to paste (e.g.
+  // their licence key). Show edit items inside input fields, and Copy when text is
+  // selected. The MenuItem roles invoke the clipboard directly, so this works even
+  // on Windows where the application menu is disabled.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const template = [];
+    if (params.isEditable) {
+      template.push(
+        { role: 'cut',   enabled: params.editFlags.canCut },
+        { role: 'copy',  enabled: params.editFlags.canCopy },
+        { role: 'paste', enabled: params.editFlags.canPaste },
+        { type: 'separator' },
+        { role: 'selectAll' },
+      );
+    } else if (params.selectionText && params.selectionText.trim()) {
+      template.push({ role: 'copy' });
+    }
+    if (template.length) Menu.buildFromTemplate(template).popup({ window: mainWindow });
+  });
 }
 
 // We render our own menu in the navy title bar. On Windows we drop the native
@@ -615,6 +636,7 @@ ipcMain.handle('license:verify', async (event, key) => {
   // backend status (e.g. revoked) into expired.
   const status = ['trial', 'active', 'expired'].includes(data.status) ? data.status : 'expired';
 
+  const prevStatus = db.getLicense()?.status;
   db.saveLicense({
     license_key: data.license_key,
     email: data.email,
@@ -622,6 +644,19 @@ ipcMain.handle('license:verify', async (event, key) => {
     expires_at: data.expires_at,
   });
   syncLicenseEnv(); // main-process AI now uses this license via the backend
+
+  // On upgrade to a paid licence — only the trial→paid transition, never routine
+  // rechecks — raise the daily application limit to the paid maximum so the user
+  // can apply to 25/day the moment they activate, without hunting for the setting
+  // or restarting. (They can still lower it afterwards; rechecks won't touch it.)
+  if (status === 'active' && prevStatus !== 'active') {
+    try {
+      const prof = db.getProfile();
+      if (!prof || (prof.max_applications_per_day ?? 0) < 25) {
+        db.saveProfile({ max_applications_per_day: 25 });
+      }
+    } catch (_) {}
+  }
 
   return {
     ok: true,
