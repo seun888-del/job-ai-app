@@ -998,6 +998,20 @@ async function _answerRadios(page, job) {
           console.log(`  [LinkedIn] AI answered radio: "${question}" → "${picked.text}"`);
         }
       }
+      // Last-resort default: a gate question we couldn't map (AI declined or
+      // returned an unmatchable answer). Disqualifying/sensitive questions were
+      // already handled above, so for anything else the affirmative option is the
+      // safe pick — and it beats leaving a REQUIRED radio blank, which stalls the
+      // whole form in an endless re-upload loop.
+      if (!target && question && !ai.isSensitiveQuestion(question)) {
+        const yesOpt = options.find(o => /^\s*yes\b/i.test(o.label))
+          || options.find(o => /^\s*i\s+(do|have|am|can|would|will)\b/i.test(o.label))
+          || options.find(o => /\b(agree|confirm|accept)\b/i.test(o.label));
+        if (yesOpt) {
+          target = yesOpt;
+          console.log(`  [LinkedIn] Defaulted unmatched radio "${(question || '').slice(0, 45)}" → "${yesOpt.label}"`);
+        }
+      }
       if (!target) {
         // Still unanswered — log (with a DOM snippet when the label couldn't be
         // extracted, so we can pinpoint LinkedIn DOM changes from the agent log)
@@ -1092,10 +1106,29 @@ async function _answerSelects(page, job) {
 }
 
 async function _fillInput(inp, value) {
+  const v = String(value);
   try {
     await inp.click({ clickCount: 3 }).catch(() => {});
     await DELAY(80);
-    await inp.fill(String(value)).catch(() => {});
+    // Hard-clear first. LinkedIn/Ember inputs sometimes pre-fill or re-render with
+    // a value still present, and a plain .fill() can then APPEND rather than replace
+    // (e.g. "7" years becomes "77"). Select-all+Delete and blanking el.value make the
+    // field empty before we type.
+    await inp.press('ControlOrMeta+a').catch(() => {});
+    await inp.press('Delete').catch(() => {});
+    await inp.evaluate(el => { el.value = ''; }).catch(() => {});
+    await inp.fill(v).catch(() => {});
+    await DELAY(90);
+    // Verify the field holds EXACTLY our value; if a formatter/re-render doubled or
+    // mangled it, force it via the DOM and fire the events LinkedIn listens for.
+    const got = await inp.inputValue().catch(() => '');
+    if (got !== v) {
+      await inp.evaluate((el, val) => {
+        el.value = val;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, v).catch(() => {});
+    }
     await DELAY(100);
   } catch (_) {}
 }
@@ -1346,4 +1379,4 @@ async function ensureLoggedIn(page) {
   console.log('  [LinkedIn] Session active');
 }
 
-module.exports = { ensureLoggedIn, login, searchJobs, getJobDescription, applyToJob, dismissModal, answerScreeningQuestions, uploadResume };
+module.exports = { ensureLoggedIn, login, searchJobs, getJobDescription, applyToJob, dismissModal, answerScreeningQuestions, uploadResume, _fillInput };

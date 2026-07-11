@@ -90,6 +90,17 @@ function _matchOption(choice, opts) {
   if (m) return m;
   const cn = c.match(/\d+/);
   if (cn) { m = opts.find(o => (o.text || '').includes(cn[0])); if (m) return m; }
+  // Yes/No sentiment: a verbose model answer ("I do have strong skills",
+  // "Absolutely") should still map to the Yes/No option rather than falling
+  // through to null (which left a required radio blank → stuck form).
+  const yesOpt = opts.find(o => /^\s*yes\b/i.test(o.text || ''));
+  const noOpt  = opts.find(o => /^\s*no\b/i.test(o.text || ''));
+  if (yesOpt || noOpt) {
+    const neg = /\b(no|not|never|don'?t|doesn'?t|can'?t|cannot|haven'?t|hasn'?t|unable|false)\b/.test(c);
+    const pos = /\b(yes|yeah|yep|i do|i have|i am|i can|absolutely|certainly|of course|sure|correct|true|agree|indeed)\b/.test(c);
+    if (neg && noOpt) return noOpt;   // negation wins ("I do not have" → No)
+    if (pos && yesOpt) return yesOpt;
+  }
   return null;
 }
 
@@ -175,4 +186,4 @@ Respond with ONLY the answer text — no preamble, no quotes, no labels.`;
   }
 }
 
-module.exports = { aiPickOption, aiTextAnswer, isSensitiveQuestion, aiEnabled };
+module.exports = { aiPickOption, aiTextAnswer, isSensitiveQuestion, aiEnabled, _matchOption };
