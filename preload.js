@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('api', {
     start: (botName) => ipcRenderer.invoke('bot:start', botName),
     stop: (botName) => ipcRenderer.invoke('bot:stop', botName),
     status: () => ipcRenderer.invoke('bot:status'),
+    dailyLimit: () => ipcRenderer.invoke('bot:dailyLimit'),
     onLog: (callback) => {
       const handler = (event, data) => callback(data);
       ipcRenderer.on('bot:log', handler);

@@ -64,6 +64,18 @@ function getRecentApplications(limit = 50) {
   `, [limit]), []);
 }
 
+// Applications submitted today. Mirrors the bots' own cap counter
+// (queue_manager.countAppliedToday) so the "daily limit reached" prompt shown
+// when the user presses Start lines up exactly with what the agents enforce.
+function getTodayAppliedCount() {
+  return withQueueDb(db => {
+    try {
+      const r = all(db, "SELECT COUNT(*) AS c FROM applied_jobs WHERE date(applied_at) = date('now')");
+      return r[0]?.c || 0;
+    } catch (_) { return 0; }
+  }, 0);
+}
+
 // Returns applications-per-day for the last N days (from applied_jobs table)
 function getDailyApplications(days = 14) {
   return withQueueDb(db => {
@@ -156,4 +168,4 @@ function getAnalytics() {
   }, null);
 }
 
-module.exports = { init, getQueueSummary, getRecentApplications, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics };
+module.exports = { init, getQueueSummary, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics };

@@ -65,6 +65,29 @@ function showConfirm({ title, bodyHtml = '', confirmText = 'Confirm', cancelText
   });
 }
 
+// Informational popup with a single dismiss button (reuses the confirm styling).
+function showInfoDialog({ title, bodyHtml = '', okText = 'Got it' }) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-modal">
+        <h3>${title}</h3>
+        <div class="confirm-body">${bodyHtml}</div>
+        <div class="confirm-actions">
+          <button class="primary" data-ok="1">${okText}</button>
+        </div>
+      </div>`;
+    const done = () => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(); };
+    const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') done(); };
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay || e.target.closest('[data-ok]')) done();
+    });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+  });
+}
+
 async function render(view) {
   let fn;
   switch (view) {
@@ -1374,6 +1397,23 @@ async function renderDashboard() {
           errorEl.textContent = 'Select at least one job site to run — tick a box on a card below.';
           return;
         }
+        // Already hit today's cap? Tell the user up front — otherwise the agents
+        // start, immediately stop, and it looks like nothing happened.
+        if (op === 'start') {
+          let limit = null;
+          try { limit = await window.api.bot.dailyLimit(); } catch (_) {}
+          if (limit && limit.reached) {
+            await showInfoDialog({
+              title: 'Daily limit reached',
+              bodyHtml: `
+                <p style="margin:0 0 10px">Your Agents have already applied to today's maximum of <strong>${limit.cap}</strong> application${limit.cap === 1 ? '' : 's'} (${limit.applied} today).</p>
+                <p style="margin:0${limit.isPaid ? '' : ' 0 10px'}">They'll be ready to apply again tomorrow.</p>
+                ${limit.isPaid ? '' : `<p style="margin:0;color:var(--text-muted,#64748b);font-size:13px">Your free trial is capped at 10 applications a day. Subscribe to apply up to 25 per day.</p>`}`,
+              okText: 'Got it',
+            });
+            return;
+          }
+        }
         // First time someone starts: warn that the Agent drives its own Chrome
         // windows and they must be left alone (not used as a normal browser).
         if (op === 'start' && !localStorage.getItem('browser_notice_seen')) {
@@ -1397,6 +1437,22 @@ async function renderDashboard() {
       const errorEl = document.getElementById('bot-error');
       errorEl.className = 'status-msg';
       errorEl.textContent = '';
+      // Same daily-cap heads-up for a single-agent Start.
+      if (btn.dataset.action === 'start') {
+        let limit = null;
+        try { limit = await window.api.bot.dailyLimit(); } catch (_) {}
+        if (limit && limit.reached) {
+          await showInfoDialog({
+            title: 'Daily limit reached',
+            bodyHtml: `
+              <p style="margin:0 0 10px">Your Agents have already applied to today's maximum of <strong>${limit.cap}</strong> application${limit.cap === 1 ? '' : 's'} (${limit.applied} today).</p>
+              <p style="margin:0${limit.isPaid ? '' : ' 0 10px'}">They'll be ready to apply again tomorrow.</p>
+              ${limit.isPaid ? '' : `<p style="margin:0;color:var(--text-muted,#64748b);font-size:13px">Your free trial is capped at 10 applications a day. Subscribe to apply up to 25 per day.</p>`}`,
+            okText: 'Got it',
+          });
+          return;
+        }
+      }
       try {
         await window.api.bot[btn.dataset.action](btn.dataset.bot);
       } catch (err) {
