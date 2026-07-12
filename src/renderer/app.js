@@ -66,7 +66,12 @@ function showConfirm({ title, bodyHtml = '', confirmText = 'Confirm', cancelText
 }
 
 // Informational popup with a single dismiss button (reuses the confirm styling).
-function showInfoDialog({ title, bodyHtml = '', okText = 'Got it' }) {
+// A single-button info dialog, with an optional second call-to-action button
+// (extraText/onExtra) shown as the primary action on the right. When an extra
+// button is present the dismiss button becomes secondary. Enter/Esc and the
+// backdrop only ever dismiss — the extra action requires an explicit click, so
+// nobody is flung to a payment page by hitting Enter.
+function showInfoDialog({ title, bodyHtml = '', okText = 'Got it', extraText = null, onExtra = null }) {
   return new Promise(resolve => {
     const overlay = document.createElement('div');
     overlay.className = 'confirm-overlay';
@@ -75,16 +80,37 @@ function showInfoDialog({ title, bodyHtml = '', okText = 'Got it' }) {
         <h3>${title}</h3>
         <div class="confirm-body">${bodyHtml}</div>
         <div class="confirm-actions">
-          <button class="primary" data-ok="1">${okText}</button>
+          <button class="${extraText ? 'secondary' : 'primary'}" data-ok="1">${okText}</button>
+          ${extraText ? `<button class="primary" data-extra="1">${extraText}</button>` : ''}
         </div>
       </div>`;
-    const done = () => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(); };
+    const done = (fn) => { overlay.remove(); document.removeEventListener('keydown', onKey); if (fn) { try { fn(); } catch (_) {} } resolve(); };
     const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') done(); };
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay || e.target.closest('[data-ok]')) done();
+      if (e.target.closest('[data-extra]')) return done(onExtra);
+      if (e.target === overlay || e.target.closest('[data-ok]')) return done();
     });
     document.addEventListener('keydown', onKey);
     document.body.appendChild(overlay);
+  });
+}
+
+// Stripe checkout (redirects to the pricing page). Kept as one constant so the
+// daily-cap dialog and the expiry banner stay in sync.
+const SUBSCRIBE_URL = 'https://jobbot-backend-production-1323.up.railway.app/subscribe';
+
+// The "daily limit reached" dialog, shown at Start when today's cap is used up.
+// Trial users get a Subscribe call-to-action; paid users just acknowledge it.
+function showDailyLimitDialog(limit) {
+  return showInfoDialog({
+    title: 'Daily limit reached',
+    bodyHtml: `
+      <p style="margin:0 0 10px">Your Agents have already applied to today's maximum of <strong>${limit.cap}</strong> application${limit.cap === 1 ? '' : 's'} (${limit.applied} today).</p>
+      <p style="margin:0${limit.isPaid ? '' : ' 0 10px'}">They'll be ready to apply again tomorrow.</p>
+      ${limit.isPaid ? '' : `<p style="margin:0;color:var(--text-muted,#64748b);font-size:13px">Your free trial is capped at 10 applications a day. Paid plans apply up to 25 per day.</p>`}`,
+    okText: limit.isPaid ? 'Got it' : 'Not now',
+    extraText: limit.isPaid ? null : 'Subscribe',
+    onExtra: limit.isPaid ? null : () => window.open(SUBSCRIBE_URL, '_blank'),
   });
 }
 
@@ -1403,14 +1429,7 @@ async function renderDashboard() {
           let limit = null;
           try { limit = await window.api.bot.dailyLimit(); } catch (_) {}
           if (limit && limit.reached) {
-            await showInfoDialog({
-              title: 'Daily limit reached',
-              bodyHtml: `
-                <p style="margin:0 0 10px">Your Agents have already applied to today's maximum of <strong>${limit.cap}</strong> application${limit.cap === 1 ? '' : 's'} (${limit.applied} today).</p>
-                <p style="margin:0${limit.isPaid ? '' : ' 0 10px'}">They'll be ready to apply again tomorrow.</p>
-                ${limit.isPaid ? '' : `<p style="margin:0;color:var(--text-muted,#64748b);font-size:13px">Your free trial is capped at 10 applications a day. Subscribe to apply up to 25 per day.</p>`}`,
-              okText: 'Got it',
-            });
+            await showDailyLimitDialog(limit);
             return;
           }
         }
@@ -1442,14 +1461,7 @@ async function renderDashboard() {
         let limit = null;
         try { limit = await window.api.bot.dailyLimit(); } catch (_) {}
         if (limit && limit.reached) {
-          await showInfoDialog({
-            title: 'Daily limit reached',
-            bodyHtml: `
-              <p style="margin:0 0 10px">Your Agents have already applied to today's maximum of <strong>${limit.cap}</strong> application${limit.cap === 1 ? '' : 's'} (${limit.applied} today).</p>
-              <p style="margin:0${limit.isPaid ? '' : ' 0 10px'}">They'll be ready to apply again tomorrow.</p>
-              ${limit.isPaid ? '' : `<p style="margin:0;color:var(--text-muted,#64748b);font-size:13px">Your free trial is capped at 10 applications a day. Subscribe to apply up to 25 per day.</p>`}`,
-            okText: 'Got it',
-          });
+          await showDailyLimitDialog(limit);
           return;
         }
       }
