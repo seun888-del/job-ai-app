@@ -1549,12 +1549,17 @@ const STAGE_LABELS = { applied: 'Applied', phone_screen: 'Phone Screen', intervi
 const STAGE_COLORS = { applied: '#2563eb', phone_screen: '#8b5cf6', interview: '#f59e0b', offer: '#10b981', rejected: '#ef4444', withdrawn: '#94a3b8' };
 
 async function renderTracker() {
-  content.innerHTML = `
-    <div class="page-header">
-      <h2>Interview Tracker</h2>
-      <p>Track every application from submission to offer. Syncs automatically from the Agents.</p>
-    </div>
-    <div class="tracker-loading">Syncing from Agents...</div>`;
+  // Render a stable header once, then only swap the body (loading -> table) so
+  // the title/subtitle never flicker while the sync runs.
+  const headerHtml = `
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h2>Interview Tracker</h2>
+        <p>Track every application from submission to offer.</p>
+      </div>
+      <button class="secondary" id="sync-tracker">Sync now</button>
+    </div>`;
+  content.innerHTML = headerHtml + `<div id="tracker-body"><div class="tracker-loading">Syncing from Agents...</div></div>`;
 
   let entries = [];
   try {
@@ -1570,16 +1575,7 @@ async function renderTracker() {
 
   const SOURCE_BADGE = { reed: '#2563eb', linkedin: '#0077b5', indeed: '#2164f3', glassdoor: '#0caa41', cvlibrary: '#ff5c35', totaljobs: '#E84B2A', cwjobs: '#003057' };
 
-  content.innerHTML = `
-    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <h2>Interview Tracker</h2>
-        <p>Track every application from submission to offer.</p>
-      </div>
-      <button class="secondary" id="sync-tracker">Sync now</button>
-    </div>
-
-    ${!entries.length ? `
+  document.getElementById('tracker-body').innerHTML = !entries.length ? `
       <div class="card"><div class="empty-state">No applications tracked yet. The tracker syncs automatically once Agents start applying.</div></div>
     ` : `
     <div class="card card-wide">
@@ -1602,8 +1598,7 @@ async function renderTracker() {
         </tbody>
       </table>
       </div>
-    </div>`}
-  `;
+    </div>`;
 
   document.getElementById('sync-tracker')?.addEventListener('click', async () => {
     const btn = document.getElementById('sync-tracker');
