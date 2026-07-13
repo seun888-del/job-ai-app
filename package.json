@@ -1,6 +1,6 @@
 {
   "name": "job-bot-app",
-  "version": "0.6.49",
+  "version": "0.6.50",
   "description": "Desktop app for automated job search and application",
   "main": "main.js",
   "private": true,
