@@ -102,11 +102,13 @@ html[data-os="darwin"] .titlebar-brand { padding-left: 78px; }
 .sidebar h1::before {
   content: '';
   display: inline-block;
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #3b82f6, #60a5fa);
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
+  width: 28px;
+  height: 28px;
+  background-image: url('brand-logo.png');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  filter: drop-shadow(0 2px 8px rgba(37, 99, 235, 0.5));
 }
 .sidebar .tagline {
   padding: 0 24px;
