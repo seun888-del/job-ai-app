@@ -1,6 +1,6 @@
 {
   "name": "job-bot-app",
-  "version": "0.6.43",
+  "version": "0.6.44",
   "description": "Desktop app for automated job search and application",
   "main": "main.js",
   "private": true,
@@ -76,7 +76,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.png",
+      "icon": "assets/icon.icns",
       "category": "public.app-category.productivity",
       "hardenedRuntime": false,
       "gatekeeperAssess": false
