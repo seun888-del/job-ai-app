@@ -182,14 +182,14 @@ async function renderPersonal() {
         <div class="field"><label>Email</label><input id="email" value="${p.email || ''}"></div>
       </div>
       <div class="field"><label>Location (city, state/county)</label><input id="location" value="${p.location || ''}"></div>
-      <div class="field"><label>Address (street address — used to fill "Address Line 1" on applications)</label><input id="address" value="${p.address || ''}" placeholder="e.g. 12 High Street"></div>
+      <div class="field"><label>Address (street address, used to fill "Address Line 1" on applications)</label><input id="address" value="${p.address || ''}" placeholder="e.g. 12 High Street"></div>
       <div class="field"><label>LinkedIn URL</label><input id="linkedin_url" value="${p.linkedin_url || ''}"></div>
     </div>
 
     <div class="card">
       <h3>Work Eligibility</h3>
       <div class="field"><label>Years of experience</label><input id="years_experience" type="number" min="0" value="${p.years_experience ?? 0}"></div>
-      <div class="field"><label>Salary expectation (e.g. 45000 or $45,000—$55,000)</label><input id="salary_expectation" value="${p.salary_expectation || ''}"></div>
+      <div class="field"><label>Salary expectation (e.g. 45000 or $45,000 to $55,000)</label><input id="salary_expectation" value="${p.salary_expectation || ''}"></div>
       <div class="field">
         <label>Countries I am eligible to work in (hold Ctrl/Cmd to select multiple)</label>
         ${(() => {
@@ -203,8 +203,8 @@ async function renderPersonal() {
       <div class="field">
         <label>Do you require visa sponsorship?</label>
         <select id="requires_sponsorship">
-          <option value="0" ${!p.requires_sponsorship ? 'selected' : ''}>No — I do not require sponsorship</option>
-          <option value="1" ${p.requires_sponsorship ? 'selected' : ''}>Yes — I require visa sponsorship</option>
+          <option value="0" ${!p.requires_sponsorship ? 'selected' : ''}>No, I do not require sponsorship</option>
+          <option value="1" ${p.requires_sponsorship ? 'selected' : ''}>Yes, I require visa sponsorship</option>
         </select>
       </div>
       <div class="checkbox-field">
@@ -364,7 +364,7 @@ async function renderLogin() {
 
     <div class="card">
       <h3>LinkedIn</h3>
-      <p style="font-size:13px;color:#64748b;margin:0 0 12px">LinkedIn uses a persistent browser session instead of a stored password. Use the <strong>Connect account</strong> button on the Dashboard — log in once and the session is saved automatically.</p>
+      <p style="font-size:13px;color:#64748b;margin:0 0 12px">LinkedIn uses a persistent browser session instead of a stored password. Use the <strong>Connect account</strong> button on the Dashboard. Log in once and the session is saved automatically.</p>
       <button class="secondary" id="go-dashboard-li">Go to Dashboard →</button>
     </div>
   `;
@@ -382,7 +382,7 @@ async function renderLogin() {
   };
 
   document.getElementById('save-reed').addEventListener('click', () =>
-    saveCredential('reed', 'reed_email', 'reed_pass', 'status-reed', 'Saved — Reed Agent will open a login window on first start to verify'));
+    saveCredential('reed', 'reed_email', 'reed_pass', 'status-reed', 'Saved. Reed Agent will open a login window on first start to verify'));
 
   document.getElementById('go-dashboard-li').addEventListener('click', () => navigate('dashboard'));
 }
@@ -394,7 +394,7 @@ async function renderCVs() {
   content.innerHTML = `
     <div class="page-header">
       <h2>Your CVs</h2>
-      <p>Upload your CV to get started. <strong>Word (.docx) is recommended</strong> — it's read more accurately, so your tailored CV captures every detail. PDF also works, but can occasionally be misread during tailoring.</p>
+      <p>Upload your CV to get started. <strong>Word (.docx) is recommended.</strong> It's read more accurately, so your tailored CV captures every detail. PDF also works, but can occasionally be misread during tailoring.</p>
     </div>
 
     <div id="cv-list">
@@ -420,7 +420,7 @@ async function renderCVs() {
               <div class="tag-list">${cv.extracted_keywords.map(k => `<div class="tag">${k}</div>`).join('')}</div>
             </div>` : ''}
           ${!cv.suggested_roles.length && !cv.extracted_keywords.length
-            ? '<p class="muted">AI analysis unavailable — add search terms manually in Search Preferences.</p>'
+            ? '<p class="muted">AI analysis unavailable. Add search terms manually in Search Preferences.</p>'
             : ''}
         </div>
       `).join('') || `<div class="card"><div class="empty-upload">
@@ -450,7 +450,7 @@ async function renderCVs() {
     const statusEl = document.getElementById('status');
     addBtn.disabled = true;
     statusEl.className = 'status-msg';
-    statusEl.textContent = 'Analysing CV with AI — this can take a couple of minutes...';
+    statusEl.textContent = 'Analysing CV with AI. This can take a couple of minutes...';
     try {
       const result = await window.api.cvs.pickAndAdd(label);
       if (result) {
@@ -479,7 +479,7 @@ async function renderCVs() {
       if (!ok) return;
       await window.api.cvs.addSuggestedTerms(cvId);
       showToast('Search terms added');
-      showStatus(document.getElementById('status'), 'Search terms added — see Search Preferences.');
+      showStatus(document.getElementById('status'), 'Search terms added. See Search Preferences.');
     });
   });
 
@@ -769,18 +769,18 @@ async function renderSearch() {
 // â”€â”€ 5. License â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LICENSE_ERRORS = {
   missing_key: 'Enter a license key',
-  network_error: 'Could not reach the Job-AI backend — check your internet connection',
+  network_error: 'Could not reach the Job-AI backend. Check your internet connection',
   invalid_license_key: 'Invalid license key',
   missing_license_key: 'Enter a license key',
   license_inactive: 'This license has been revoked',
   license_expired: 'This license has expired',
   rate_limit_exceeded: 'Daily usage limit reached for this license',
   invalid_email: 'Enter a valid email address',
-  already_registered: 'A license is already registered to this email — check your inbox',
-  server_error: 'Something went wrong on our end — please try again',
+  already_registered: 'A license is already registered to this email. Check your inbox',
+  server_error: 'Something went wrong on our end. Please try again',
   device_trial_used: 'This device has already used its free trial. Subscribe to keep using Job-AI.',
   disposable_email: 'Please use a permanent email address (temporary inboxes aren’t accepted)',
-  too_many_trials: 'Too many trials started from your network today — please try again later',
+  too_many_trials: 'Too many trials started from your network today. Please try again later',
 };
 
 function licenseBadgeClass(status) {
@@ -984,9 +984,9 @@ function showBrowserNotice() {
       <div class="notice-box">
         <div class="notice-icon">🤖</div>
         <h3>The Agents drive their own browser</h3>
-        <p>When you start, a Chrome window opens for each connected job site and the Agent works inside it automatically — searching, tailoring your CV, and applying.</p>
-        <div class="notice-warn">⚠️ Please leave those windows alone — do not click, type in, or close them. They are the Agent working, not your browser. Just minimise them and carry on. Closing a window stops that Agent.</div>
-        <button class="primary" id="notice-ok">Got it — start applying</button>
+        <p>When you start, a Chrome window opens for each connected job site and the Agent works inside it automatically, searching, tailoring your CV, and applying.</p>
+        <div class="notice-warn">⚠️ Please leave those windows alone. Do not click, type in, or close them. They are the Agent working, not your browser. Just minimise them and carry on. Closing a window stops that Agent.</div>
+        <button class="primary" id="notice-ok">Got it, start applying</button>
       </div>`;
     document.body.appendChild(overlay);
     const done = () => { overlay.remove(); resolve(); };
@@ -1080,13 +1080,13 @@ function buildPreflightWarning(profile, cvs) {
   if (!profile?.phone)      profileMissing.push('Phone');
   if (profileMissing.length) {
     warnings.push(`<div class="preflight-warning">
-      &#9888; Profile incomplete — Agents will leave contact fields blank: <strong>${profileMissing.join(', ')}</strong>
+      &#9888; Profile incomplete. Agents will leave contact fields blank: <strong>${profileMissing.join(', ')}</strong>
       <button class="preflight-link" data-view="personal">Complete Profile →</button>
     </div>`);
   }
   if (!cvs || cvs.length === 0) {
     warnings.push(`<div class="preflight-warning">
-      &#9888; No CV uploaded — the Agent cannot tailor applications without one.
+      &#9888; No CV uploaded. The Agent cannot tailor applications without one.
       <button class="preflight-link" data-view="cvs">Add a CV →</button>
     </div>`);
   }
@@ -1112,9 +1112,9 @@ function buildGetStartedCard(profile, cvs, anyConnected, anyRunning) {
           ${profileDone ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="personal">Complete profile →</button>'}</li>
         <li>${mark(cvDone, 2)}<span>Upload a CV</span>
           ${cvDone ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="cvs">Add a CV →</button>'}</li>
-        <li>${mark(anyConnected, 3)}<span>Connect your job sites — click <strong>Connect account</strong> on a card below and log in once</span>
+        <li>${mark(anyConnected, 3)}<span>Connect your job sites. Click <strong>Connect account</strong> on a card below and log in once</span>
           ${anyConnected ? '<em class="gs-ok">Done</em>' : ''}</li>
-        <li><span id="gs-mark-4">${mark(anyRunning, 4)}</span><span>Click <strong>Start applying</strong> — the AI scores jobs, tailors your CV and applies for you automatically</span>
+        <li><span id="gs-mark-4">${mark(anyRunning, 4)}</span><span>Click <strong>Start applying</strong>. The AI scores jobs, tailors your CV and applies for you automatically</span>
           <em class="gs-ok" id="gs-done-4" style="${anyRunning ? '' : 'display:none'}">Applying…</em></li>
       </ol>
     </div>`;
@@ -1234,17 +1234,17 @@ async function renderDashboard() {
     return `
       <div class="card bot-card${isRunning ? ' bot-card-running' : ''}" id="bot-card-${key}">
         <div class="bot-card-header">
-          <label class="agent-run-toggle" title="Tick to run this site when you press Start applying — untick to skip it">
+          <label class="agent-run-toggle" title="Tick to run this site when you press Start applying, untick to skip it">
             <input type="checkbox" class="agent-enabled" data-bot="${key}" ${isEnabled ? 'checked' : ''}>
             <strong>${label}</strong>
           </label>
           <span class="bot-status bot-status-${status[key]}" id="status-${key}">${status[key]}</span>
         </div>
-        <div class="agent-run-state ${isEnabled ? 'on' : 'off'}" id="run-state-${key}">${isEnabled ? '✓ Included — runs when you press Start applying' : '○ Unticked — this site will be skipped'}</div>
+        <div class="agent-run-state ${isEnabled ? 'on' : 'off'}" id="run-state-${key}">${isEnabled ? '✓ Included, runs when you press Start applying' : '○ Unticked, this site will be skipped'}</div>
         <div class="bot-card-actions">
           ${needsCreds ? `<button class="btn-connect" data-bot="${key}" data-action="connect">Connect account</button>` : ''}
           ${!needsCreds && CONNECT_URLS[key] ? `<button class="btn-connect" data-bot="${key}" data-action="connect-session">Connect account</button>` : ''}
-          ${CHROME_SESSION_BOTS.has(key) ? `<button class="btn-connect" data-bot="${key}" data-action="import-chrome" title="Copy your real Chrome session into the bot profile — bypasses Cloudflare verification">Use my Chrome →</button>` : ''}
+          ${CHROME_SESSION_BOTS.has(key) ? `<button class="btn-connect" data-bot="${key}" data-action="import-chrome" title="Copy your real Chrome session into the bot profile, bypasses Cloudflare verification">Use my Chrome →</button>` : ''}
         </div>
       </div>`;
   }
@@ -1268,10 +1268,10 @@ async function renderDashboard() {
     <div class="start-applying-bar">
       <button class="primary start-applying-btn" data-action="start-all"
         ${(!dashboardHasLicense || allAppRunning) ? 'disabled' : ''}
-        ${!dashboardHasLicense ? `title="${license?.license_key ? 'Your Job-AI access has ended — subscribe to continue' : 'Activate a license to start the Agents'}"` : ''}>▶ Start applying</button>
+        ${!dashboardHasLicense ? `title="${license?.license_key ? 'Your Job-AI access has ended. Subscribe to continue' : 'Activate a license to start the Agents'}"` : ''}>▶ Start applying</button>
       <button class="secondary stop-all-btn" data-action="stop-all" ${anyAppRunning ? '' : 'disabled'}>Stop</button>
       <span class="scorer-pill${scorerRunning ? ' scorer-pill-active' : ''}" id="scorer-pill" data-status="${status.scorer || 'stopped'}"
-        title="The AI tailoring engine runs automatically while the Agents are applying — you don't start it yourself.">${scorerRunning ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
+        title="The AI tailoring engine runs automatically while the Agents are applying, so you don't start it yourself.">${scorerRunning ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
     </div>
 
     <p class="bot-controls-hint">Tick the box on a site to include it, then press <strong>Start applying</strong>. Untick any site you want to skip.</p>
@@ -1284,7 +1284,7 @@ async function renderDashboard() {
       <div class="login-prompt-icon">🔐</div>
       <div class="login-prompt-body">
         <strong id="login-prompt-title">Agent is waiting for you to log in</strong>
-        <span id="login-prompt-body">A browser window has opened — complete the login there and the Agent will continue automatically.</span>
+        <span id="login-prompt-body">A browser window has opened. Complete the login there and the Agent will continue automatically.</span>
       </div>
     </div>
 
@@ -1302,7 +1302,7 @@ async function renderDashboard() {
     </div>
 
     <div class="card card-wide">
-      <h3>Applications — Last 14 Days</h3>
+      <h3>Applications (Last 14 Days)</h3>
       ${buildApplicationsGraph(dailyApps)}
     </div>
 
@@ -1336,8 +1336,8 @@ async function renderDashboard() {
       if (state) {
         state.className = 'agent-run-state ' + (cb.checked ? 'on' : 'off');
         state.textContent = cb.checked
-          ? '✓ Included — runs when you press Start applying'
-          : '○ Unticked — this site will be skipped';
+          ? '✓ Included, runs when you press Start applying'
+          : '○ Unticked, this site will be skipped';
       }
     });
   });
@@ -1399,7 +1399,7 @@ async function renderDashboard() {
         const card = btn.closest('.bot-card');
         const tip = document.createElement('p');
         tip.style.cssText = 'font-size:11px;color:var(--text-muted);margin:4px 0 0;text-align:center;';
-        tip.textContent = 'Your Chrome session is now active — click Start to run the Agent.';
+        tip.textContent = 'Your Chrome session is now active. Click Start to run the Agent.';
         if (card && !card.querySelector('.chrome-import-tip')) { tip.className = 'chrome-import-tip'; card.appendChild(tip); }
         setTimeout(() => { btn.textContent = origText; btn.disabled = false; btn.style.background = ''; btn.style.color = ''; }, 5000);
         return;
@@ -1420,7 +1420,7 @@ async function renderDashboard() {
           : appAgentKeys;
         if (op === 'start' && targetKeys.length === 0) {
           errorEl.className = 'status-msg error';
-          errorEl.textContent = 'Select at least one job site to run — tick a box on a card below.';
+          errorEl.textContent = 'Select at least one job site to run. Tick a box on a card below.';
           return;
         }
         // Already hit today's cap? Tell the user up front — otherwise the agents
@@ -1491,15 +1491,15 @@ async function renderDashboard() {
     if (loginPrompt) {
       if (bot === 'reed' && (text.includes('Opening login page') || text.includes('Waiting for you to complete login'))) {
         document.getElementById('login-prompt-title').textContent = 'Reed is waiting for you to log in';
-        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Reed.co.uk password there and click Log In — the Agent will continue automatically once you\'re signed in.';
+        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Reed.co.uk password there and click Log In. The Agent will continue automatically once you\'re signed in.';
         loginPrompt.style.display = 'flex';
       } else if (bot === 'linkedin' && text.includes('Security check')) {
         document.getElementById('login-prompt-title').textContent = 'LinkedIn security check';
-        document.getElementById('login-prompt-body').textContent = 'LinkedIn has shown a CAPTCHA or security check. Complete it in the browser window — the Agent will continue automatically.';
+        document.getElementById('login-prompt-body').textContent = 'LinkedIn has shown a CAPTCHA or security check. Complete it in the browser window. The Agent will continue automatically.';
         loginPrompt.style.display = 'flex';
       } else if (bot === 'glassdoor' && (text.includes('Opening login page') || text.includes('Waiting for you to complete login'))) {
         document.getElementById('login-prompt-title').textContent = 'Glassdoor is waiting for you to log in';
-        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Glassdoor password — the Agent will continue automatically once signed in.';
+        document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Glassdoor password. The Agent will continue automatically once signed in.';
         loginPrompt.style.display = 'flex';
       } else if ((text.includes('Logged in') || text.includes('Session restored') || text.includes('ERROR:') || text.includes('login timed out') || text.includes('Logged in successfully'))) {
         loginPrompt.style.display = 'none';
@@ -1683,7 +1683,7 @@ async function renderAnalytics() {
   const data = await window.api.analytics.get();
 
   if (!data) {
-    content.innerHTML = `<div class="page-header"><h2>Analytics</h2><p>No data yet — run the Agents to see analytics.</p></div>`;
+    content.innerHTML = `<div class="page-header"><h2>Analytics</h2><p>No data yet. Run the Agents to see analytics.</p></div>`;
     return;
   }
 
@@ -1725,7 +1725,7 @@ async function renderAnalytics() {
     </div>
 
     <div class="card card-wide">
-      <h3>Applications — Last 30 Days</h3>
+      <h3>Applications (Last 30 Days)</h3>
       ${buildAnalyticsGraph(daily30)}
     </div>
 
@@ -1790,7 +1790,7 @@ function ensureCredModal() {
   el.innerHTML = `
     <div class="cred-modal-card">
       <h3 id="cred-modal-title">Connect account</h3>
-      <p class="cred-modal-hint">Stored encrypted on this device only — never sent to our servers.</p>
+      <p class="cred-modal-hint">Stored encrypted on this device only, never sent to our servers.</p>
       <div class="field"><label>Email</label><input id="cred-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
       <div class="field"><label>Password</label><input id="cred-password" type="password" autocomplete="current-password" placeholder="••••••••"></div>
       <div class="status-msg" id="cred-status"></div>
@@ -1912,7 +1912,7 @@ const TOUR_STEPS = [
   {
     view: 'cvs',
     title: 'Step 2: Upload your CV',
-    tip: 'Upload your CV as a Word document (.docx) for the best results — it is read most accurately, so your tailored CV keeps every detail. PDF also works but can occasionally be misread. Before each application, the AI rewrites your professional summary and bullet points to match that specific job, so it reads naturally to a recruiter rather than being stuffed with keywords.',
+    tip: 'Upload your CV as a Word document (.docx) for the best results. It is read most accurately, so your tailored CV keeps every detail. PDF also works but can occasionally be misread. Before each application, the AI rewrites your professional summary and bullet points to match that specific job, so it reads naturally to a recruiter rather than being stuffed with keywords.',
     action: 'Click "Add CV" and upload at least one CV, ideally a Word (.docx) file. You can add several CVs for different role types and the Agent picks the best one for each job.',
   },
   {
@@ -1936,13 +1936,13 @@ const TOUR_STEPS = [
   {
     view: 'dashboard',
     title: 'Step 6: Choose which sites to run',
-    tip: 'Each job site card has a tick box in its top-left corner, next to the site name. A ticked box means that site runs when you press Start applying; unticking it skips that site. Under the box, the card tells you plainly whether the site is "Included" or "Unticked — skipped", so you are never guessing. Both Reed and LinkedIn are ticked by default.',
+    tip: 'Each job site card has a tick box in its top-left corner, next to the site name. A ticked box means that site runs when you press Start applying; unticking it skips that site. Under the box, the card tells you plainly whether the site is "Included" or "Unticked", so you are never guessing. Both Reed and LinkedIn are ticked by default.',
     action: 'Leave both ticked to run Reed and LinkedIn, or untick one if you only want the other. The line under the tick box updates to confirm your choice.',
   },
   {
     view: 'dashboard',
     title: 'All set: start applying',
-    tip: 'When you click Start applying, only the ticked sites launch — each opens a Chrome window and works inside it automatically, searching, tailoring your CV, and applying to matching roles on its own.',
+    tip: 'When you click Start applying, only the ticked sites launch. Each opens a Chrome window and works inside it automatically, searching, tailoring your CV, and applying to matching roles on its own.',
     action: 'Click "Start applying" (the checklist flags anything still missing). Important: the Chrome windows that open are the Agent working, not your own browser. Please leave them alone. Do not click, type in, or close them. Simply minimise them and carry on with your day. Closing a window stops that Agent.',
   },
 ];
@@ -2073,27 +2073,27 @@ function renderHelp() {
     },
     {
       q: 'Which job sites does Job-AI use?',
-      a: 'Job-AI applies through Reed.co.uk and LinkedIn — each has its own Agent card on the Dashboard. Connect the account(s) you want and Job-AI searches and applies on your behalf.'
+      a: 'Job-AI applies through Reed.co.uk and LinkedIn. Each has its own Agent card on the Dashboard. Connect the account(s) you want and Job-AI searches and applies on your behalf.'
     },
     {
       q: 'How do I connect my job site accounts?',
-      a: 'On the Dashboard, each Agent card has a “Connect account” button. Click it and a regular browser window opens on that site\'s login page - log in as you normally would. Your session is saved locally so the Agent can apply on your behalf. You only need to do this once per site - but reconnect again whenever your session expires or you change your password (or log out) on that job site, otherwise the Agent can no longer log in.'
+      a: 'On the Dashboard, each Agent card has a “Connect account” button. Click it and a regular browser window opens on that site\'s login page. Log in as you normally would. Your session is saved locally so the Agent can apply on your behalf. You only need to do this once per site. Reconnect whenever your session expires, or when you change your password or log out on that job site, otherwise the Agent can no longer log in.'
     },
     {
       q: 'What are the Agents and what do they do?',
-      a: 'The Reed and LinkedIn Agents search each site and submit applications for you. Behind the scenes, AI automatically scores every job and tailors your CV to it before applying — you don\'t start that separately. Just click “Start applying” on the Dashboard and both the Agents and the AI tailoring run together (you\'ll see an “AI tailoring” indicator while it works).'
+      a: 'The Reed and LinkedIn Agents search each site and submit applications for you. Behind the scenes, AI automatically scores every job and tailors your CV to it before applying, so you don\'t start that separately. Just click “Start applying” on the Dashboard and both the Agents and the AI tailoring run together (you\'ll see an “AI tailoring” indicator while it works).'
     },
     {
       q: 'Why are some jobs showing as skipped?',
-      a: 'Jobs are skipped when they do not match your preferences - for example, wrong work type, no easy apply button, external application site, or below your minimum match score. This is normal and expected.'
+      a: 'Jobs are skipped when they don\'t match your preferences. Common reasons are the wrong work type, no easy apply button, an external application site, or a score below your minimum match score. This is normal and expected.'
     },
     {
-      q: 'The Agent says “not logged in” - what do I do?',
+      q: 'The Agent says “not logged in”. What do I do?',
       a: 'Your session for that site has expired. Click the “Connect account” button on that Agent\'s card on the Dashboard, log in again in the browser that opens, then click “Start applying”.'
     },
     {
       q: 'How do I add more CVs?',
-      a: 'Go to CVs in the sidebar and click “Add CV”. You can upload multiple CVs - Job-AI will automatically select the best one for each job based on the AI match score.'
+      a: 'Go to CVs in the sidebar and click “Add CV”. You can upload multiple CVs, and Job-AI automatically selects the best one for each job based on the AI match score.'
     },
     {
       q: 'What is the minimum match score?',
@@ -2101,7 +2101,7 @@ function renderHelp() {
     },
     {
       q: 'The Agents are running but no jobs are being found - why?',
-      a: 'Your search terms may have exhausted all available jobs. Try adding more search terms in Search Preferences - for example, if you have “IT Support Analyst”, also add “IT Support Specialist” or “Help Desk Analyst”.'
+      a: 'Your search terms may have exhausted all available jobs. Try adding more search terms in Search Preferences. For example, if you already have “IT Support Analyst”, add “IT Support Specialist” or “Help Desk Analyst” too.'
     },
     {
       q: 'Windows shows a security warning when I install Job-AI - is it safe?',
@@ -2113,11 +2113,11 @@ function renderHelp() {
     },
     {
       q: 'How do I cancel or manage my subscription?',
-      a: 'If you have a paid subscription, open the License page and click “Manage or cancel subscription” — this opens Stripe\'s secure portal where you can cancel or update your payment details. If you cancel, your access continues until the end of the current billing period. On a free trial there is nothing to cancel. Any issues, email us and we\'ll help.'
+      a: 'If you have a paid subscription, open the License page and click “Manage or cancel subscription”. That opens Stripe\'s secure portal where you can cancel or update your payment details. If you cancel, your access continues until the end of the current billing period. On a free trial there is nothing to cancel. If you run into any issues, email us and we\'ll help.'
     },
     {
-      q: 'The Agents open Chrome windows — what are they, and can I keep using my computer?',
-      a: 'When you click “Start applying”, each connected Agent opens its own Chrome window and works inside it automatically. These windows run minimised so they stay out of your way — keep using your computer as normal. Please don\'t close them (closing one stops that Agent). If a site shows a human-verification check, the window pops up on its own and you\'ll get a notification so you can complete it.'
+      q: 'The Agents open Chrome windows. What are they, and can I keep using my computer?',
+      a: 'When you click “Start applying”, each connected Agent opens its own Chrome window and works inside it automatically. These windows run minimised and stay out of your way, so just keep using your computer as normal. Please don\'t close them (closing one stops that Agent). If a site shows a human-verification check, the window pops up on its own and you\'ll get a notification so you can complete it.'
     },
   ];
 
@@ -2150,7 +2150,7 @@ if (window.api?.onUpdateAvailable) {
   window.api.onUpdateAvailable(() => {
     const banner = document.getElementById('expiry-banner');
     if (banner) {
-      banner.innerHTML = `<span>A new version of Job-AI is available — downloading in the background...</span>`;
+      banner.innerHTML = `<span>A new version of Job-AI is available. Downloading in the background...</span>`;
       banner.style.display = 'flex';
       banner.style.background = '#0891b2';
       banner.style.color = '#fff';
@@ -2163,7 +2163,7 @@ if (window.api?.onUpdateReady) {
     if (!banner) return;
     const vLabel = version ? ` ${version}` : '';
     banner.innerHTML = `
-      <span style="flex:1">✅ <strong>Job-AI${vLabel} is ready</strong> — new look &amp; smarter CV tailoring. It installs when you next close the app, or update now.</span>
+      <span style="flex:1">✅ <strong>Job-AI${vLabel} is ready.</strong> New look and smarter CV tailoring. It installs when you next close the app, or update now.</span>
       <button id="update-install-btn" style="background:#fff;color:#1d4ed8;border:none;padding:7px 16px;border-radius:7px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;margin-left:14px">Restart &amp; update now</button>`;
     banner.style.display = 'flex';
     banner.style.alignItems = 'center';
