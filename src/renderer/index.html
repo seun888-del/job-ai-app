@@ -56,26 +56,33 @@
       </div>
     </nav>
   </div>
-  <div class="app">
-    <nav class="sidebar">
-      <h1>Job-AI</h1>
-      <p class="tagline">Job Search Automation</p>
-      <ul id="nav">
-        <li data-view="personal" class="active"><span class="nav-num">1</span>Personal Details</li>
-        <li data-view="cvs"><span class="nav-num">2</span>CVs</li>
-        <li data-view="search"><span class="nav-num">3</span>Search Preferences</li>
-        <li data-view="license"><span class="nav-num">4</span>License</li>
-        <li data-view="dashboard" class="nav-dashboard"><span class="nav-icon"></span>Dashboard</li>
-        <li data-view="tracker" class="nav-tracker"><span class="nav-icon nav-icon-check"></span>Tracker</li>
-        <li data-view="analytics" class="nav-analytics"><span class="nav-icon nav-icon-chart"></span>Analytics</li>
-        <li data-view="help" class="nav-help"><span class="nav-icon">?</span>Help</li>
-      </ul>
-    </nav>
-    <div class="main-wrapper">
-      <div id="expiry-banner"></div>
-      <main id="content"></main>
+  <header class="topnav">
+    <div class="topnav-brand"><span class="tn-badge"></span><span class="tn-name">Job-AI</span></div>
+    <ul id="nav" class="topnav-tabs">
+      <li data-view="dashboard" class="tab active">Dashboard</li>
+      <li data-view="tracker" class="tab">Tracker</li>
+      <li data-view="analytics" class="tab">Analytics</li>
+    </ul>
+    <div class="topnav-right">
+      <div class="setup-menu" id="setup-menu">
+        <button class="setup-label" id="setup-label">Setup <span class="setup-chev">&#9662;</span></button>
+        <div class="setup-pop" id="setup-pop">
+          <div class="setup-h">Set up once</div>
+          <ul id="nav-setup">
+            <li data-view="personal" class="setup-item"><span class="nav-num">1</span>Personal Details</li>
+            <li data-view="cvs" class="setup-item"><span class="nav-num">2</span>CVs</li>
+            <li data-view="search" class="setup-item"><span class="nav-num">3</span>Search Preferences</li>
+            <li data-view="license" class="setup-item"><span class="nav-num">4</span>License</li>
+          </ul>
+        </div>
+      </div>
+      <span class="tn-chip" id="tn-status" style="display:none"></span>
+      <button class="tn-help" data-view="help" title="Help">?</button>
     </div>
-  </div>
+  </header>
+  <div id="expiry-banner"></div>
+  <main id="content"></main>
+  <footer class="app-footer">Job-AI · Apply to jobs while you sleep</footer>
   <script src="app.js"></script>
   <script>
     // Wire the custom title-bar menu (click to open, hover to switch, click-away to close)
@@ -104,6 +111,21 @@
         });
       });
       document.addEventListener('click', closeAll);
+    })();
+
+    // Top-nav "Setup" dropdown (click to open, click-away or select to close)
+    (function () {
+      var menu = document.getElementById('setup-menu');
+      var label = document.getElementById('setup-label');
+      if (!menu || !label) return;
+      label.addEventListener('click', function (e) {
+        e.stopPropagation();
+        menu.classList.toggle('open');
+      });
+      document.getElementById('setup-pop').addEventListener('click', function () {
+        menu.classList.remove('open');
+      });
+      document.addEventListener('click', function () { menu.classList.remove('open'); });
     })();
   </script>
 </body>

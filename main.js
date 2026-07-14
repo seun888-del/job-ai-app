@@ -64,10 +64,10 @@ function createWindow() {
     width: 1100,
     height: 750,
     icon: path.join(__dirname, 'assets', 'icon.ico'),
-    backgroundColor: '#0b1f3a',
-    // Navy custom title bar; the menu lives inside it (rendered by the app).
+    backgroundColor: '#f6f4ef',
+    // Blue custom title bar (matches the logo); the menu lives inside it (rendered by the app).
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
-    ...(isMac ? {} : { titleBarOverlay: { color: '#0b1f3a', symbolColor: '#ffffff', height: 38 } }),
+    ...(isMac ? {} : { titleBarOverlay: { color: '#2563eb', symbolColor: '#ffffff', height: 38 } }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

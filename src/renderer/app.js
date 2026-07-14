@@ -1,21 +1,32 @@
 const content = document.getElementById('content');
-const navItems = document.querySelectorAll('#nav li');
+// Every navigable destination in the top nav: the tabs, the Setup-menu items,
+// and Help — all carry data-view.
+const navItems = document.querySelectorAll('.topnav [data-view]');
+const SETUP_VIEWS = new Set(['personal', 'cvs', 'search', 'license']);
 let _statsPoll = null;
+
+// The "Setup" label lights up while any of its sub-pages is the active view.
+function syncSetupActive(view) {
+  const label = document.getElementById('setup-label');
+  if (label) label.classList.toggle('active', SETUP_VIEWS.has(view));
+}
 
 navItems.forEach(li => {
   li.addEventListener('click', () => {
     if (_statsPoll) { clearInterval(_statsPoll); _statsPoll = null; }
     navItems.forEach(x => x.classList.remove('active'));
     li.classList.add('active');
+    syncSetupActive(li.dataset.view);
     render(li.dataset.view).then(() => updateNavProgress());
   });
 });
 
 function navigate(view) {
   if (_statsPoll) { clearInterval(_statsPoll); _statsPoll = null; }
-  const navLi = document.querySelector(`#nav li[data-view="${view}"]`);
   navItems.forEach(x => x.classList.remove('active'));
+  const navLi = document.querySelector(`.topnav [data-view="${view}"]`);
   if (navLi) navLi.classList.add('active');
+  syncSetupActive(view);
   render(view).then(() => updateNavProgress());
 }
 
@@ -799,15 +810,15 @@ function renderLicenseStatus(license, usage) {
   }
   const expires = license.expires_at ? new Date(license.expires_at).toLocaleString() : 'N/A';
 
-  let usageRow = '';
-  if (usage) {
-    usageRow = `
+  // Always render the row (with a placeholder until the usage figure loads from
+  // the server) so it doesn't pop in and shift the card after the page appears.
+  const usageText = usage ? `${usage.usage_today} / ${usage.daily_limit} applications tailored` : '…';
+  const usageRow = `
       <div class="stat-row">
         <span class="stat-label">Usage today</span>
-        <span class="stat-value">${usage.usage_today} / ${usage.daily_limit} applications tailored</span>
+        <span class="stat-value">${usageText}</span>
       </div>
     `;
-  }
 
   return `
     <div class="stat-row"><span class="stat-label">Email</span><span class="stat-value">${license.email || 'N/A'}</span></div>
@@ -818,13 +829,22 @@ function renderLicenseStatus(license, usage) {
 }
 
 async function renderLicense() {
-  const license = await window.api.license.get();
-  const hasLicense = !!(license?.license_key);
+  const localLicense = await window.api.license.get();
   let diagOn = true;
   try { diagOn = await window.api.diagnostics.get(); } catch (_) {}
 
-  // Trial signup happens on the website before download; showing an email
-  // trial box in the app confused testers who already have a key. Removed.
+  // Fetch the live status + usage BEFORE rendering so the whole card (including
+  // the "Usage today" figure) paints at once, instead of the number popping in
+  // a moment after the page appears.
+  let verified = null;
+  if (localLicense?.license_key) {
+    try { const r = await window.api.license.verify(localLicense.license_key); if (r.ok) verified = r; } catch (_) {}
+  }
+  const license = verified?.license || localLicense;
+  const usage = verified?.usage;
+  const hasLicense = !!(license?.license_key);
+  if (verified) dashboardHasLicense = licenseIsActive(verified.license);
+
   content.innerHTML = `
     <div class="page-header">
       <h2>License</h2>
@@ -833,7 +853,7 @@ async function renderLicense() {
 
     <div class="card">
       <h3>Current License</h3>
-      <div id="license-current">${renderLicenseStatus(license)}</div>
+      <div id="license-current">${renderLicenseStatus(license, usage)}</div>
     </div>
 
     ${license?.status === 'active' ? `
@@ -846,9 +866,9 @@ async function renderLicense() {
 
     <div class="card">
       <h3>Activate a License Key</h3>
-      <div class="field"><label>License key</label><input id="license_key" placeholder="jb_..." value="${license?.license_key || ''}"></div>
-      <button class="primary" id="activate">Activate</button>
-      <button class="btn-text-muted" id="change-key" style="display:none">Change key</button>
+      <div class="field"><label>License key</label><input id="license_key" placeholder="jb_..." value="${license?.license_key || ''}"${hasLicense ? ' readonly class="input-locked"' : ''}></div>
+      <button class="primary" id="activate"${hasLicense ? ' style="display:none"' : ''}>Activate</button>
+      <button class="btn-text-muted" id="change-key" style="display:${hasLicense ? '' : 'none'}">Change key</button>
       <div class="status-msg" id="status"></div>
     </div>
 
@@ -867,15 +887,10 @@ async function renderLicense() {
     </div>
   `;
 
-  if (license?.license_key) {
-    const result = await window.api.license.verify(license.license_key);
-    if (result.ok) {
-      document.getElementById('license-current').innerHTML = renderLicenseStatus(result.license, result.usage);
-      dashboardHasLicense = licenseIsActive(result.license);
-      // Reconcile the expiry banner in case the status changed server-side
-      // (e.g. a renewed subscription or an extended trial) since app launch.
-      await refreshExpiryBanner();
-    }
+  if (verified) {
+    // Reconcile the expiry banner in case the status changed server-side
+    // (e.g. a renewed subscription or an extended trial) since app launch.
+    await refreshExpiryBanner();
   }
 
   const diagToggle = document.getElementById('diagnostics_toggle');
@@ -1157,7 +1172,7 @@ function recentRowsHtml(recent) {
               <td><span class="badge ${statusBadgeClass(r.status)}">${r.status}</span></td>
               <td class="cv-name-cell">${r.cv_name || '—'}</td>
               <td>${r.updated_at ? r.updated_at.slice(0, 10) : ''}</td>
-              <td>${r.cv_path ? `<button class="view-cv-btn" data-path="${r.cv_path}">View CV</button>` : ''}</td>
+              <td>${r.cv_path ? `<button class="view-cv-btn" data-path="${r.cv_path}" title="View CV" aria-label="View CV"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}</td>
             </tr>`).join('') || '<tr><td colspan="6"><div class="empty-state">No activity yet</div></td></tr>';
 }
 
@@ -1249,10 +1264,23 @@ async function renderDashboard() {
       </div>`;
   }
 
+  const hour = new Date().getHours();
+  const partOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+  const greeting = `Good ${partOfDay}${profile?.first_name ? ', ' + profile.first_name : ''}`;
   content.innerHTML = `
-    <div class="page-header">
-      <h2>Dashboard</h2>
-      <p>Monitor Agent activity and track your application progress.</p>
+    <div class="dash-head">
+      <div>
+        <h2 class="dash-greeting">${greeting}</h2>
+        <p class="dash-sub">${dashboardHasLicense ? 'Your agents are ready. Applications run automatically each day.' : 'Monitor agent activity and track your application progress.'}</p>
+      </div>
+      <div class="dash-cta">
+        <span class="scorer-pill${scorerRunning ? ' scorer-pill-active' : ''}" id="scorer-pill" data-status="${status.scorer || 'stopped'}"
+          title="The AI tailoring engine runs automatically while the Agents are applying, so you don't start it yourself.">${scorerRunning ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
+        <button class="secondary stop-all-btn" data-action="stop-all" ${anyAppRunning ? '' : 'disabled'}>Stop</button>
+        <button class="primary start-applying-btn" data-action="start-all"
+          ${(!dashboardHasLicense || allAppRunning) ? 'disabled' : ''}
+          ${!dashboardHasLicense ? `title="${license?.license_key ? 'Your Job-AI access has ended. Subscribe to continue' : 'Activate a license to start the Agents'}"` : ''}>▶ Start applying</button>
+      </div>
     </div>
 
     ${!dashboardHasLicense ? `
@@ -1265,34 +1293,6 @@ async function renderDashboard() {
 
     ${buildGetStartedCard(profile, cvs, anyConnected, anyAppRunning)}
 
-    <div class="start-applying-bar">
-      <button class="primary start-applying-btn" data-action="start-all"
-        ${(!dashboardHasLicense || allAppRunning) ? 'disabled' : ''}
-        ${!dashboardHasLicense ? `title="${license?.license_key ? 'Your Job-AI access has ended. Subscribe to continue' : 'Activate a license to start the Agents'}"` : ''}>▶ Start applying</button>
-      <button class="secondary stop-all-btn" data-action="stop-all" ${anyAppRunning ? '' : 'disabled'}>Stop</button>
-      <span class="scorer-pill${scorerRunning ? ' scorer-pill-active' : ''}" id="scorer-pill" data-status="${status.scorer || 'stopped'}"
-        title="The AI tailoring engine runs automatically while the Agents are applying, so you don't start it yourself.">${scorerRunning ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
-    </div>
-
-    <p class="bot-controls-hint">Tick the box on a site to include it, then press <strong>Start applying</strong>. Untick any site you want to skip.</p>
-    <div class="bot-controls">
-      ${appAgentKeys.map(key => buildBotCard(key, BOT_LABELS[key])).join('')}
-    </div>
-    <div class="status-msg" id="bot-error"></div>
-
-    <div id="login-prompt" class="login-prompt" style="display:none">
-      <div class="login-prompt-icon">🔐</div>
-      <div class="login-prompt-body">
-        <strong id="login-prompt-title">Agent is waiting for you to log in</strong>
-        <span id="login-prompt-body">A browser window has opened. Complete the login there and the Agent will continue automatically.</span>
-      </div>
-    </div>
-
-    <div class="card card-wide">
-      <h3>Agent Logs</h3>
-      <pre class="bot-log" id="bot-log"></pre>
-    </div>
-
     <div class="summary-grid">
       <div class="summary-card applied"><div class="num" id="stat-applied">${counts.applied || 0}</div><div class="label">Applied</div></div>
       <div class="summary-card pending"><div class="num" id="stat-pending">${counts.pending || 0}</div><div class="label">Pending</div></div>
@@ -1301,9 +1301,29 @@ async function renderDashboard() {
       <div class="summary-card apply_failed"><div class="num" id="stat-failed">${counts.apply_failed || 0}</div><div class="label">Failed</div></div>
     </div>
 
-    <div class="card card-wide">
-      <h3>Applications (Last 14 Days)</h3>
-      ${buildApplicationsGraph(dailyApps)}
+    <div class="dash-cols">
+      <div class="dash-col-main">
+        <div class="dash-col-title">Your agents</div>
+        <p class="bot-controls-hint">Tick a site to include it, then press <strong>Start applying</strong>. Untick any site you want to skip.</p>
+        <div class="bot-controls">
+          ${appAgentKeys.map(key => buildBotCard(key, BOT_LABELS[key])).join('')}
+        </div>
+      </div>
+      <div class="dash-col-side">
+        <div class="dash-col-title">Applications (last 14 days)</div>
+        <div class="card dash-applications-card">
+          ${buildApplicationsGraph(dailyApps)}
+        </div>
+      </div>
+    </div>
+
+    <div class="status-msg" id="bot-error"></div>
+    <div id="login-prompt" class="login-prompt" style="display:none">
+      <div class="login-prompt-icon">🔐</div>
+      <div class="login-prompt-body">
+        <strong id="login-prompt-title">Agent is waiting for you to log in</strong>
+        <span id="login-prompt-body">A browser window has opened. Complete the login there and the Agent will continue automatically.</span>
+      </div>
     </div>
 
     <div class="card card-wide">
@@ -1316,6 +1336,11 @@ async function renderDashboard() {
           ${recentRowsHtml(recent)}
         </tbody>
       </table>
+    </div>
+
+    <div class="card card-wide">
+      <h3>Agent Logs</h3>
+      <pre class="bot-log" id="bot-log"></pre>
     </div>
   `;
 
@@ -1569,7 +1594,7 @@ async function renderTracker() {
   }
 
   const stageHtml = (id, currentStage) => `
-    <select class="tracker-stage-select" data-id="${id}" style="color:${STAGE_COLORS[currentStage] || '#94a3b8'}">
+    <select class="tracker-stage-select" data-id="${id}" style="color:#1c1b17">
       ${TRACKER_STAGES.map(s => `<option value="${s}" ${s === currentStage ? 'selected' : ''}>${STAGE_LABELS[s]}</option>`).join('')}
     </select>`;
 
@@ -1609,7 +1634,7 @@ async function renderTracker() {
 
   content.querySelectorAll('.tracker-stage-select').forEach(sel => {
     sel.addEventListener('change', async () => {
-      sel.style.color = STAGE_COLORS[sel.value] || '#94a3b8';
+      sel.style.color = '#1c1b17';
       await window.api.tracker.update(Number(sel.dataset.id), { stage: sel.value });
     });
   });
@@ -1711,16 +1736,16 @@ async function renderAnalytics() {
       <p>Application performance and patterns over time.</p>
     </div>
 
-    <div class="summary-grid">
+    <div class="summary-grid analytics-summary">
       <div class="summary-card applied"><div class="num">${totalApplied}</div><div class="label">Total Applied</div></div>
       <div class="summary-card pending"><div class="num">${avgPerDay}</div><div class="label">Avg / Active Day</div></div>
-      <div class="summary-card cv_ready"><div class="num">${topSource}</div><div class="label">Top Source</div></div>
+      <div class="summary-card cv_ready"><div class="num num-sm">${topSource}</div><div class="label">Top Source</div></div>
       <div class="summary-card skipped"><div class="num">${skipRate}%</div><div class="label">Skip Rate</div></div>
       <div class="summary-card apply_failed"><div class="num">${totalFailed}</div><div class="label">Failed</div></div>
     </div>
 
+    <div class="dash-col-title analytics-graph-title">Applications (last 30 days)</div>
     <div class="card card-wide">
-      <h3>Applications (Last 30 Days)</h3>
       ${buildAnalyticsGraph(daily30)}
     </div>
 
@@ -1943,10 +1968,23 @@ const TOUR_STEPS = [
 ];
 
 function tourNavigateTo(view) {
+  const isSetup = SETUP_VIEWS.has(view);
+  const setupMenu = document.getElementById('setup-menu');
+  const setupLabel = document.getElementById('setup-label');
+  // While a setup step is active, open the Setup dropdown so its highlighted
+  // item is visible, and pulse the Setup label itself.
+  // Defer opening so the click that advanced the tour finishes bubbling first
+  // (the global click-away handler would otherwise close it immediately).
+  if (setupMenu) {
+    if (isSetup) setTimeout(() => setupMenu.classList.add('open'), 0);
+    else setupMenu.classList.remove('open');
+  }
+  if (setupLabel) setupLabel.classList.toggle('nav-tour-active', isSetup);
   navItems.forEach(li => {
     li.classList.remove('active', 'nav-tour-active');
     if (li.dataset.view === view) li.classList.add('active', 'nav-tour-active');
   });
+  syncSetupActive(view);
   return render(view).then(() => updateNavProgress());
 }
 
@@ -1994,6 +2032,10 @@ function startTour() {
     const existing = document.getElementById('tour-panel');
     if (existing) existing.remove();
     navItems.forEach(li => li.classList.remove('nav-tour-active'));
+    const setupMenu = document.getElementById('setup-menu');
+    const setupLabel = document.getElementById('setup-label');
+    if (setupMenu) setupMenu.classList.remove('open');
+    if (setupLabel) setupLabel.classList.remove('nav-tour-active');
     localStorage.setItem('tour_complete', '1');
   }
 
@@ -2064,7 +2106,7 @@ function renderHelp() {
   const faqs = [
     {
       q: 'How do I get started?',
-      a: 'Complete the 4 setup steps in the sidebar: (1) Personal Details, (2) CVs, (3) Search Preferences, (4) License. Then open the Dashboard, click “Connect account” on a job site card and log in once, and click “Start applying”. The “How to start applying” checklist on the Dashboard walks you through anything still missing.'
+      a: 'Open the Setup menu (top right) and complete the 4 pages: Personal Details, CVs, Search Preferences, and License. Then go to the Dashboard, click “Connect account” on a job site card and log in once, and click “Start applying”. The “How to start applying” checklist on the Dashboard walks you through anything still missing.'
     },
     {
       q: 'Which job sites does Job-AI use?',
@@ -2088,7 +2130,7 @@ function renderHelp() {
     },
     {
       q: 'How do I add more CVs?',
-      a: 'Go to CVs in the sidebar and click “Add CV”. You can upload multiple CVs, and Job-AI automatically selects the best one for each job based on the AI match score.'
+      a: 'Open the Setup menu (top right), choose CVs, and click “Add CV”. You can upload multiple CVs, and Job-AI automatically selects the best one for each job based on the AI match score.'
     },
     {
       q: 'What is the minimum match score?',
@@ -2117,7 +2159,7 @@ function renderHelp() {
   ];
 
   content.innerHTML = `
-    <div class="view-header"><h2>Help &amp; FAQs</h2></div>
+    <div class="page-header"><h2>Help &amp; FAQs</h2><p>Answers to common questions about setting up and running Job-AI.</p></div>
     <div class="help-faq">
       ${faqs.map((f, i) => `
         <div class="faq-item" id="faq-${i}">
@@ -2183,8 +2225,8 @@ if (window.api?.onUpdateReady) {
   });
 }
 
-// Initial view
-render('personal').then(() => {
+// Initial view — open on the Dashboard (command center), not a setup form.
+render('dashboard').then(() => {
   updateNavProgress();
   refreshExpiryBanner();
   initOnboarding();
