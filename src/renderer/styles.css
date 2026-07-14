@@ -9,8 +9,6 @@
 @font-face{font-family:'Hanken Grotesk';src:url('fonts/hanken-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
 @font-face{font-family:'Hanken Grotesk';src:url('fonts/hanken-600.woff2') format('woff2');font-weight:600;font-style:normal;font-display:swap}
 @font-face{font-family:'Hanken Grotesk';src:url('fonts/hanken-700.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}
-@font-face{font-family:'Fraunces';src:url('fonts/fraunces-500.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
-@font-face{font-family:'Fraunces';src:url('fonts/fraunces-600.woff2') format('woff2');font-weight:600;font-style:normal;font-display:swap}
 
 :root {
   --bg: #f6f4ef;            /* warm bone paper */
@@ -39,7 +37,9 @@
   --gold-border: #e6dab9;
 
   --font-sans: 'Hanken Grotesk', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+  /* Headings use the same clean sans as body — Fraunces' decorative glyphs
+     (wonky J / j / f / g) read as "off", so the whole app stays on Hanken. */
+  --font-serif: 'Hanken Grotesk', 'Segoe UI', system-ui, -apple-system, sans-serif;
 
   --radius-sm: 7px;
   --radius: 9px;

@@ -1345,10 +1345,15 @@ async function renderDashboard() {
   `;
 
   const noLicenseCta = content.querySelector('.no-license-cta');
-  if (noLicenseCta) noLicenseCta.addEventListener('click', () => render('license'));
+  if (noLicenseCta) noLicenseCta.addEventListener('click', () => navigate('license'));
 
-  const preflightLink = content.querySelector('.preflight-link');
-  if (preflightLink) preflightLink.addEventListener('click', () => render(preflightLink.dataset.view));
+  // Every "Complete profile →" / "Add a CV →" button (in the checklist AND the
+  // preflight warnings) must jump to its page. querySelector wired only the
+  // first, so all the others did nothing — use querySelectorAll + navigate so
+  // the Setup menu highlights the destination too.
+  content.querySelectorAll('.preflight-link').forEach(link => {
+    link.addEventListener('click', () => navigate(link.dataset.view));
+  });
 
   bindViewCvButtons();
 
