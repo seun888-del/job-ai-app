@@ -67,8 +67,8 @@ body {
 .titlebar {
   height: 38px;
   flex-shrink: 0;
-  background: #2563eb;   /* same blue as the logo */
-  border-bottom: 1px solid #1d4ed8;
+  background: #1e3a8a;   /* darker blue than the logo */
+  border-bottom: 1px solid #172e6e;
   display: flex;
   align-items: stretch;
   -webkit-app-region: drag;
@@ -78,10 +78,10 @@ body {
   display: flex;
   align-items: center;
   padding: 0 14px;
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: #ffffff;
 }
 html[data-os="darwin"] .titlebar-brand { padding-left: 78px; }
@@ -1081,7 +1081,7 @@ li.active .nav-icon-check::after, li.active .nav-icon-chart::after { color: #fff
 .topnav-brand{ display:flex; align-items:center; gap:10px; }
 .tn-badge{ width:30px; height:30px; flex:none; background-image:url('brand-logo.png'); background-size:contain;
   background-repeat:no-repeat; background-position:center; }
-.tn-name{ font-family:var(--font-serif); font-weight:600; font-size:19px; letter-spacing:-.01em; color:var(--text); }
+.tn-name{ font-family:var(--font-sans); font-weight:700; font-size:19px; letter-spacing:-.02em; color:var(--text); }
 .topnav-tabs{ list-style:none; margin:0; padding:0; display:flex; align-items:stretch; gap:2px; height:100%; }
 .topnav-tabs li{ height:100%; display:flex; align-items:center; padding:0 15px; font-size:14px; font-weight:600;
   color:var(--text-muted); border-bottom:2px solid transparent; cursor:pointer; transition:color var(--transition); }
