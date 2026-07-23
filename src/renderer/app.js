@@ -108,7 +108,7 @@ function showInfoDialog({ title, bodyHtml = '', okText = 'Got it', extraText = n
 
 // Stripe checkout (redirects to the pricing page). Kept as one constant so the
 // daily-cap dialog and the expiry banner stay in sync.
-const SUBSCRIBE_URL = 'https://jobbot-backend-production-1323.up.railway.app/subscribe';
+const SUBSCRIBE_URL = 'https://tryjobai.com/subscribe';
 
 // The "daily limit reached" dialog, shown at Start when today's cap is used up.
 // Trial users get a Subscribe call-to-action; paid users just acknowledge it.
@@ -1889,7 +1889,7 @@ async function refreshExpiryBanner() {
   document.getElementById('renew-btn').addEventListener('click', () => {
     if (isTrial) {
       // Straight to Stripe payment — not the trial signup page
-      window.open('https://jobbot-backend-production-1323.up.railway.app/subscribe', '_blank');
+      window.open(SUBSCRIBE_URL, '_blank');
     } else {
       window.open('mailto:merritfemi@gmail.com?subject=Job-AI%20License%20Renewal', '_blank');
     }
