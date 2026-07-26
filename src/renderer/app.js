@@ -1891,7 +1891,7 @@ async function refreshExpiryBanner() {
       // Straight to Stripe payment — not the trial signup page
       window.open(SUBSCRIBE_URL, '_blank');
     } else {
-      window.open('mailto:merritfemi@gmail.com?subject=Job-AI%20License%20Renewal', '_blank');
+      window.open('mailto:jobaisupport@gmail.com?subject=Job-AI%20License%20Renewal', '_blank');
     }
   });
 }
@@ -2177,7 +2177,7 @@ function renderHelp() {
       `).join('')}
     </div>
     <div class="help-contact">
-      <p>Still need help? Email us at <a href="mailto:merritfemi@gmail.com">merritfemi@gmail.com</a> and we'll get back to you.</p>
+      <p>Still need help? Email us at <a href="mailto:jobaisupport@gmail.com">jobaisupport@gmail.com</a> and we'll get back to you.</p>
     </div>
   `;
 }
