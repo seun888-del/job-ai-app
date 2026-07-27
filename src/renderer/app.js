@@ -21,7 +21,9 @@ navItems.forEach(li => {
   });
 });
 
+let _currentView = 'dashboard';
 function navigate(view) {
+  _currentView = view;
   if (_statsPoll) { clearInterval(_statsPoll); _statsPoll = null; }
   navItems.forEach(x => x.classList.remove('active'));
   const navLi = document.querySelector(`.topnav [data-view="${view}"]`);
@@ -2186,6 +2188,17 @@ window.toggleFaq = function(i) {
   const item = document.getElementById(`faq-${i}`);
   item.classList.toggle('open');
 };
+
+// Licence re-validated in the background (e.g. reinstated or renewed) — refresh
+// the current view so the Start button and access banner reflect the new status,
+// without the user having to re-paste the key or restart.
+if (window.api?.license?.onUpdated) {
+  window.api.license.onUpdated(() => {
+    if (_currentView === 'dashboard' || _currentView === 'license') {
+      try { navigate(_currentView); } catch (_) {}
+    }
+  });
+}
 
 // â”€â”€ Auto-update banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (window.api?.onUpdateAvailable) {

@@ -158,6 +158,7 @@ app.whenReady().then(async () => {
   syncLicenseEnv(); // route main-process AI (CV analysis) through the licensed backend
   queueReader.init(app.getPath('userData'));
   createWindow();
+  refreshLicense('startup'); // recover a reinstated/renewed licence on relaunch, no re-paste
 
   const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent' };
   // The user-facing job-site agents. The scorer runs alongside them but is an
@@ -234,6 +235,9 @@ app.whenReady().then(async () => {
 
   // Daily summary email — check every 30 minutes after 6 PM
   setInterval(maybeSendDailySummary, 30 * 60 * 1000);
+  // Re-check the licence every 15 min so a reinstated/renewed one recovers on its
+  // own — the user never has to re-paste the key or restart.
+  setInterval(() => refreshLicense('periodic'), 15 * 60 * 1000);
   maybeSendDailySummary(); // also run immediately on launch in case it's past 6 PM
 
   // Anonymous install beacon (once per install) — feeds the founder funnel stats
@@ -577,6 +581,48 @@ function syncLicenseEnv() {
       delete process.env.JOBBOT_LICENSE_KEY;
     }
   } catch (_) {}
+}
+
+// Re-validate the STORED licence against the backend and update local status —
+// so a reinstated / renewed licence recovers WITHOUT the user re-pasting the key.
+// Runs at startup (a restart recovers it) and on a timer (recovers on its own).
+// Only changes local state when the backend actually confirms: a network error or
+// a 5xx leaves things untouched (never locks a valid user out on a blip). Emits
+// 'license:updated' on a real status change so the UI (Start button) refreshes.
+async function refreshLicense(reason = '') {
+  try {
+    const lic = db.getLicense();
+    if (!lic || !lic.license_key) return;
+    const prev = lic.status;
+
+    let res;
+    try {
+      res = await fetch(`${JOBBOT_BACKEND_URL}/v1/license`, {
+        headers: { Authorization: `Bearer ${lic.license_key}`, 'X-Machine-Id': machineId() },
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (_) { return; } // network error → leave local state as-is
+
+    let next;
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (!data || !data.status) return;
+      // Local table only allows trial/active/expired; fold anything else (revoked) → expired.
+      next = ['trial', 'active', 'expired'].includes(data.status) ? data.status : 'expired';
+      db.saveLicense({ license_key: data.license_key, email: data.email, status: next, expires_at: data.expires_at });
+    } else if (res.status === 401 || res.status === 403) {
+      next = 'expired'; // revoked / inactive per the backend
+      db.saveLicense({ license_key: lic.license_key, email: lic.email, status: 'expired', expires_at: lic.expires_at });
+    } else {
+      return; // other backend errors (5xx) → don't touch local state
+    }
+
+    syncLicenseEnv();
+    if (next !== prev) {
+      console.log(`[license] refresh${reason ? ' (' + reason + ')' : ''}: ${prev} -> ${next}`);
+      mainWindow?.webContents.send('license:updated', db.getLicense());
+    }
+  } catch (_) { /* never let a refresh crash the app */ }
 }
 
 ipcMain.handle('license:get', () => db.getLicense());

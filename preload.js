@@ -92,6 +92,11 @@ contextBridge.exposeInMainWorld('api', {
     verify: (key) => ipcRenderer.invoke('license:verify', key),
     startTrial: (email) => ipcRenderer.invoke('license:startTrial', email),
     manageSubscription: () => ipcRenderer.invoke('license:manageSubscription'),
+    onUpdated: (callback) => {
+      const handler = (event, lic) => callback(lic);
+      ipcRenderer.on('license:updated', handler);
+      return () => ipcRenderer.removeListener('license:updated', handler);
+    },
   },
   diagnostics: {
     get: () => ipcRenderer.invoke('diagnostics:get'),
