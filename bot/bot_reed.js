@@ -122,6 +122,10 @@ async function drainReadyCVs(context, reedPage) {
     .sort((a, b) => (priority[a.workType] ?? 99) - (priority[b.workType] ?? 99));
 
   if (!readyJobs.length) return reedPage;
+  if (queue.reconnectNeeded('reed')) {
+    console.log('  [Reed Bot] [Drain] Reconnect needed — skipping this apply pass until the Reed account is reconnected.');
+    return reedPage;
+  }
   console.log(`\n  [Reed Bot] [Drain] ${readyJobs.length} cv_ready job(s) — applying before next search...`);
 
   for (const job of readyJobs) {
@@ -149,10 +153,15 @@ async function drainReadyCVs(context, reedPage) {
         queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
         console.log(`  [Reed Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
+        const _cb = queue.recordUploadFailure('reed');
+        if (_cb.tripped) {
+          console.log('  [Reed Bot] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your Reed account (Connect account on the dashboard), then press Start applying. Pausing Reed applications + tailoring until then.');
+          return reedPage;
+        }
       } else {
         const finalStatus = applied ? 'applied' : 'apply_failed';
         queue.update(job.jobId, { status: finalStatus });
-        if (applied) queue.markApplied(job.jobId);
+        if (applied) { queue.markApplied(job.jobId); queue.recordUploadSuccess('reed'); }
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, applied ? 'APPLIED' : 'APPLY_FAILED', applied ? 'Reed' : 'Reed form could not be completed');
         console.log(`  [Reed Bot] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
       }
@@ -225,6 +234,13 @@ async function phase2_applyReadyCVs(context, reedPage) {
       ...queue.getByStatus('processing').filter(j => j.source === 'reed'),
     ].length;
 
+    // Circuit-breaker: if the Reed session is flagged as dead, don't churn
+    // through cv_ready jobs failing to upload — idle until reconnected.
+    if (readyJobs.length && queue.reconnectNeeded('reed')) {
+      await DELAY(15000);
+      continue;
+    }
+
     for (const job of readyJobs) {
       const appliedToday = queue.countAppliedToday();
       if (appliedToday >= cfg.MAX_APPLICATIONS_PER_DAY) {
@@ -265,12 +281,17 @@ async function phase2_applyReadyCVs(context, reedPage) {
           queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
           console.log(`  [Reed Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
+          const _cb = queue.recordUploadFailure('reed');
+          if (_cb.tripped) {
+            console.log('  [Reed Bot] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your Reed account (Connect account on the dashboard), then press Start applying. Pausing Reed applications + tailoring until then.');
+            return;
+          }
           continue;
         }
 
         const finalStatus = applied ? 'applied' : 'apply_failed';
         queue.update(job.jobId, { status: finalStatus });
-        if (applied) queue.markApplied(job.jobId);
+        if (applied) { queue.markApplied(job.jobId); queue.recordUploadSuccess('reed'); }
         logger.log(
           job.title, job.company, job.url, job.cvName, job.cvScore,
           applied ? 'APPLIED' : 'APPLY_FAILED',
@@ -338,6 +359,9 @@ async function launchBrowser() {
 async function main() {
   await cfg.init();
   await queue.init(process.env.JOBBOT_USERDATA);
+  // Login not yet verified this session → the Scorer holds Reed jobs (doesn't
+  // tailor) until we confirm the session below. Fresh Start starts clean here.
+  queue.markSessionChecking('reed');
 
   console.log('═══════════════════════════════════════════════════════');
   console.log('  Reed Bot — Starting (continuous mode)');
@@ -364,9 +388,12 @@ async function main() {
         process.exit(0);
       }
       console.error('  [Reed Bot] Failed to launch browser or log in: ' + err.message);
+      queue.markSessionDead('reed'); // login failed → Scorer stops tailoring Reed jobs
       await context?.close().catch(() => {});
       process.exit(1);
     }
+    // Login verified — let the Scorer tailor Reed jobs again.
+    queue.markSessionHealthy('reed');
 
     // When the shared daily application cap is reached, stop the WHOLE agent —
     // not just applications. Otherwise it keeps searching + scoring/tailoring

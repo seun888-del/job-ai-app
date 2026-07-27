@@ -57,6 +57,10 @@ async function drainReadyCVs(liPage) {
     .sort((a, b) => (priority[a.workType] ?? 99) - (priority[b.workType] ?? 99));
 
   if (!readyJobs.length) return;
+  if (queue.reconnectNeeded('linkedin')) {
+    console.log('  [LinkedIn Bot] [Drain] Reconnect needed — skipping this apply pass until the LinkedIn account is reconnected.');
+    return;
+  }
   console.log(`\n  [LinkedIn Bot] [Drain] ${readyJobs.length} cv_ready job(s) — applying before next search...`);
 
   for (const job of readyJobs) {
@@ -80,10 +84,15 @@ async function drainReadyCVs(liPage) {
         queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
         console.log(`  [LinkedIn Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
+        const _cb = queue.recordUploadFailure('linkedin');
+        if (_cb.tripped) {
+          console.log('  [LinkedIn Bot] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your LinkedIn account (Connect account on the dashboard), then press Start applying. Pausing LinkedIn applications + tailoring until then.');
+          return;
+        }
       } else {
         const finalStatus = applied ? 'applied' : 'apply_failed';
         queue.update(job.jobId, { status: finalStatus });
-        if (applied) queue.markApplied(job.jobId);
+        if (applied) { queue.markApplied(job.jobId); queue.recordUploadSuccess('linkedin'); }
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, applied ? 'APPLIED' : 'APPLY_FAILED', applied ? 'LinkedIn Easy Apply' : 'LinkedIn form could not be completed');
         console.log(`  [LinkedIn Bot] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
       }
@@ -211,6 +220,13 @@ async function phase2_applyReadyCVs(liPage) {
       ...queue.getByStatus('processing').filter(j => j.source === 'linkedin'),
     ].length;
 
+    // Circuit-breaker: if the LinkedIn session is flagged as dead, idle instead
+    // of churning through cv_ready jobs that will all fail to upload.
+    if (readyJobs.length && queue.reconnectNeeded('linkedin')) {
+      await DELAY(15000);
+      continue;
+    }
+
     for (const job of readyJobs) {
       const appliedToday = queue.countAppliedToday();
       if (appliedToday >= cfg.MAX_APPLICATIONS_PER_DAY) {
@@ -243,12 +259,17 @@ async function phase2_applyReadyCVs(liPage) {
           queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
           console.log(`  [LinkedIn Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
+          const _cb = queue.recordUploadFailure('linkedin');
+          if (_cb.tripped) {
+            console.log('  [LinkedIn Bot] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your LinkedIn account (Connect account on the dashboard), then press Start applying. Pausing LinkedIn applications + tailoring until then.');
+            return;
+          }
           continue;
         }
 
         const finalStatus = applied ? 'applied' : 'apply_failed';
         queue.update(job.jobId, { status: finalStatus });
-        if (applied) queue.markApplied(job.jobId);
+        if (applied) { queue.markApplied(job.jobId); queue.recordUploadSuccess('linkedin'); }
         logger.log(
           job.title, job.company, job.url, job.cvName, job.cvScore,
           applied ? 'APPLIED' : 'APPLY_FAILED',
@@ -285,6 +306,9 @@ async function phase2_applyReadyCVs(liPage) {
 async function main() {
   await cfg.init();
   await queue.init(process.env.JOBBOT_USERDATA);
+  // Login not yet verified this session → the Scorer holds LinkedIn jobs until
+  // we confirm the session below. Fresh Start starts clean here.
+  queue.markSessionChecking('linkedin');
 
   console.log('═══════════════════════════════════════════════════════');
   console.log('  LinkedIn Bot — Starting (continuous mode)');
@@ -315,9 +339,12 @@ async function main() {
       process.exit(0);
     }
     console.error('ERROR: ' + err.message);
+    queue.markSessionDead('linkedin'); // login failed → Scorer stops tailoring LinkedIn jobs
     await context.close().catch(() => {});
     process.exit(1);
   }
+  // Login verified — let the Scorer tailor LinkedIn jobs again.
+  queue.markSessionHealthy('linkedin');
 
   // When the shared daily application cap is reached, stop the WHOLE agent — not
   // just applications — so it doesn't keep searching + scoring/tailoring CVs it

@@ -23,6 +23,8 @@ async function init(userDataPath) {
   const buffer = fs.existsSync(dbPath) ? fs.readFileSync(dbPath) : undefined;
   const db = new SQL.Database(buffer);
   db.run(schema); // idempotent — creates tables if missing
+  // Key/value store for cross-process bot state (e.g. the reconnect circuit-breaker).
+  db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
 
   // Migrations: add columns if not present
   const colStmt = db.prepare('PRAGMA table_info(queue)');
@@ -270,4 +272,125 @@ function isQualityJD(description, title) {
   return true;
 }
 
-module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, wasApplied, countAppliedToday, hasCanonical, requeueFailed, wasAppliedToCompanyRecently, isQualityJD };
+// ── Cross-process key/value store ───────────────────────────────────────────
+function getMeta(key) {
+  try {
+    return withDb((db) => {
+      db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
+      const stmt = db.prepare('SELECT value FROM meta WHERE key = ?');
+      stmt.bind([key]);
+      const val = stmt.step() ? stmt.getAsObject().value : null;
+      stmt.free();
+      return val;
+    });
+  } catch (_) { return null; }
+}
+
+function setMeta(key, value) {
+  try {
+    withDb((db, mutated) => {
+      db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
+      db.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, String(value)]);
+      mutated();
+    });
+  } catch (_) { /* non-fatal: breaker must never break the pipeline */ }
+}
+
+// ── Session-health gate (stops tailoring CVs for a dead session) ─────────────
+// Per-source session state lives in meta as `sess:<source>` = "<state>:<ts>":
+//   checking → the apply bot is logging in; not yet verified
+//   ok       → login verified / a real application just succeeded
+//   dead     → login failed, or CVs repeatedly couldn't be attached
+// The SCORER only tailors a source that is 'ok' or unknown (a non-participating
+// bot like Indeed never sets state → tailors normally). It HOLDS 'dead' sources,
+// and 'checking' sources within a grace window — so a CV is only tailored once
+// the account's session is confirmed, not before. FAIL-SAFE: a 'checking' state
+// stuck past CHECKING_GRACE_MS falls back to tailoring, so a missing "logged in"
+// signal can never permanently stall the product — worst case is a short delay.
+// Every call is defensive: on any error it returns a safe default and never
+// disrupts the apply/tailor pipeline.
+const CV_FAIL_THRESHOLD = 3;
+const CHECKING_GRACE_MS = 90 * 1000;
+
+function _setSession(source, state) { setMeta(`sess:${source}`, `${state}:${Date.now()}`); }
+function _parseSession(raw) {
+  if (!raw) return { state: null, ts: 0 };
+  const i = String(raw).lastIndexOf(':');
+  if (i < 0) return { state: String(raw), ts: 0 };
+  return { state: String(raw).slice(0, i), ts: parseInt(String(raw).slice(i + 1), 10) || 0 };
+}
+function sessionState(source) { try { return _parseSession(getMeta(`sess:${source}`)); } catch (_) { return { state: null, ts: 0 }; } }
+
+// Login in progress — call at bot startup, before ensureLoggedIn.
+function markSessionChecking(source) { try { _setSession(source, 'checking'); } catch (_) {} }
+// Login verified / a real application succeeded — resumes tailoring for this source.
+function markSessionHealthy(source) { try { _setSession(source, 'ok'); setMeta(`cvfail:${source}`, '0'); } catch (_) {} }
+// Login failed / repeated upload failures — pauses tailoring for this source.
+function markSessionDead(source) { try { _setSession(source, 'dead'); } catch (_) {} }
+
+// Mid-run upload failure. A healthy session only flips to dead after
+// CV_FAIL_THRESHOLD in a row (guards against a one-off "upload box not found").
+function recordUploadFailure(source) {
+  try {
+    const k = `cvfail:${source}`;
+    const streak = (parseInt(getMeta(k) || '0', 10) || 0) + 1;
+    setMeta(k, streak);
+    if (streak >= CV_FAIL_THRESHOLD) { markSessionDead(source); return { tripped: true, streak }; }
+    return { tripped: false, streak };
+  } catch (_) { return { tripped: false, streak: 0 }; }
+}
+function recordUploadSuccess(source) { markSessionHealthy(source); }
+
+// Apply-bot gate: don't bother applying when the session is dead.
+function reconnectNeeded(source) { try { return sessionState(source).state === 'dead'; } catch (_) { return false; } }
+
+// Scorer gate: sources whose CVs must NOT be tailored right now — 'dead', or
+// 'checking' still inside the grace window. One DB read.
+function tailoringPausedSources() {
+  try {
+    return withDb((db) => {
+      db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
+      const stmt = db.prepare("SELECT key, value FROM meta WHERE key LIKE 'sess:%'");
+      const out = []; const now = Date.now();
+      while (stmt.step()) {
+        const r = stmt.getAsObject();
+        const src = String(r.key).slice('sess:'.length);
+        const { state, ts } = _parseSession(r.value);
+        if (state === 'dead') out.push(src);
+        else if (state === 'checking' && (now - ts) < CHECKING_GRACE_MS) out.push(src);
+      }
+      stmt.free();
+      return out;
+    });
+  } catch (_) { return []; }
+}
+
+// Sources currently flagged dead (for the reconnect prompt / logging).
+function reconnectSources() {
+  try {
+    return withDb((db) => {
+      db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
+      const stmt = db.prepare("SELECT key, value FROM meta WHERE key LIKE 'sess:%'");
+      const out = [];
+      while (stmt.step()) {
+        const r = stmt.getAsObject();
+        if (_parseSession(r.value).state === 'dead') out.push(String(r.key).slice('sess:'.length));
+      }
+      stmt.free();
+      return out;
+    });
+  } catch (_) { return []; }
+}
+
+function clearReconnect(source) {
+  try {
+    if (source) { setMeta(`cvfail:${source}`, '0'); setMeta(`sess:${source}`, ''); return; }
+    withDb((db, mutated) => {
+      db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
+      db.run("DELETE FROM meta WHERE key LIKE 'sess:%' OR key LIKE 'cvfail:%'");
+      mutated();
+    });
+  } catch (_) { /* non-fatal */ }
+}
+
+module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, wasApplied, countAppliedToday, hasCanonical, requeueFailed, wasAppliedToCompanyRecently, isQualityJD, getMeta, setMeta, markSessionChecking, markSessionHealthy, markSessionDead, sessionState, recordUploadFailure, recordUploadSuccess, reconnectNeeded, reconnectSources, tailoringPausedSources, clearReconnect };

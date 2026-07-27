@@ -369,7 +369,20 @@ async function main() {
       queue.update(j.jobId, { status: 'pending' });
     }
 
-    const pending = queue.getByStatus('pending');
+    // Session-health gate: only tailor for sources whose login is verified ('ok'
+    // or unknown/non-participating). Hold sources that are 'dead' or still
+    // 'checking' (login in progress) — so a CV is tailored only once the account's
+    // session is confirmed, never into a dead or unverified session.
+    const pausedSources = queue.tailoringPausedSources();
+    let pending = queue.getByStatus('pending');
+    if (pausedSources.length) {
+      const before = pending.length;
+      pending = pending.filter(j => !pausedSources.includes(j.source));
+      const held = before - pending.length;
+      if (held > 0 && logTick % 6 === 0) {
+        console.log(`  [Scorer Bot] Holding ${held} job(s) — reconnect needed for: ${pausedSources.join(', ')}. Not tailoring until reconnected (saves AI calls).`);
+      }
+    }
 
     if (pending.length === 0) {
       logTick++;
