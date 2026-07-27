@@ -11,6 +11,7 @@ const cfg     = require('./config');
 const queue   = require('./modules/queue_manager');
 const logger  = require('./modules/logger');
 const salary  = require('./modules/salary_filter');
+const sponsorship = require('./modules/sponsorship');
 const stealth = require('./modules/stealth');
 const { launchPersistentContext, connectToRunningChrome, humanWarmup, waitForCloudflareSolve } = require('./modules/browser_launcher');
 const path    = require('path');
@@ -187,12 +188,10 @@ async function phase1_searchAndQueue(context, page) {
           continue;
         }
 
-        if (cfg.APPLICANT.seekSponsorship) {
-          if (!/visa sponsor|sponsorship|skilled worker|tier 2|work permit/i.test(description)) {
-            console.log(`  [CV-Library Bot] No sponsorship — skipping: ${title}`);
-            queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'No sponsorship offered' });
-            continue;
-          }
+        if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(description))) {
+          console.log(`  [CV-Library Bot] No sponsorship — skipping: ${title}`);
+          queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'No sponsorship offered' });
+          continue;
         }
 
         const workType = detectWorkType(description);

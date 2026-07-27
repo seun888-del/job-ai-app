@@ -15,6 +15,7 @@ const linkedin = require('./modules/linkedin');
 const queue    = require('./modules/queue_manager');
 const logger   = require('./modules/logger');
 const salary   = require('./modules/salary_filter');
+const sponsorship = require('./modules/sponsorship');
 const stealth  = require('./modules/stealth');
 const { launchPersistentContext, connectToRunningChrome, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
 const path     = require('path');
@@ -162,13 +163,10 @@ async function phase1_searchAndQueue(liPage) {
         // LinkedIn URL already filters f_WT=2,3 (Remote+Hybrid) — no need to re-filter
         const workType = detectWorkType(jobDetails.description);
 
-        if (cfg.APPLICANT.seekSponsorship) {
-          const offersSponsor = /visa sponsor|sponsorship|skilled worker visa|tier 2|work permit|sponsor.*visa/i.test(jobDetails.description);
-          if (!offersSponsor) {
-            console.log(`  [LinkedIn Bot] No sponsorship offered — skipping: ${job.title}`);
-            queue.add({ ...job, source: 'linkedin', status: 'skipped', reason: 'No sponsorship offered' });
-            continue;
-          }
+        if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(jobDetails.description))) {
+          console.log(`  [LinkedIn Bot] No sponsorship offered — skipping: ${job.title}`);
+          queue.add({ ...job, source: 'linkedin', status: 'skipped', reason: 'No sponsorship offered' });
+          continue;
         }
 
         if (!salary.isAcceptable(jobDetails.description, cfg.APPLICANT.salaryExpectation)) {

@@ -14,6 +14,7 @@ const reed      = require('./modules/reed');
 const queue     = require('./modules/queue_manager');
 const logger    = require('./modules/logger');
 const salary    = require('./modules/salary_filter');
+const sponsorship = require('./modules/sponsorship');
 const stealth   = require('./modules/stealth');
 const atsFiller = require('./modules/ats_filler');
 const { launchPersistentContext, connectToRunningChrome, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
@@ -96,12 +97,10 @@ async function filterAndQueue(job, getDetails) {
     queue.add({ ...job, source: 'reed', status: 'skipped', reason: `Work type (${workType}) not wanted` });
     return;
   }
-  if (cfg.APPLICANT.seekSponsorship) {
-    if (!/visa sponsor|sponsorship|skilled worker visa|tier 2|work permit|sponsor.*visa/i.test(jobDetails.description)) {
-      console.log(`  [Reed Bot] No sponsorship offered — skipping: ${job.title}`);
-      queue.add({ ...job, source: 'reed', status: 'skipped', reason: 'No sponsorship offered' });
-      return;
-    }
+  if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(jobDetails.description))) {
+    console.log(`  [Reed Bot] No sponsorship offered — skipping: ${job.title}`);
+    queue.add({ ...job, source: 'reed', status: 'skipped', reason: 'No sponsorship offered' });
+    return;
   }
   if (!salary.isAcceptable(jobDetails.description, cfg.APPLICANT.salaryExpectation)) {
     const min = salary.extractMinSalary(jobDetails.description);

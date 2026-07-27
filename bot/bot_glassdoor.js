@@ -11,6 +11,7 @@ const glassdoor      = require('./modules/glassdoor');
 const queue          = require('./modules/queue_manager');
 const logger         = require('./modules/logger');
 const salary         = require('./modules/salary_filter');
+const sponsorship    = require('./modules/sponsorship');
 const stealth        = require('./modules/stealth');
 const { launchPersistentContext, connectToRunningChrome } = require('./modules/browser_launcher');
 const path           = require('path');
@@ -89,12 +90,10 @@ async function phase1_searchAndQueue(context, page) {
           queue.add({ ...job, source: 'glassdoor', status: 'skipped', reason: 'No Easy Apply button found' });
           continue;
         }
-        if (cfg.APPLICANT.seekSponsorship) {
-          const offersSponsor = /visa sponsor|sponsorship|skilled worker visa|tier 2|work permit/i.test(jobDetails.description);
-          if (!offersSponsor) {
-            queue.add({ ...job, source: 'glassdoor', status: 'skipped', reason: 'No sponsorship offered' });
-            continue;
-          }
+        if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(jobDetails.description))) {
+          console.log(`  [Glassdoor Bot] No sponsorship offered — skipping: ${job.title}`);
+          queue.add({ ...job, source: 'glassdoor', status: 'skipped', reason: 'No sponsorship offered' });
+          continue;
         }
         const workType = detectWorkType(jobDetails.description);
         if (!cfg.WORK_TYPE_PRIORITY.includes(workType)) {
