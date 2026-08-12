@@ -123,7 +123,7 @@ function showDailyLimitDialog(limit) {
       ${limit.isPaid ? '' : `<p style="margin:0;color:var(--text-muted,#64748b);font-size:13px">Your free trial is capped at 10 applications a day. Paid plans apply up to 25 per day.</p>`}`,
     okText: limit.isPaid ? 'Got it' : 'Not now',
     extraText: limit.isPaid ? null : 'Subscribe',
-    onExtra: limit.isPaid ? null : () => window.open(SUBSCRIBE_URL, '_blank'),
+    onExtra: limit.isPaid ? null : () => window.api.shell.openExternal(SUBSCRIBE_URL),
   });
 }
 
@@ -1668,7 +1668,7 @@ async function renderTracker() {
   content.querySelectorAll('.tracker-link').forEach(a => {
     a.addEventListener('click', e => {
       e.preventDefault();
-      if (a.dataset.url) window.api.shell.openPath(a.dataset.url);
+      if (a.dataset.url) window.api.shell.openExternal(a.dataset.url);
     });
   });
 }
@@ -1886,14 +1886,33 @@ async function refreshExpiryBanner() {
   banner.className = `expiry-banner ${urgency}`;
   banner.innerHTML = `
     <span>${msg}</span>
-    <button id="renew-btn">${isTrial ? 'Subscribe to continue ->' : 'Contact to Renew'}</button>
+    <button id="renew-btn">${isTrial ? 'Subscribe to continue ->' : 'Renew Subscription'}</button>
   `;
-  document.getElementById('renew-btn').addEventListener('click', () => {
+  document.getElementById('renew-btn').addEventListener('click', async () => {
     if (isTrial) {
       // Straight to Stripe payment — not the trial signup page
-      window.open(SUBSCRIBE_URL, '_blank');
-    } else {
-      window.open('mailto:jobaisupport@gmail.com?subject=Job-AI%20License%20Renewal', '_blank');
+      window.api.shell.openExternal(SUBSCRIBE_URL);
+      return;
+    }
+    // Expired paid subscriber: open the Stripe billing portal so they can
+    // update their card / reactivate and self-renew, no email needed.
+    const btn = document.getElementById('renew-btn');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Opening…';
+    try {
+      const r = await window.api.license.manageSubscription();
+      if (r.ok) return;
+      if (r.error === 'no_subscription') {
+        // No linked subscription to reactivate — send them to a fresh checkout.
+        window.api.shell.openExternal(SUBSCRIBE_URL);
+      } else {
+        // Server / network problem — fall back to emailing support.
+        window.api.shell.openExternal('mailto:merritfemi@gmail.com?subject=Job-AI%20License%20Renewal');
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
     }
   });
 }

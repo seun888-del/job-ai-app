@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   shell: {
     openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
+    openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   },
   session: {
     importChrome: (botName) => ipcRenderer.invoke('session:importChrome', botName),

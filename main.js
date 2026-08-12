@@ -730,6 +730,15 @@ ipcMain.handle('license:verify', async (event, key) => {
 
 // ── Shell ────────────────────────────────────────────────────────────────
 ipcMain.handle('shell:openPath', (event, filePath) => shell.openPath(filePath));
+// Open a URL or mailto: link in the OS browser / mail client. Renderer must
+// use this (NOT window.open(url,'_blank'), which just spawns a blank Electron
+// window). Only allow safe external schemes so a bad value can't do worse.
+ipcMain.handle('shell:openExternal', (event, url) => {
+  if (typeof url === 'string' && /^(https?:|mailto:)/i.test(url)) {
+    return shell.openExternal(url);
+  }
+  return false;
+});
 
 // ── Site Connect ──────────────────────────────────────────────────────────
 // Opens real Chrome with --remote-debugging-port so Playwright can attach to
