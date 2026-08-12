@@ -112,6 +112,17 @@ function showInfoDialog({ title, bodyHtml = '', okText = 'Got it', extraText = n
 // daily-cap dialog and the expiry banner stay in sync.
 const SUBSCRIBE_URL = 'https://tryjobai.com/subscribe';
 
+// Open Stripe checkout, forwarding this device's stored license key so a
+// renewal reactivates that exact key on the backend — the app then auto-unlocks
+// on its next re-check with nothing to paste, even if they pay with a different
+// email. Falls back to a plain checkout if no key is stored yet.
+async function openSubscribe() {
+  let key = '';
+  try { key = (await window.api.license.get())?.license_key || ''; } catch (_) {}
+  const url = key ? `${SUBSCRIBE_URL}?lk=${encodeURIComponent(key)}` : SUBSCRIBE_URL;
+  window.api.shell.openExternal(url);
+}
+
 // The "daily limit reached" dialog, shown at Start when today's cap is used up.
 // Trial users get a Subscribe call-to-action; paid users just acknowledge it.
 function showDailyLimitDialog(limit) {
@@ -123,7 +134,7 @@ function showDailyLimitDialog(limit) {
       ${limit.isPaid ? '' : `<p style="margin:0;color:var(--text-muted,#64748b);font-size:13px">Your free trial is capped at 10 applications a day. Paid plans apply up to 25 per day.</p>`}`,
     okText: limit.isPaid ? 'Got it' : 'Not now',
     extraText: limit.isPaid ? null : 'Subscribe',
-    onExtra: limit.isPaid ? null : () => window.api.shell.openExternal(SUBSCRIBE_URL),
+    onExtra: limit.isPaid ? null : () => openSubscribe(),
   });
 }
 
@@ -1891,7 +1902,7 @@ async function refreshExpiryBanner() {
   document.getElementById('renew-btn').addEventListener('click', async () => {
     if (isTrial) {
       // Straight to Stripe payment — not the trial signup page
-      window.api.shell.openExternal(SUBSCRIBE_URL);
+      openSubscribe();
       return;
     }
     // Expired paid subscriber: open the Stripe billing portal so they can
@@ -1904,8 +1915,9 @@ async function refreshExpiryBanner() {
       const r = await window.api.license.manageSubscription();
       if (r.ok) return;
       if (r.error === 'no_subscription') {
-        // No linked subscription to reactivate — send them to a fresh checkout.
-        window.api.shell.openExternal(SUBSCRIBE_URL);
+        // No linked subscription to reactivate — send them to a fresh checkout,
+        // forwarding their key so the renewal reactivates it in place.
+        openSubscribe();
       } else {
         // Server / network problem — fall back to emailing support.
         window.api.shell.openExternal('mailto:merritfemi@gmail.com?subject=Job-AI%20License%20Renewal');
