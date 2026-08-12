@@ -16,8 +16,24 @@ jobs:
         with:
           node-version: 20
 
+      # Electron's postinstall downloads its binary from GitHub's release CDN,
+      # which intermittently drops the connection ("socket hang up") on the
+      # Windows runner and fails the whole release. Retry a few times, clearing
+      # Electron's download cache between attempts so it re-fetches cleanly.
       - name: Install dependencies
-        run: npm ci
+        shell: pwsh
+        run: |
+          $max = 4
+          for ($i = 1; $i -le $max; $i++) {
+            Write-Host "npm ci attempt $i of $max"
+            npm ci
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "npm ci failed (exit $LASTEXITCODE); clearing Electron cache and retrying..."
+            Remove-Item -Recurse -Force "$env:LOCALAPPDATA\electron\Cache" -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds ([Math]::Min(30, 8 * $i))
+          }
+          Write-Host "npm ci failed after $max attempts"
+          exit 1
 
       - name: Download Playwright browsers
         run: npx playwright install chromium
