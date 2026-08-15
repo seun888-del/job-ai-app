@@ -16,19 +16,29 @@ function safe(fn, fallback) {
   try { return fn(); } catch (_) { return fallback; }
 }
 
+// queueReader methods are async (they re-open queue.db each call), so these must
+// be awaited — a sync call would hand back a Promise and throw downstream.
+async function safeAsync(fn, fallback) {
+  try { return await fn(); } catch (_) { return fallback; }
+}
+
 // extra: { botStatus, connected } — supplied by main.js (they need Electron
 // app paths / botManager, which live in the main process).
-function build(extra = {}) {
+// Async because the queueReader reads (queue counts, analytics, applied-today)
+// return Promises; main.js must `await` this.
+async function build(extra = {}) {
   const license = safe(() => db.getLicense(), null) || {};
 
-  const summaryRows = safe(() => queueReader.getQueueSummary(), []);
+  const summaryRows = await safeAsync(() => queueReader.getQueueSummary(), []);
   const queue = {};
   for (const r of summaryRows) queue[r.status] = r.count;
 
-  const analytics = safe(() => queueReader.getAnalytics(), null) || {};
+  const analytics = (await safeAsync(() => queueReader.getAnalytics(), null)) || {};
   const topSkipReasons = (analytics.skipReasons || [])
     .slice(0, 8)
     .map(r => ({ reason: String(r.reason || '').slice(0, 120), count: r.count }));
+
+  const appliedToday = await safeAsync(() => queueReader.getTodayAppliedCount(), 0);
 
   const searchTerms = safe(() => db.getSearchTerms(true), []).map(t => t.term).slice(0, 40);
   const excludeKeywords = safe(() => db.getExcludeKeywords(true), []).map(k => k.keyword).slice(0, 40);
@@ -42,7 +52,7 @@ function build(extra = {}) {
     },
     agents: extra.botStatus || {},                   // { reed:'running', scorer:'stopped', ... }
     connected_accounts: extra.connected || {},       // { reed:true, linkedin:false, ... }
-    applied_today: safe(() => queueReader.getTodayAppliedCount(), 0),
+    applied_today: appliedToday,
     queue,                                            // counts keyed by status (incl. 'tailored')
     top_skip_reasons: topSkipReasons,                // the "why nothing applied" signal
     search_terms: searchTerms,

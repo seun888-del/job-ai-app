@@ -923,7 +923,7 @@ ipcMain.handle('assistant:ask', async (event, question) => {
 
   let state = {};
   try {
-    state = assistantState.build({
+    state = await assistantState.build({
       botStatus: botManager.getStatus(),
       connected: connectedSitesStatus(),
     });
