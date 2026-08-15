@@ -28,7 +28,11 @@ const { tailorStructured }            = require('./modules/cv_tailor_structured'
 const { generateCoverLetter }         = require('./modules/cover_letter');
 const { llmAvailable, mode: llmMode } = require('../src/services/llm');
 
-const QUICK_FAIL_THRESHOLD = 35;
+// Minimum GENUINE (pre-addendum) keyword match a job must have before we let
+// the ATS addendum top it up. Below this the role is fundamentally off-target
+// (e.g. a Finance or Product Owner job for an AI candidate) and must stay
+// skipped — the addendum must never rescue an unrelated role into an application.
+const QUICK_FAIL_THRESHOLD = 45;
 const BOOST_TARGET         = 85;
 const STUCK_TIMEOUT_MS     = 10 * 60 * 1000;
 
@@ -121,8 +125,12 @@ async function scoreWithBoost(cv, jdText) {
 
   console.log(`  [Scorer Bot] Score: ${score}% — ${cv.name}`);
 
-  if (score > 0 && score < QUICK_FAIL_THRESHOLD) {
-    console.log(`  [Scorer Bot] ${score}% below quick-fail threshold — skipping this CV`);
+  // NOTE: no "score > 0" guard here. A 0% match previously slipped past this
+  // check and got boosted to 100% by the addendum, so completely unrelated jobs
+  // (0 keyword hits) were applied to. Any base score below the floor — including
+  // 0 — is a hard skip with no addendum rescue.
+  if (score < QUICK_FAIL_THRESHOLD) {
+    console.log(`  [Scorer Bot] ${score}% below quick-fail threshold — skipping this CV (no addendum)`);
     return { score, cvText: cleanedText, rawCvText: cleanedText, missingKeywords };
   }
 
