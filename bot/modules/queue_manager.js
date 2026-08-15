@@ -43,6 +43,34 @@ function _activeTermsFingerprint(userDataPath) {
   }
 }
 
+// Fingerprint the user's ACTIVE CVs (path + label + file mtime/size, so a
+// swapped or re-saved CV is detected even at the same path). Returns null
+// (→ "don't touch") if the DB is unreadable OR there are no active CVs — the
+// latter avoids re-tailoring during the window where the old CV was removed
+// but the new one hasn't been added yet.
+function _activeCvsFingerprint(userDataPath) {
+  try {
+    const pPath = path.join(userDataPath, 'profile.db');
+    if (!fs.existsSync(pPath)) return null;
+    const pdb = new SQL.Database(fs.readFileSync(pPath));
+    const stmt = pdb.prepare('SELECT label, file_path FROM cvs WHERE is_active = 1 ORDER BY file_path');
+    const parts = [];
+    while (stmt.step()) {
+      const r = stmt.getAsObject();
+      const fp = (r.file_path || '').trim();
+      let sig = '';
+      try { const st = fs.statSync(fp); sig = `${st.size}:${Math.round(st.mtimeMs)}`; } catch (_) {}
+      parts.push(`${(r.label || '').trim().toLowerCase()}|${fp.toLowerCase()}|${sig}`);
+    }
+    stmt.free();
+    pdb.close();
+    if (!parts.length) return null;
+    return crypto.createHash('sha256').update(parts.join('||')).digest('hex').slice(0, 16);
+  } catch (_) {
+    return null;
+  }
+}
+
 async function init(userDataPath) {
   SQL = await initSqlJs();
   dbPath = path.join(userDataPath, 'queue.db');
@@ -61,32 +89,45 @@ async function init(userDataPath) {
   if (!cols.includes('cover_letter')) db.run('ALTER TABLE queue ADD COLUMN cover_letter TEXT');
   if (!cols.includes('retry_count'))  db.run('ALTER TABLE queue ADD COLUMN retry_count INTEGER DEFAULT 0');
 
-  // ── Auto-clear stale jobs when the user changes their search terms ──────────
-  // Jobs discovered under the OLD terms would otherwise linger and get applied
-  // to (they still score high because CV-tailoring games the match), so the
-  // bots appear to "ignore" the new terms. On the first bot to start after a
-  // term change, drop every un-applied job so the queue reflects the new terms.
-  // status='applied' rows and the separate applied_jobs table are kept, so
-  // nothing already sent is ever re-applied. Runs inside the bot process that
-  // owns queue.db, so there's no cross-process write race; the fingerprint means
-  // the first bot clears and the rest no-op. Seeded (not cleared) on first run.
+  // ── Auto-reconcile the queue when the user changes their inputs ─────────────
+  // Two triggers, both detected by fingerprinting the active inputs and running
+  // on the first bot to start after a change (inside the queue-owning process,
+  // so no cross-process write race; the fingerprint means the first bot acts and
+  // the rest no-op; seeded — not fired — on first run). status='applied' rows and
+  // the separate applied_jobs table are always kept, so nothing already sent is
+  // ever re-applied.
+  //
+  //  1. Search terms changed → the old-term jobs are the wrong ROLES now, and
+  //     they'd still get applied to (they score high because CV-tailoring games
+  //     the match). Drop every un-applied job so the queue reflects new terms.
+  //  2. CV changed (terms same) → the jobs are still the right roles, but any
+  //     already-tailored (cv_ready / apply_failed) job carries a CV tailored from
+  //     the OLD base CV. Reset those to 'pending' so the Scorer re-tailors them
+  //     with the new CV. pending/skipped are left alone (pending re-tailors
+  //     anyway; skipped were mostly filtered for non-CV reasons).
   try {
-    const fp = _activeTermsFingerprint(userDataPath);
-    if (fp !== null) {
-      const s = db.prepare("SELECT value FROM meta WHERE key = 'search_terms_fp'");
-      const prev = s.step() ? s.getAsObject().value : null;
-      s.free();
-      if (prev && prev !== fp) {
-        const c = db.prepare("SELECT COUNT(*) AS n FROM queue WHERE status != 'applied'");
-        const n = c.step() ? c.getAsObject().n : 0;
-        c.free();
-        db.run("DELETE FROM queue WHERE status != 'applied'");
-        console.log(`  [Queue] Search terms changed — cleared ${n} stale un-applied job(s) from the previous terms`);
-      }
-      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('search_terms_fp', ?)", [fp]);
+    const getMetaVal = (k) => { const s = db.prepare('SELECT value FROM meta WHERE key = ?'); s.bind([k]); const v = s.step() ? s.getAsObject().value : null; s.free(); return v; };
+    const termsFp = _activeTermsFingerprint(userDataPath);
+    const cvsFp   = _activeCvsFingerprint(userDataPath);
+    const prevTerms = getMetaVal('search_terms_fp');
+    const prevCvs   = getMetaVal('cvs_fp');
+
+    if (termsFp !== null && prevTerms && prevTerms !== termsFp) {
+      const c = db.prepare("SELECT COUNT(*) AS n FROM queue WHERE status != 'applied'");
+      const n = c.step() ? c.getAsObject().n : 0; c.free();
+      db.run("DELETE FROM queue WHERE status != 'applied'");
+      console.log(`  [Queue] Search terms changed — cleared ${n} stale un-applied job(s) from the previous terms`);
+    } else if (cvsFp !== null && prevCvs && prevCvs !== cvsFp) {
+      const c = db.prepare("SELECT COUNT(*) AS n FROM queue WHERE status IN ('cv_ready','apply_failed')");
+      const n = c.step() ? c.getAsObject().n : 0; c.free();
+      db.run("UPDATE queue SET status = 'pending', cv_path = NULL, cv_score = NULL, cv_name = NULL, cover_letter = NULL, error = NULL WHERE status IN ('cv_ready','apply_failed')");
+      console.log(`  [Queue] CV changed — re-tailoring ${n} already-prepared job(s) with the new CV`);
     }
+
+    if (termsFp !== null) db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('search_terms_fp', ?)", [termsFp]);
+    if (cvsFp   !== null) db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('cvs_fp', ?)", [cvsFp]);
   } catch (e) {
-    console.warn('  [Queue] term reconcile skipped:', e.message);
+    console.warn('  [Queue] input reconcile skipped:', e.message);
   }
 
   fs.writeFileSync(dbPath, Buffer.from(db.export()));
