@@ -2283,3 +2283,112 @@ render('dashboard').then(() => {
   content.innerHTML = `<div style="padding:40px;color:#e74c3c;font-family:sans-serif"><h3>Failed to load</h3><p>${err.message}</p><p>Try restarting the app.</p></div>`;
 });
 
+// ── In-app assistant ────────────────────────────────────────────────────────
+// A licensed support chat. The heavy lifting is server-side; here we just relay
+// the question, render the reply as ESCAPED text (never innerHTML the reply —
+// it's model output), and keep a light per-session transcript.
+(function initAssistant() {
+  const fab   = document.getElementById('asst-fab');
+  const panel = document.getElementById('asst-panel');
+  const close = document.getElementById('asst-close');
+  const log   = document.getElementById('asst-log');
+  const form  = document.getElementById('asst-form');
+  const input = document.getElementById('asst-input');
+  const send  = document.getElementById('asst-send');
+  if (!fab || !panel || !form) return;
+
+  let greeted = false;
+  let pending = false;
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+  // The model returns light markdown. Escape everything first, then re-enable
+  // ONLY **bold** on the already-escaped text — no raw HTML ever reaches innerHTML.
+  function renderReply(text) {
+    return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+
+  function addMsg(kind, text, isHtml) {
+    const el = document.createElement('div');
+    el.className = 'asst-msg ' + kind;
+    if (isHtml) el.innerHTML = text; else el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+  function addHint(text) {
+    const el = document.createElement('div');
+    el.className = 'asst-hint';
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function openPanel() {
+    panel.classList.add('open');
+    panel.setAttribute('aria-hidden', 'false');
+    fab.classList.add('hidden');
+    if (!greeted) {
+      greeted = true;
+      addHint('Hi! I can help you use Job-AI: connecting your accounts, why a job was skipped, search terms, CVs, limits and more. Ask me anything.');
+    }
+    setTimeout(() => input.focus(), 50);
+  }
+  function closePanel() {
+    panel.classList.remove('open');
+    panel.setAttribute('aria-hidden', 'true');
+    fab.classList.remove('hidden');
+  }
+
+  fab.addEventListener('click', openPanel);
+  close.addEventListener('click', closePanel);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && panel.classList.contains('open')) closePanel(); });
+
+  const ERRORS = {
+    no_license: 'You need an active license to use the assistant. Add your key on the License page.',
+    license_inactive: 'Your license isn’t active right now. Check the License page to renew.',
+    license_expired: 'Your license has expired. Renew it on the License page to keep using the assistant.',
+    assistant_daily_limit: 'You’ve reached today’s assistant limit. It resets in 24 hours.',
+    rate_limited: 'Give me a moment — that was a lot of messages at once.',
+    network_error: 'I couldn’t reach the server. Check your connection and try again.',
+    assistant_unavailable: 'The assistant is briefly unavailable. Please try again in a moment.',
+  };
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (pending) return;
+    const q = input.value.trim();
+    if (!q) return;
+
+    addMsg('user', q);
+    input.value = '';
+    pending = true;
+    send.disabled = true;
+    const typing = addMsg('typing', 'Job-AI is thinking…');
+    typing.className = 'asst-typing';
+
+    let resp;
+    try {
+      resp = await window.api.assistant.ask(q);
+    } catch (_) {
+      resp = { ok: false, error: 'network_error' };
+    }
+    typing.remove();
+    pending = false;
+    send.disabled = false;
+
+    if (resp && resp.ok) {
+      addMsg('bot', renderReply(resp.reply || ''), true);
+      if (typeof resp.remaining_today === 'number' && resp.remaining_today <= 5) {
+        addHint(`${resp.remaining_today} assistant message${resp.remaining_today === 1 ? '' : 's'} left today.`);
+      }
+    } else {
+      addMsg('error', ERRORS[resp && resp.error] || 'Something went wrong. Please try again, or email jobaisupport@gmail.com.');
+    }
+    input.focus();
+  });
+})();
+

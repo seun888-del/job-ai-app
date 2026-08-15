@@ -83,6 +83,27 @@
   <div id="expiry-banner"></div>
   <main id="content"></main>
   <footer class="app-footer">Job-AI · Apply to jobs while you sleep</footer>
+
+  <!-- In-app assistant: a launcher button + a slide-up chat panel. Injected once
+       and reused across views. Replies render as escaped text (see app.js). -->
+  <button id="asst-fab" title="Ask Job-AI" aria-label="Ask Job-AI">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    <span>Ask Job-AI</span>
+  </button>
+  <div id="asst-panel" aria-hidden="true">
+    <div class="asst-head">
+      <div class="asst-title"><span class="asst-dot"></span> Job-AI Assistant</div>
+      <button id="asst-close" title="Close" aria-label="Close">&times;</button>
+    </div>
+    <div id="asst-log" class="asst-log"></div>
+    <form id="asst-form" class="asst-form" autocomplete="off">
+      <input id="asst-input" type="text" placeholder="Ask about your agents, settings, or a skip…" maxlength="2000" />
+      <button id="asst-send" type="submit" title="Send" aria-label="Send">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </form>
+  </div>
+
   <script src="app.js"></script>
   <script>
     // Wire the custom title-bar menu (click to open, hover to switch, click-away to close)

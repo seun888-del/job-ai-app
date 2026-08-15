@@ -99,6 +99,9 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('license:updated', handler);
     },
   },
+  assistant: {
+    ask: (question) => ipcRenderer.invoke('assistant:ask', question),
+  },
   diagnostics: {
     get: () => ipcRenderer.invoke('diagnostics:get'),
     set: (enabled) => ipcRenderer.invoke('diagnostics:set', enabled),

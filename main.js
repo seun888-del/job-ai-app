@@ -6,6 +6,7 @@ const db = require('./src/db/database');
 const queueReader = require('./src/db/queueReader');
 const cvAnalyzer = require('./src/services/cvAnalyzer');
 const botManager = require('./src/services/botManager');
+const assistantState = require('./src/services/assistantState');
 const https = require('https');
 const { JOBBOT_BACKEND_URL } = require('./src/config');
 const { machineId } = require('./src/services/machineId');
@@ -891,7 +892,7 @@ ipcMain.handle('site:connect', async (event, { site, loginUrl }) => {
 // site (LinkedIn etc.) stores nothing in `credentials` — its login lives in a
 // `{site}_profile` Chrome folder — so we detect connection by that folder's
 // populated "Default" profile, OR (for password sites like Reed) a saved login.
-ipcMain.handle('site:connectedStatus', () => {
+function connectedSitesStatus() {
   const sites = ['reed', 'linkedin', 'glassdoor', 'cvlibrary', 'totaljobs', 'cwjobs', 'indeed'];
   const status = {};
   for (const site of sites) {
@@ -906,4 +907,48 @@ ipcMain.handle('site:connectedStatus', () => {
     status[site] = connected;
   }
   return status;
+}
+ipcMain.handle('site:connectedStatus', () => connectedSitesStatus());
+
+// In-app support assistant. Sends the user's question plus a PII-light snapshot
+// of their local agent state to the licensed backend, which answers using its
+// server-side knowledge doc. The reply is rendered as plain (escaped) text in
+// the renderer, so nothing it returns can execute.
+ipcMain.handle('assistant:ask', async (event, question) => {
+  const q = typeof question === 'string' ? question.trim() : '';
+  if (!q) return { ok: false, error: 'empty_question' };
+
+  const license = db.getLicense();
+  if (!license?.license_key) return { ok: false, error: 'no_license' };
+
+  let state = {};
+  try {
+    state = assistantState.build({
+      botStatus: botManager.getStatus(),
+      connected: connectedSitesStatus(),
+    });
+  } catch (_) { state = {}; }
+
+  let res;
+  try {
+    res = await fetch(`${JOBBOT_BACKEND_URL}/v1/assistant`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${license.license_key}`,
+        'X-Machine-Id': machineId(),
+      },
+      body: JSON.stringify({ question: q.slice(0, 2000), state }),
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch {
+    return { ok: false, error: 'network_error' };
+  }
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return { ok: false, error: body.error || `http_${res.status}`, daily_limit: body.daily_limit };
+  }
+  return { ok: true, reply: body.reply, remaining_today: body.remaining_today };
 });
