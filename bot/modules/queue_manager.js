@@ -10,11 +10,38 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const initSqlJs = require('sql.js');
 const schema = require('../db/queueSchema');
 
 let SQL;
 let dbPath;
+
+// Fingerprint the user's ACTIVE search terms (from profile.db, same folder as
+// queue.db). Used to detect when the user has changed their terms so we can
+// drop stale jobs discovered under the old ones. Returns null (→ "don't touch
+// the queue") if the DB is unreadable OR there are no active terms — the latter
+// avoids wiping the queue during the brief window where the old terms are
+// deleted but the new ones haven't been added yet.
+function _activeTermsFingerprint(userDataPath) {
+  try {
+    const pPath = path.join(userDataPath, 'profile.db');
+    if (!fs.existsSync(pPath)) return null;
+    const pdb = new SQL.Database(fs.readFileSync(pPath));
+    const stmt = pdb.prepare('SELECT term FROM search_terms WHERE is_active = 1 ORDER BY term');
+    const terms = [];
+    while (stmt.step()) {
+      const t = (stmt.getAsObject().term || '').trim().toLowerCase();
+      if (t) terms.push(t);
+    }
+    stmt.free();
+    pdb.close();
+    if (!terms.length) return null;
+    return crypto.createHash('sha256').update(terms.join('|')).digest('hex').slice(0, 16);
+  } catch (_) {
+    return null;
+  }
+}
 
 async function init(userDataPath) {
   SQL = await initSqlJs();
@@ -33,6 +60,34 @@ async function init(userDataPath) {
   colStmt.free();
   if (!cols.includes('cover_letter')) db.run('ALTER TABLE queue ADD COLUMN cover_letter TEXT');
   if (!cols.includes('retry_count'))  db.run('ALTER TABLE queue ADD COLUMN retry_count INTEGER DEFAULT 0');
+
+  // ── Auto-clear stale jobs when the user changes their search terms ──────────
+  // Jobs discovered under the OLD terms would otherwise linger and get applied
+  // to (they still score high because CV-tailoring games the match), so the
+  // bots appear to "ignore" the new terms. On the first bot to start after a
+  // term change, drop every un-applied job so the queue reflects the new terms.
+  // status='applied' rows and the separate applied_jobs table are kept, so
+  // nothing already sent is ever re-applied. Runs inside the bot process that
+  // owns queue.db, so there's no cross-process write race; the fingerprint means
+  // the first bot clears and the rest no-op. Seeded (not cleared) on first run.
+  try {
+    const fp = _activeTermsFingerprint(userDataPath);
+    if (fp !== null) {
+      const s = db.prepare("SELECT value FROM meta WHERE key = 'search_terms_fp'");
+      const prev = s.step() ? s.getAsObject().value : null;
+      s.free();
+      if (prev && prev !== fp) {
+        const c = db.prepare("SELECT COUNT(*) AS n FROM queue WHERE status != 'applied'");
+        const n = c.step() ? c.getAsObject().n : 0;
+        c.free();
+        db.run("DELETE FROM queue WHERE status != 'applied'");
+        console.log(`  [Queue] Search terms changed — cleared ${n} stale un-applied job(s) from the previous terms`);
+      }
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('search_terms_fp', ?)", [fp]);
+    }
+  } catch (e) {
+    console.warn('  [Queue] term reconcile skipped:', e.message);
+  }
 
   fs.writeFileSync(dbPath, Buffer.from(db.export()));
   db.close();
