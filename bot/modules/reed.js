@@ -709,48 +709,73 @@ async function uploadResume(page, resumePath) {
       '[data-testid*="change-cv"]',
       '[data-testid*="update-cv"]',
     ];
-    // Step 1: click "Update" — this opens a second modal (not a file chooser yet)
-    for (const sel of changeSelectors) {
-      try {
-        const btn = await page.$(sel);
-        if (btn && await btn.isVisible()) {
-          console.log(`  [Reed] Clicking "${sel}" to open CV update modal...`);
-          await btn.click();
-          await DELAY(2000);
-          break;
-        }
-      } catch (_) {}
-    }
-
-    // Step 2: Reed shows "Update your CV" modal with a "Choose your CV file" button — click it
+    // Reed shows "Update your CV" modal with a "Choose your CV file" button.
     const chooseSelectors = [
       'button:has-text("Choose your CV file")',
       'button:has-text("Choose your CV")',
       'button:has-text("Choose file")',
       'label:has-text("Choose")',
     ];
-    for (const sel of chooseSelectors) {
-      try {
-        const btn = await page.$(sel);
-        if (btn && await btn.isVisible()) {
-          console.log(`  [Reed] Clicking "${sel}" to open file chooser...`);
-          const [chooser] = await Promise.all([
-            page.waitForEvent('filechooser', { timeout: 8000 }),
-            btn.click(),
-          ]);
-          await chooser.setFiles(resumePath);
-          await DELAY(3000);
-          if (await verifyCvUploaded(page, resumePath)) {
-            console.log('  [Reed] Tailored CV uploaded + verified attached.');
-            return true;
+
+    // Reed's CV-update endpoint intermittently rejects the upload with
+    // "Something went wrong with your CV update. Please try again." — the file is
+    // set but the update never sticks, so verifyCvUploaded fails and the whole job
+    // is skipped. Retry the whole Update → Choose file → set-file → verify sequence
+    // a few times (Reed's own error explicitly invites a retry).
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      // Step 1: click "Update" to open the CV update modal
+      for (const sel of changeSelectors) {
+        try {
+          const btn = await page.$(sel);
+          if (btn && await btn.isVisible()) {
+            console.log(`  [Reed] (try ${attempt}) Clicking "${sel}" to open CV update modal...`);
+            await btn.click();
+            await DELAY(2000);
+            break;
           }
-          console.log('  [Reed] ⚠ Upload set but tailored CV NOT confirmed attached — treating as failed.');
-          await page.screenshot({ path: `${SSDIR}/reed_cv_verify_failed.png` }).catch(() => {});
-          return false;
-        }
-      } catch (err) {
-        console.log(`  [Reed] Choose file click error: ${err.message.substring(0, 80)}`);
+        } catch (_) {}
       }
+
+      // Step 2: click "Choose your CV file" → drive the file chooser → verify
+      let chose = false;
+      for (const sel of chooseSelectors) {
+        try {
+          const btn = await page.$(sel);
+          if (btn && await btn.isVisible()) {
+            console.log(`  [Reed] (try ${attempt}) Clicking "${sel}" to open file chooser...`);
+            const [chooser] = await Promise.all([
+              page.waitForEvent('filechooser', { timeout: 8000 }),
+              btn.click(),
+            ]);
+            await chooser.setFiles(resumePath);
+            chose = true;
+            await DELAY(3000);
+            if (await verifyCvUploaded(page, resumePath)) {
+              console.log('  [Reed] Tailored CV uploaded + verified attached.');
+              return true;
+            }
+            break;
+          }
+        } catch (err) {
+          console.log(`  [Reed] Choose file click error: ${err.message.substring(0, 80)}`);
+        }
+      }
+
+      // Not verified. If Reed showed its "CV update failed" error, try again.
+      const updateFailed = await page.evaluate(() =>
+        /CV update failed|something went wrong with your CV update|please try again/i.test(document.body?.innerText || '')
+      ).catch(() => false);
+      if (attempt < 3 && (chose || updateFailed)) {
+        console.log(`  [Reed] ⚠ CV update ${updateFailed ? 'rejected by Reed' : 'not confirmed'} on try ${attempt} — retrying...`);
+        await page.waitForTimeout(1800);
+        continue;
+      }
+      if (chose) {
+        console.log('  [Reed] ⚠ Upload set but tailored CV NOT confirmed attached after retries — treating as failed.');
+        await page.screenshot({ path: `${SSDIR}/reed_cv_verify_failed.png` }).catch(() => {});
+        return false;
+      }
+      break; // no "Choose" control found — fall through to the bare-input fallback below
     }
 
     // Fallback: bare file input (no saved CV on account)
