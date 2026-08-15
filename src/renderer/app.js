@@ -2305,10 +2305,23 @@ render('dashboard').then(() => {
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
   }
-  // The model returns light markdown. Escape everything first, then re-enable
-  // ONLY **bold** on the already-escaped text — no raw HTML ever reaches innerHTML.
+  // The model returns light markdown. Defence in depth on untrusted model output:
+  //   1. strip control chars (keep \n and \t) — no terminal/format tricks;
+  //   2. hard-clamp length — a runaway reply can't flood the panel;
+  //   3. escape ALL html FIRST, then re-enable ONLY **bold** on the escaped text,
+  //      so no raw markup (<script>, onerror, javascript: …) can ever reach
+  //      innerHTML. (Links are intentionally NOT linkified.)
   function renderReply(text) {
-    return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Strip control chars (keep tab/newline/CR), clamp length, escape ALL html,
+    // then re-enable only bold. Regex chars built via fromCharCode (no escapes).
+    var clean = Array.from(String(text)).filter(function (ch) {
+      var n = ch.charCodeAt(0);
+      return n === 9 || n === 10 || n === 13 || n >= 32;
+    }).join('').slice(0, 4000);
+    var STAR = String.fromCharCode(42);
+    var ESC = String.fromCharCode(92) + STAR;
+    var boldRe = new RegExp(ESC + ESC + '([^' + STAR + ']+)' + ESC + ESC, 'g');
+    return escapeHtml(clean).replace(boldRe, '<strong>$1</strong>');
   }
 
   function addMsg(kind, text, isHtml) {
