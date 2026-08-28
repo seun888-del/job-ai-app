@@ -168,6 +168,33 @@ app.whenReady().then(async () => {
   // Persist agent logs to disk so real runs can be inspected after the fact
   // (the in-app Agent tab only shows the live session). One file per UTC day.
   const agentLogFile = () => path.join(app.getPath('userData'), 'logs', `agents-${new Date().toISOString().slice(0, 10)}.log`);
+
+  // Strip user-specific ANSWER VALUES from agent logs before they're shown or
+  // written to disk. Screening-question answers can be special-category PII
+  // (visa status, disability, salary), so keep the QUESTION and the fact it was
+  // answered, but replace the quoted value after "→" with [recorded]. Scores
+  // (unquoted %), the sponsorship setting (unquoted Yes/No) and the question
+  // text stay intact for debugging. One choke point covers both log sinks and
+  // any future agent, so a new "answered → value" line can't reopen the leak.
+  const redactAnswerValues = (text) => String(text).replace(/(→\s*")[^"]*(")/g, '$1[recorded]$2');
+
+  // Expire old agent logs so redacted-but-still-detailed run files don't pile up
+  // forever. Keep the last 7 UTC days; delete older agents-YYYY-MM-DD.log on
+  // startup. Best-effort — the logs dir may not exist on a first run.
+  const pruneAgentLogs = (days = 7) => {
+    try {
+      const dir = path.join(app.getPath('userData'), 'logs');
+      const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+      for (const name of fs.readdirSync(dir)) {
+        const m = /^agents-(\d{4}-\d{2}-\d{2})\.log$/.exec(name);
+        if (m && Date.parse(m[1]) < cutoff) {
+          try { fs.unlinkSync(path.join(dir, name)); } catch (_) {}
+        }
+      }
+    } catch (_) { /* no logs dir yet */ }
+  };
+  pruneAgentLogs();
+
   botManager.setLogHandler((bot, stream, text) => {
     // Agents run minimised, so surface "human verification needed" as a desktop
     // notification (the bot emits a [[JOBBOT_NOTIFY]] marker in its log stream).
@@ -196,12 +223,16 @@ app.whenReady().then(async () => {
     if (fatal) {
       errorReporter.report({ source: 'agent', name: `${bot}-fatal`, message: fatal[1].slice(0, 300) });
     }
+    // Redact answer values for BOTH sinks (on-screen log + on-disk file). The
+    // marker/notification checks above run on the original text on purpose —
+    // they never contain answer values and need exact matching.
+    const safeText = redactAnswerValues(text);
     try {
       const file = agentLogFile();
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.appendFile(file, `[${new Date().toISOString()}] [${bot}/${stream}] ${text}`, () => {});
+      fs.appendFile(file, `[${new Date().toISOString()}] [${bot}/${stream}] ${safeText}`, () => {});
     } catch (_) {}
-    mainWindow?.webContents.send('bot:log', { bot, stream, text });
+    mainWindow?.webContents.send('bot:log', { bot, stream, text: safeText });
   });
   botManager.setStatusHandler((bot, status) => {
     mainWindow?.webContents.send('bot:status', { bot, status });

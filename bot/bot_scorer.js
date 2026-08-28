@@ -119,45 +119,45 @@ async function scoreWithBoost(cv, jdText) {
   try {
     ({ score, missingKeywords, allKeywords } = await cvScorer.scoreCV(cleanedText, jdText));
   } catch (err) {
-    console.warn(`  [Scorer Bot] Scoring failed (${err.message}) — fallback score 85`);
+    console.warn(`  [Scorer Agent] Scoring failed (${err.message}) — fallback score 85`);
     return { score: 85, cvText: cleanedText, rawCvText: cleanedText, missingKeywords: [] };
   }
 
-  console.log(`  [Scorer Bot] Score: ${score}% — ${cv.name}`);
+  console.log(`  [Scorer Agent] Score: ${score}% — ${cv.name}`);
 
   // NOTE: no "score > 0" guard here. A 0% match previously slipped past this
   // check and got boosted to 100% by the addendum, so completely unrelated jobs
   // (0 keyword hits) were applied to. Any base score below the floor — including
   // 0 — is a hard skip with no addendum rescue.
   if (score < QUICK_FAIL_THRESHOLD) {
-    console.log(`  [Scorer Bot] ${score}% below quick-fail threshold — skipping this CV (no addendum)`);
+    console.log(`  [Scorer Agent] ${score}% below quick-fail threshold — skipping this CV (no addendum)`);
     return { score, cvText: cleanedText, rawCvText: cleanedText, missingKeywords };
   }
 
   // Addendum: append missing keywords at the bottom for ATS (no rewriting of CV body)
   let cvText = cleanedText;
   if (score < BOOST_TARGET && missingKeywords.length > 0) {
-    console.log(`  [Scorer Bot] ${score}% — adding ${missingKeywords.length} missing keywords via addendum`);
+    console.log(`  [Scorer Agent] ${score}% — adding ${missingKeywords.length} missing keywords via addendum`);
     cvText = boostCVText(cleanedText, missingKeywords);
     const rescore = cvScorer.rescoreCV(cvText, allKeywords);
     score = rescore.score;
-    console.log(`  [Scorer Bot] After addendum: ${score}%`);
+    console.log(`  [Scorer Agent] After addendum: ${score}%`);
   }
 
   return { score, cvText, rawCvText: cleanedText, missingKeywords: missingKeywords || [] };
 }
 
 async function processJob(job) {
-  console.log(`\n  [Scorer Bot] ── ${job.title} @ ${job.company}`);
+  console.log(`\n  [Scorer Agent] ── ${job.title} @ ${job.company}`);
 
   if (!job.description || job.description.trim().length < 30) {
-    console.log('  [Scorer Bot] No description — skipping');
+    console.log('  [Scorer Agent] No description — skipping');
     queue.update(job.jobId, { status: 'skipped', reason: 'No job description' });
     return;
   }
 
   if (!cfg.CVS.length) {
-    console.log('  [Scorer Bot] No CVs configured — skipping');
+    console.log('  [Scorer Agent] No CVs configured — skipping');
     queue.update(job.jobId, { status: 'skipped', reason: 'No CVs configured' });
     return;
   }
@@ -165,7 +165,7 @@ async function processJob(job) {
   // Pre-filter: skip before spending any AI tokens
   const preFilter = passesPreFilter(job);
   if (!preFilter.pass) {
-    console.log(`  [Scorer Bot] Pre-filter: ${preFilter.reason}`);
+    console.log(`  [Scorer Agent] Pre-filter: ${preFilter.reason}`);
     queue.update(job.jobId, { status: 'skipped', reason: preFilter.reason });
     return;
   }
@@ -191,7 +191,7 @@ async function processJob(job) {
       .map(x => x.cv);
 
     for (const altCV of others) {
-      console.log(`\n  [Scorer Bot] ${score}% — trying next CV: ${altCV.name}`);
+      console.log(`\n  [Scorer Agent] ${score}% — trying next CV: ${altCV.name}`);
       const result = await scoreWithBoost(altCV, job.description);
 
       if (result.score > bestScore) {
@@ -264,10 +264,10 @@ async function processJob(job) {
 
       await writeStructuredPDF(tailoredStruct, paths.saved, pdfOpts);
       await writeStructuredPDF(tailoredStruct, paths.upload, pdfOpts);
-      console.log(`  [Scorer Bot] ✓ Tailored CV rendered (reference layout): ${paths.saved}`);
+      console.log(`  [Scorer Agent] ✓ Tailored CV rendered (reference layout): ${paths.saved}`);
       rendered = true;
     } catch (err) {
-      console.warn(`  [Scorer Bot] Structured tailoring failed (${err.message}) — falling back`);
+      console.warn(`  [Scorer Agent] Structured tailoring failed (${err.message}) — falling back`);
     }
 
     // ── Fallback: preserve previous behaviour if structured render failed ───
@@ -279,7 +279,7 @@ async function processJob(job) {
         } catch (err) {
           // Do NOT copy the base docx here — converting an untailored copy
           // would submit the base CV as if it were tailored. Skip instead.
-          console.warn(`  [Scorer Bot] Docx tailoring failed (${err.message}) — skipping job (base CV must never be submitted)`);
+          console.warn(`  [Scorer Agent] Docx tailoring failed (${err.message}) — skipping job (base CV must never be submitted)`);
           queue.update(job.jobId, { status: 'skipped', reason: 'CV tailoring failed (docx)' });
           return;
         }
@@ -298,7 +298,7 @@ async function processJob(job) {
           // NEVER fall back to copying the base CV into the tailored path —
           // that would submit an untailored CV under a tailored filename.
           // Skip the job instead; it can be retried on a later cycle.
-          console.warn(`  [Scorer Bot] CV render failed entirely (${err.message}) — skipping job (base CV must never be submitted)`);
+          console.warn(`  [Scorer Agent] CV render failed entirely (${err.message}) — skipping job (base CV must never be submitted)`);
           queue.update(job.jobId, { status: 'skipped', reason: 'CV tailoring/render failed' });
           return;
         }
@@ -306,7 +306,7 @@ async function processJob(job) {
     }
 
     const flag = bestScore >= BOOST_TARGET ? '✓' : '~';
-    console.log(`  [Scorer Bot] ${flag} ${bestCvName} → ${bestScore}% | PDF: ${paths.saved}`);
+    console.log(`  [Scorer Agent] ${flag} ${bestCvName} → ${bestScore}% | PDF: ${paths.saved}`);
 
     // Mark cv_ready immediately — don't block on cover letter generation
     queue.update(job.jobId, {
@@ -321,10 +321,10 @@ async function processJob(job) {
       .then(coverLetter => {
         if (coverLetter) {
           queue.update(job.jobId, { coverLetter });
-          console.log(`  [Scorer Bot] ✓ Cover letter ready for: ${job.title}`);
+          console.log(`  [Scorer Agent] ✓ Cover letter ready for: ${job.title}`);
         }
       })
-      .catch(err => console.warn(`  [Scorer Bot] Cover letter failed: ${err.message}`));
+      .catch(err => console.warn(`  [Scorer Agent] Cover letter failed: ${err.message}`));
 
     return;
   }
@@ -333,7 +333,7 @@ async function processJob(job) {
     status: 'skipped',
     reason: `Best score across all CVs was ${bestScore}% (threshold: ${cfg.MIN_SCORE}%)`,
   });
-  console.log(`  [Scorer Bot] ✗ No CV reached ${cfg.MIN_SCORE}% for "${job.title}" — skipped`);
+  console.log(`  [Scorer Agent] ✗ No CV reached ${cfg.MIN_SCORE}% for "${job.title}" — skipped`);
 }
 
 async function main() {
@@ -342,7 +342,7 @@ async function main() {
 
   const modeLabel = llmMode === 'claude' ? 'Claude API' : llmMode === 'hosted' ? 'hosted backend' : 'local Ollama';
   console.log('═══════════════════════════════════════════════════════');
-  console.log(`  Scorer Bot — Starting (${modeLabel}, no browser)`);
+  console.log(`  Scorer Agent — Starting (${modeLabel}, no browser)`);
   console.log('  Watching queue.db for pending jobs...');
   console.log('═══════════════════════════════════════════════════════');
 
@@ -356,10 +356,10 @@ async function main() {
   // Recover any jobs stuck in 'processing' from a previous crashed run
   const stuck = queue.getByStatus('processing');
   if (stuck.length > 0) {
-    console.log(`  [Scorer Bot] Recovering ${stuck.length} stuck job(s) from previous run...`);
+    console.log(`  [Scorer Agent] Recovering ${stuck.length} stuck job(s) from previous run...`);
     for (const j of stuck) {
       queue.update(j.jobId, { status: 'pending' });
-      console.log(`  [Scorer Bot] Reset to pending: ${j.title}`);
+      console.log(`  [Scorer Agent] Reset to pending: ${j.title}`);
     }
   }
 
@@ -373,7 +373,7 @@ async function main() {
       return age > STUCK_TIMEOUT_MS;
     });
     for (const j of stuckNow) {
-      console.log(`  [Scorer Bot] Resetting stuck job (>30 min): ${j.title}`);
+      console.log(`  [Scorer Agent] Resetting stuck job (>30 min): ${j.title}`);
       queue.update(j.jobId, { status: 'pending' });
     }
 
@@ -388,14 +388,14 @@ async function main() {
       pending = pending.filter(j => !pausedSources.includes(j.source));
       const held = before - pending.length;
       if (held > 0 && logTick % 6 === 0) {
-        console.log(`  [Scorer Bot] Holding ${held} job(s) — reconnect needed for: ${pausedSources.join(', ')}. Not tailoring until reconnected (saves AI calls).`);
+        console.log(`  [Scorer Agent] Holding ${held} job(s) — reconnect needed for: ${pausedSources.join(', ')}. Not tailoring until reconnected (saves AI calls).`);
       }
     }
 
     if (pending.length === 0) {
       logTick++;
       if (logTick % 18 === 0) { // log every ~3 min
-        console.log('  [Scorer Bot] Waiting for new jobs...');
+        console.log('  [Scorer Agent] Waiting for new jobs...');
       }
       await DELAY(POLL_INTERVAL);
       continue;
@@ -407,7 +407,7 @@ async function main() {
       try {
         await processJob(job);
       } catch (err) {
-        console.error(`  [Scorer Bot] Error on "${job.title}": ${err.message}`);
+        console.error(`  [Scorer Agent] Error on "${job.title}": ${err.message}`);
         queue.update(job.jobId, { status: 'failed', error: err.message });
       }
       await DELAY(500); // brief pause between jobs
@@ -421,8 +421,8 @@ async function run() {
     try {
       await main();
     } catch (err) {
-      console.error('  [Scorer Bot] Crashed:', err.message);
-      console.log('  [Scorer Bot] Restarting in 5 s...');
+      console.error('  [Scorer Agent] Crashed:', err.message);
+      console.log('  [Scorer Agent] Restarting in 5 s...');
       await DELAY(5000);
     }
   }

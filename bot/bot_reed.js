@@ -3,9 +3,9 @@
  * ─────────────────────────────────────────────────────────────────────────
  * Phase 1 — Search Reed.co.uk for jobs matching the configured search terms,
  *            extract JDs, add each job to queue.db (source: 'reed') with
- *            status "pending". The Scorer bot then scores and tailors the CV.
+ *            status "pending". The Scorer agent then scores and tailors the CV.
  *
- * Phase 2 — Poll the queue every 10 s. When the Scorer bot sets a Reed job
+ * Phase 2 — Poll the queue every 10 s. When the Scorer agent sets a Reed job
  *            to "cv_ready", pick up the CV path and submit the Reed application.
  */
 
@@ -58,59 +58,59 @@ function workTypePriority() {
 // Shared job filtering logic — applies the same skip rules whether jobs came
 // from the API or the browser scraper.
 async function filterAndQueue(job, getDetails) {
-  if (queue.has(job.jobId)) { console.log(`  [Reed Bot] Already queued: ${job.title}`); return; }
-  if (queue.wasApplied(job.jobId)) { console.log(`  [Reed Bot] Already applied — skipping: ${job.title}`); return; }
-  if (!isRelevantTitle(job.title)) { console.log(`  [Reed Bot] Title filter — skipping: ${job.title}`); return; }
-  if (isBlockedCompany(job.company)) { console.log(`  [Reed Bot] Company blocked — skipping: ${job.title} @ ${job.company}`); return; }
-  if (queue.hasCanonical(job.title, job.company)) { console.log(`  [Reed Bot] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`); return; }
+  if (queue.has(job.jobId)) { console.log(`  [Reed Agent] Already queued: ${job.title}`); return; }
+  if (queue.wasApplied(job.jobId)) { console.log(`  [Reed Agent] Already applied — skipping: ${job.title}`); return; }
+  if (!isRelevantTitle(job.title)) { console.log(`  [Reed Agent] Title filter — skipping: ${job.title}`); return; }
+  if (isBlockedCompany(job.company)) { console.log(`  [Reed Agent] Company blocked — skipping: ${job.title} @ ${job.company}`); return; }
+  if (queue.hasCanonical(job.title, job.company)) { console.log(`  [Reed Agent] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`); return; }
   if (/with verification/i.test(job.title)) {
-    console.log(`  [Reed Bot] Requires identity verification — skipping: ${job.title}`);
+    console.log(`  [Reed Agent] Requires identity verification — skipping: ${job.title}`);
     queue.add({ ...job, source: 'reed', status: 'skipped', reason: 'Requires identity verification' });
     return;
   }
 
   let jobDetails;
   try { jobDetails = await getDetails(job); } catch (err) {
-    console.error(`  [Reed Bot] Error fetching JD for "${job.title}": ${err.message}`);
+    console.error(`  [Reed Agent] Error fetching JD for "${job.title}": ${err.message}`);
     return;
   }
 
   if (!jobDetails.description || jobDetails.description.trim().split(/\s+/).length < 80) {
-    console.log(`  [Reed Bot] Short/missing JD — skipping: ${job.title}`);
+    console.log(`  [Reed Agent] Short/missing JD — skipping: ${job.title}`);
     queue.add({ ...job, source: 'reed', status: 'skipped', reason: 'JD too short or missing' });
     return;
   }
   if (jobDetails.isTrainingCourse || cfg.isTrainingCourseJD(jobDetails.description, job.title)) {
-    console.log(`  [Reed Bot] Training course — skipping: ${job.title}`);
+    console.log(`  [Reed Agent] Training course — skipping: ${job.title}`);
     queue.add({ ...job, source: 'reed', status: 'skipped', reason: 'Training course' });
     return;
   }
   if (!jobDetails.hasEasyApply) {
     const reason = jobDetails.isExternalOnly ? 'External site' : 'No apply button';
-    console.log(`  [Reed Bot] ${reason} — skipping: ${job.title}`);
+    console.log(`  [Reed Agent] ${reason} — skipping: ${job.title}`);
     queue.add({ ...job, source: 'reed', status: 'skipped', reason });
     return;
   }
   const workType = detectWorkType(jobDetails.description);
   if (!cfg.WORK_TYPE_PRIORITY.includes(workType)) {
-    console.log(`  [Reed Bot] Work type "${workType}" not wanted — skipping: ${job.title}`);
+    console.log(`  [Reed Agent] Work type "${workType}" not wanted — skipping: ${job.title}`);
     queue.add({ ...job, source: 'reed', status: 'skipped', reason: `Work type (${workType}) not wanted` });
     return;
   }
   if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(jobDetails.description))) {
-    console.log(`  [Reed Bot] No sponsorship offered — skipping: ${job.title}`);
+    console.log(`  [Reed Agent] No sponsorship offered — skipping: ${job.title}`);
     queue.add({ ...job, source: 'reed', status: 'skipped', reason: 'No sponsorship offered' });
     return;
   }
   if (!salary.isAcceptable(jobDetails.description, cfg.APPLICANT.salaryExpectation)) {
     const min = salary.extractMinSalary(jobDetails.description);
-    console.log(`  [Reed Bot] Below salary (${min ? '£' + min.toLocaleString() : 'stated'}) — skipping: ${job.title}`);
+    console.log(`  [Reed Agent] Below salary (${min ? '£' + min.toLocaleString() : 'stated'}) — skipping: ${job.title}`);
     queue.add({ ...job, source: 'reed', status: 'skipped', reason: 'Below salary expectation' });
     return;
   }
 
   queue.add({ ...jobDetails, source: 'reed', workType });
-  console.log(`  [Reed Bot] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
+  console.log(`  [Reed Agent] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
 }
 
 // Drain — apply all currently cv_ready Reed jobs, then return immediately.
@@ -123,14 +123,14 @@ async function drainReadyCVs(context, reedPage) {
 
   if (!readyJobs.length) return reedPage;
   if (queue.reconnectNeeded('reed')) {
-    console.log('  [Reed Bot] [Drain] Reconnect needed — skipping this apply pass until the Reed account is reconnected.');
+    console.log('  [Reed Agent] [Drain] Reconnect needed — skipping this apply pass until the Reed account is reconnected.');
     return reedPage;
   }
-  console.log(`\n  [Reed Bot] [Drain] ${readyJobs.length} cv_ready job(s) — applying before next search...`);
+  console.log(`\n  [Reed Agent] [Drain] ${readyJobs.length} cv_ready job(s) — applying before next search...`);
 
   for (const job of readyJobs) {
     if (queue.countAppliedToday() >= cfg.MAX_APPLICATIONS_PER_DAY) {
-      console.log(`  [Reed Bot] Daily limit reached — stopping drain`);
+      console.log(`  [Reed Agent] Daily limit reached — stopping drain`);
       return reedPage;
     }
     if (!isRelevantTitle(job.title)) {
@@ -138,7 +138,7 @@ async function drainReadyCVs(context, reedPage) {
       continue;
     }
     queue.update(job.jobId, { status: 'applying' });
-    console.log(`  [Reed Bot] [Drain] Applying: ${job.title} @ ${job.company}`);
+    console.log(`  [Reed Agent] [Drain] Applying: ${job.title} @ ${job.company}`);
     try {
       const applied = await reed.applyToJob(reedPage, job, job.cvPath);
       if (applied === null) {
@@ -152,10 +152,10 @@ async function drainReadyCVs(context, reedPage) {
         // Never submit the base CV: skip when the tailored CV couldn't be attached.
         queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
-        console.log(`  [Reed Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
+        console.log(`  [Reed Agent] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
         const _cb = queue.recordUploadFailure('reed');
         if (_cb.tripped) {
-          console.log('  [Reed Bot] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your Reed account (Connect account on the dashboard), then press Start applying. Pausing Reed applications + tailoring until then.');
+          console.log('  [Reed Agent] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your Reed account (Connect account on the dashboard), then press Start applying. Pausing Reed applications + tailoring until then.');
           return reedPage;
         }
       } else {
@@ -163,7 +163,7 @@ async function drainReadyCVs(context, reedPage) {
         queue.update(job.jobId, { status: finalStatus });
         if (applied) { queue.markApplied(job.jobId); queue.recordUploadSuccess('reed'); }
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, applied ? 'APPLIED' : 'APPLY_FAILED', applied ? 'Reed' : 'Reed form could not be completed');
-        console.log(`  [Reed Bot] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
+        console.log(`  [Reed Agent] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
       }
     } catch (err) {
       const isPageClosed = /Target page.*closed|context.*closed|browser.*closed|page.*closed/i.test(err.message);
@@ -175,7 +175,7 @@ async function drainReadyCVs(context, reedPage) {
       } else {
         queue.update(job.jobId, { status: 'apply_failed', error: err.message });
         logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
-        console.error(`  [Reed Bot] [Drain] Error: ${err.message}`);
+        console.error(`  [Reed Agent] [Drain] Error: ${err.message}`);
       }
     }
     await DELAY(8000 + Math.random() * 7000);
@@ -185,21 +185,21 @@ async function drainReadyCVs(context, reedPage) {
 
 async function phase1_searchAndQueue(context, reedPage) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [Reed Bot] Phase 1 — Searching for jobs');
+  console.log('  [Reed Agent] Phase 1 — Searching for jobs');
   console.log('══════════════════════════════════════════════════════');
 
   for (const searchTerm of cfg.JOB_SEARCHES) {
     // Drain any cv_ready jobs that built up before starting the next search
     reedPage = await drainReadyCVs(context, reedPage);
 
-    console.log(`\n  [Reed Bot] Searching: "${searchTerm}"`);
+    console.log(`\n  [Reed Agent] Searching: "${searchTerm}"`);
     let jobs;
     try {
       const result = await reed.searchJobs(context, reedPage, searchTerm, cfg.MAX_JOBS_PER_SEARCH, false);
       jobs     = result.jobs;
       reedPage = result.page;
     } catch (err) {
-      console.error(`  [Reed Bot] Search failed: ${err.message}`);
+      console.error(`  [Reed Agent] Search failed: ${err.message}`);
       continue;
     }
     for (const job of jobs) {
@@ -209,17 +209,17 @@ async function phase1_searchAndQueue(context, reedPage) {
   }
 
   const pending = queue.getByStatus('pending').filter(j => j.source === 'reed').length;
-  console.log(`\n  [Reed Bot] Phase 1 complete. ${pending} Reed job(s) queued for Scorer.`);
+  console.log(`\n  [Reed Agent] Phase 1 complete. ${pending} Reed job(s) queued for Scorer.`);
   return reedPage;
 }
 
 async function phase2_applyReadyCVs(context, reedPage) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [Reed Bot] Phase 2 — Waiting for Scorer bot...');
+  console.log('  [Reed Agent] Phase 2 — Waiting for Scorer agent...');
   console.log('══════════════════════════════════════════════════════');
 
   const retried = queue.requeueFailed('reed');
-  if (retried > 0) console.log(`  [Reed Bot] Requeueing ${retried} previously-failed Reed job(s) for retry.`);
+  if (retried > 0) console.log(`  [Reed Agent] Requeueing ${retried} previously-failed Reed job(s) for retry.`);
 
   const priority = workTypePriority();
   let idleCount = 0;
@@ -244,19 +244,19 @@ async function phase2_applyReadyCVs(context, reedPage) {
     for (const job of readyJobs) {
       const appliedToday = queue.countAppliedToday();
       if (appliedToday >= cfg.MAX_APPLICATIONS_PER_DAY) {
-        console.log(`  [Reed Bot] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing applications until tomorrow`);
+        console.log(`  [Reed Agent] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing applications until tomorrow`);
         return;
       }
 
       if (!isRelevantTitle(job.title)) {
         queue.update(job.jobId, { status: 'skipped', reason: 'Title filter (post-queue)' });
         logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', 'Title filter');
-        console.log(`  [Reed Bot] Post-queue title filter — skipping: ${job.title}`);
+        console.log(`  [Reed Agent] Post-queue title filter — skipping: ${job.title}`);
         continue;
       }
 
       queue.update(job.jobId, { status: 'applying' });
-      console.log(`\n  [Reed Bot] Applying: ${job.title} @ ${job.company} [${job.workType || 'onsite'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
+      console.log(`\n  [Reed Agent] Applying: ${job.title} @ ${job.company} [${job.workType || 'onsite'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
 
       try {
         const applied = await reed.applyToJob(reedPage, job, job.cvPath);
@@ -265,14 +265,14 @@ async function phase2_applyReadyCVs(context, reedPage) {
           queue.update(job.jobId, { status: 'skipped' });
           queue.markApplied(job.jobId);
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Already applied');
-          console.log(`  [Reed Bot] Already applied — skipping: ${job.title}`);
+          console.log(`  [Reed Agent] Already applied — skipping: ${job.title}`);
           continue;
         }
 
         if (applied === 'external') {
           queue.update(job.jobId, { status: 'skipped', reason: 'External application site' });
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'External application site');
-          console.log(`  [Reed Bot] External site — skipping: ${job.title}`);
+          console.log(`  [Reed Agent] External site — skipping: ${job.title}`);
           continue;
         }
 
@@ -280,10 +280,10 @@ async function phase2_applyReadyCVs(context, reedPage) {
           // Never submit the base CV: skip when the tailored CV couldn't be attached.
           queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
-          console.log(`  [Reed Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
+          console.log(`  [Reed Agent] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
           const _cb = queue.recordUploadFailure('reed');
           if (_cb.tripped) {
-            console.log('  [Reed Bot] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your Reed account (Connect account on the dashboard), then press Start applying. Pausing Reed applications + tailoring until then.');
+            console.log('  [Reed Agent] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your Reed account (Connect account on the dashboard), then press Start applying. Pausing Reed applications + tailoring until then.');
             return;
           }
           continue;
@@ -297,7 +297,7 @@ async function phase2_applyReadyCVs(context, reedPage) {
           applied ? 'APPLIED' : 'APPLY_FAILED',
           applied ? 'Reed' : 'Reed form could not be completed'
         );
-        console.log(`  [Reed Bot] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
+        console.log(`  [Reed Agent] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
       } catch (err) {
         const isPageIssue = /apply button not found|no apply button|external/i.test(err.message);
         const isPageClosed = /Target page.*closed|context.*closed|browser.*closed|page.*closed/i.test(err.message);
@@ -305,25 +305,25 @@ async function phase2_applyReadyCVs(context, reedPage) {
         if (isPageClosed) {
           // The browser tab died mid-apply — reset this job and try to recover with a fresh page.
           // If the whole context is dead, throw so main() can relaunch the entire browser.
-          console.log(`  [Reed Bot] Page was closed unexpectedly — recovering browser page...`);
+          console.log(`  [Reed Agent] Page was closed unexpectedly — recovering browser page...`);
           queue.update(job.jobId, { status: 'cv_ready', error: null });
           await reedPage.close().catch(() => {});
           reedPage = await context.newPage(); // throws if context is dead → caught by main()
           await reed.ensureLoggedIn(reedPage);
-          console.log(`  [Reed Bot] Browser page recovered — will retry "${job.title}" next loop`);
+          console.log(`  [Reed Agent] Browser page recovered — will retry "${job.title}" next loop`);
         } else if (isPageIssue) {
           queue.update(job.jobId, { status: 'skipped', reason: err.message });
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', err.message.substring(0, 100));
-          console.log(`  [Reed Bot] Page issue — skipping: ${job.title} (${err.message})`);
+          console.log(`  [Reed Agent] Page issue — skipping: ${job.title} (${err.message})`);
         } else {
           queue.update(job.jobId, { status: 'apply_failed', error: err.message });
           logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
-          console.error(`  [Reed Bot] Error applying to "${job.title}": ${err.message}`);
+          console.error(`  [Reed Agent] Error applying to "${job.title}": ${err.message}`);
         }
       }
 
       const pause = 8000 + Math.random() * 7000;
-      console.log(`  [Reed Bot] Pausing ${Math.round(pause / 1000)}s before next application...`);
+      console.log(`  [Reed Agent] Pausing ${Math.round(pause / 1000)}s before next application...`);
       await DELAY(pause);
     }
 
@@ -332,10 +332,10 @@ async function phase2_applyReadyCVs(context, reedPage) {
     } else if (pendingJobs > 0) {
       idleCount = 0;
       try { queue.printStatus(); } catch (_) {}
-      console.log(`  [Reed Bot] Waiting for Scorer bot... (${pendingJobs} Reed job(s) in progress)`);
+      console.log(`  [Reed Agent] Waiting for Scorer agent... (${pendingJobs} Reed job(s) in progress)`);
     } else {
       idleCount++;
-      console.log(`  [Reed Bot] Idle ${idleCount}/${MAX_IDLE} — no pending or ready Reed jobs`);
+      console.log(`  [Reed Agent] Idle ${idleCount}/${MAX_IDLE} — no pending or ready Reed jobs`);
     }
 
     if (idleCount >= MAX_IDLE) break;
@@ -364,13 +364,13 @@ async function main() {
   queue.markSessionChecking('reed');
 
   console.log('═══════════════════════════════════════════════════════');
-  console.log('  Reed Bot — Starting (continuous mode)');
+  console.log('  Reed Agent — Starting (continuous mode)');
   console.log('═══════════════════════════════════════════════════════');
 
   // Recover jobs left in 'applying' from a previous interrupted run
   const stuckApplying = queue.getByStatus('applying').filter(j => j.source === 'reed');
   if (stuckApplying.length > 0) {
-    console.log(`  [Reed Bot] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
+    console.log(`  [Reed Agent] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
     for (const j of stuckApplying) queue.update(j.jobId, { status: 'cv_ready' });
   }
 
@@ -380,14 +380,14 @@ async function main() {
     try {
       ({ context, page: reedPage } = await launchBrowser());
       // User closing the Chromium window → clean stop, not an error or relaunch
-      closeGuard = watchForManualClose(context, 'Reed Bot');
+      closeGuard = watchForManualClose(context, 'Reed Agent');
       await reed.ensureLoggedIn(reedPage);
     } catch (err) {
       if (BROWSER_CLOSED_RE.test(err.message || '')) {
-        console.log('  [Reed Bot] Browser window closed — agent stopped.');
+        console.log('  [Reed Agent] Browser window closed — agent stopped.');
         process.exit(0);
       }
-      console.error('  [Reed Bot] Failed to launch browser or log in: ' + err.message);
+      console.error('  [Reed Agent] Failed to launch browser or log in: ' + err.message);
       queue.markSessionDead('reed'); // login failed → Scorer stops tailoring Reed jobs
       await context?.close().catch(() => {});
       process.exit(1);
@@ -403,7 +403,7 @@ async function main() {
       const n = queue.countAppliedToday();
       if (n >= cfg.MAX_APPLICATIONS_PER_DAY) {
         // "Daily limit reached" in the log also triggers the desktop notification (main.js).
-        console.log(`  [Reed Bot] Daily limit reached (${n}/${cfg.MAX_APPLICATIONS_PER_DAY}) — stopping agent until tomorrow`);
+        console.log(`  [Reed Agent] Daily limit reached (${n}/${cfg.MAX_APPLICATIONS_PER_DAY}) — stopping agent until tomorrow`);
         if (closeGuard) closeGuard.intentional = true;
         await context.close().catch(() => {});
         process.exit(0);
@@ -419,14 +419,14 @@ async function main() {
         await phase2_applyReadyCVs(context, reedPage);
         await stopIfDailyLimit();
         logger.printSummary();
-        console.log('\n  [Reed Bot] Cycle complete. Waiting 1 min before next search...');
+        console.log('\n  [Reed Agent] Cycle complete. Waiting 1 min before next search...');
         await DELAY(60 * 1000);
       }
     } catch (err) {
       if (CONTEXT_DEAD_RE.test(err.message) || BROWSER_CLOSED_RE.test(err.message)) {
         // Browser window was closed (almost always the user clicking ✕) — stop
         // cleanly so the agent shows "stopped", don't error or pop a new window open.
-        console.log('  [Reed Bot] Browser window closed — agent stopped.');
+        console.log('  [Reed Agent] Browser window closed — agent stopped.');
         if (closeGuard) closeGuard.intentional = true;
         await context.close().catch(() => {});
         process.exit(0);
@@ -440,7 +440,7 @@ async function main() {
 
 main().catch(err => {
   if (BROWSER_CLOSED_RE.test(err?.message || '')) {
-    console.log('  [Reed Bot] Browser window closed — agent stopped.');
+    console.log('  [Reed Agent] Browser window closed — agent stopped.');
     process.exit(0);
   }
   console.error('Fatal error:', err);

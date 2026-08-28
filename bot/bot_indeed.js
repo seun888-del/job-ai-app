@@ -4,9 +4,9 @@
  * Phase 1 — Search Indeed (uk.indeed.com or indeed.com) for remote jobs
  *            with the "Easily Apply" filter. Extracts JDs and adds matching
  *            jobs to queue.db (source: 'indeed') with status "pending".
- *            The Scorer bot then scores and tailors the CV.
+ *            The Scorer agent then scores and tailors the CV.
  *
- * Phase 2 — Polls the queue every 10 s. When the Scorer bot marks an Indeed
+ * Phase 2 — Polls the queue every 10 s. When the Scorer agent marks an Indeed
  *            job as "cv_ready", submits the application via Indeed's
  *            SmartApply system with the tailored CV.
  *
@@ -55,41 +55,41 @@ function workTypePriority() {
 
 async function phase1_searchAndQueue(page) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [Indeed Bot] Phase 1 — Searching for jobs');
+  console.log('  [Indeed Agent] Phase 1 — Searching for jobs');
   console.log('══════════════════════════════════════════════════════');
 
   for (const searchTerm of cfg.JOB_SEARCHES) {
-    console.log(`\n  [Indeed Bot] Searching: "${searchTerm}"`);
+    console.log(`\n  [Indeed Agent] Searching: "${searchTerm}"`);
     let jobs;
     try {
       jobs = await indeed.searchJobs(page, searchTerm, cfg.MAX_JOBS_PER_SEARCH);
     } catch (err) {
-      console.error(`  [Indeed Bot] Search failed: ${err.message}`);
+      console.error(`  [Indeed Agent] Search failed: ${err.message}`);
       continue;
     }
 
     for (const job of jobs) {
       if (queue.has(job.jobId)) {
-        console.log(`  [Indeed Bot] Already queued: ${job.title}`);
+        console.log(`  [Indeed Agent] Already queued: ${job.title}`);
         continue;
       }
       if (queue.wasApplied(job.jobId)) {
-        console.log(`  [Indeed Bot] Already applied previously — skipping: ${job.title}`);
+        console.log(`  [Indeed Agent] Already applied previously — skipping: ${job.title}`);
         continue;
       }
       if (!isRelevantTitle(job.title)) {
-        console.log(`  [Indeed Bot] Title filter — skipping: ${job.title}`);
+        console.log(`  [Indeed Agent] Title filter — skipping: ${job.title}`);
         continue;
       }
 
       if (isBlockedCompany(job.company)) {
-        console.log(`  [Indeed Bot] Company blocked — skipping: ${job.title} @ ${job.company}`);
+        console.log(`  [Indeed Agent] Company blocked — skipping: ${job.title} @ ${job.company}`);
         continue;
       }
 
 
       if (queue.hasCanonical(job.title, job.company)) {
-        console.log(`  [Indeed Bot] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`);
+        console.log(`  [Indeed Agent] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`);
         continue;
       }
 
@@ -97,47 +97,47 @@ async function phase1_searchAndQueue(page) {
         const jobDetails = await indeed.getJobDescription(page, job);
 
         if (!jobDetails.description || jobDetails.description.trim().split(/\s+/).length < 80) {
-          console.log(`  [Indeed Bot] Short/missing JD — skipping: ${job.title}`);
+          console.log(`  [Indeed Agent] Short/missing JD — skipping: ${job.title}`);
           queue.add({ ...job, source: 'indeed', status: 'skipped', reason: 'JD too short or missing' });
           continue;
         }
 
         if (cfg.isTrainingCourseJD(jobDetails.description, job.title)) {
-          console.log(`  [Indeed Bot] Training course — skipping: ${job.title}`);
+          console.log(`  [Indeed Agent] Training course — skipping: ${job.title}`);
           queue.add({ ...job, source: 'indeed', status: 'skipped', reason: 'Training course' });
           continue;
         }
 
         if (!jobDetails.hasEasyApply) {
-          console.log(`  [Indeed Bot] No Easy Apply button found — skipping: ${job.title}`);
+          console.log(`  [Indeed Agent] No Easy Apply button found — skipping: ${job.title}`);
           queue.add({ ...job, source: 'indeed', status: 'skipped', reason: 'External apply (not Indeed Apply)' });
           continue;
         }
 
         if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(jobDetails.description))) {
-          console.log(`  [Indeed Bot] No sponsorship offered — skipping: ${job.title}`);
+          console.log(`  [Indeed Agent] No sponsorship offered — skipping: ${job.title}`);
           queue.add({ ...job, source: 'indeed', status: 'skipped', reason: 'No sponsorship offered' });
           continue;
         }
 
         const workType = detectWorkType(jobDetails.description);
         if (!cfg.WORK_TYPE_PRIORITY.includes(workType)) {
-          console.log(`  [Indeed Bot] Work type "${workType}" not wanted — skipping: ${job.title}`);
+          console.log(`  [Indeed Agent] Work type "${workType}" not wanted — skipping: ${job.title}`);
           queue.add({ ...job, source: 'indeed', status: 'skipped', reason: `Work type (${workType}) not wanted` });
           continue;
         }
 
         if (!salary.isAcceptable(jobDetails.description, cfg.APPLICANT.salaryExpectation)) {
           const min = salary.extractMinSalary(jobDetails.description);
-          console.log(`  [Indeed Bot] Below salary expectation (£${min?.toLocaleString() || '?'} < ${cfg.APPLICANT.salaryExpectation}) — skipping: ${job.title}`);
+          console.log(`  [Indeed Agent] Below salary expectation (£${min?.toLocaleString() || '?'} < ${cfg.APPLICANT.salaryExpectation}) — skipping: ${job.title}`);
           queue.add({ ...job, source: 'indeed', status: 'skipped', reason: 'Below salary expectation' });
           continue;
         }
 
         queue.add({ ...jobDetails, source: 'indeed', workType });
-        console.log(`  [Indeed Bot] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
+        console.log(`  [Indeed Agent] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
       } catch (err) {
-        console.error(`  [Indeed Bot] Error on "${job.title}": ${err.message}`);
+        console.error(`  [Indeed Agent] Error on "${job.title}": ${err.message}`);
       }
 
       await DELAY(2500);
@@ -145,16 +145,16 @@ async function phase1_searchAndQueue(page) {
   }
 
   const pending = queue.getByStatus('pending').filter(j => j.source === 'indeed').length;
-  console.log(`\n  [Indeed Bot] Phase 1 complete. ${pending} Indeed job(s) queued for Scorer.`);
+  console.log(`\n  [Indeed Agent] Phase 1 complete. ${pending} Indeed job(s) queued for Scorer.`);
 }
 
 async function phase2_applyReadyCVs(page) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [Indeed Bot] Phase 2 — Waiting for Scorer bot...');
+  console.log('  [Indeed Agent] Phase 2 — Waiting for Scorer agent...');
   console.log('══════════════════════════════════════════════════════');
 
   const retried = queue.requeueFailed('indeed');
-  if (retried > 0) console.log(`  [Indeed Bot] Requeueing ${retried} previously-failed Indeed job(s) for retry.`);
+  if (retried > 0) console.log(`  [Indeed Agent] Requeueing ${retried} previously-failed Indeed job(s) for retry.`);
 
   const priority = workTypePriority();
   let idleCount  = 0;
@@ -172,7 +172,7 @@ async function phase2_applyReadyCVs(page) {
     for (const job of readyJobs) {
       const appliedToday = queue.countAppliedToday();
       if (appliedToday >= cfg.MAX_APPLICATIONS_PER_DAY) {
-        console.log(`  [Indeed Bot] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing until tomorrow`);
+        console.log(`  [Indeed Agent] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing until tomorrow`);
         return;
       }
 
@@ -183,7 +183,7 @@ async function phase2_applyReadyCVs(page) {
       }
 
       queue.update(job.jobId, { status: 'applying' });
-      console.log(`\n  [Indeed Bot] Applying: ${job.title} @ ${job.company} [${job.workType || 'remote'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
+      console.log(`\n  [Indeed Agent] Applying: ${job.title} @ ${job.company} [${job.workType || 'remote'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
 
       try {
         const applied = await indeed.applyToJob(page, job, job.cvPath);
@@ -192,7 +192,7 @@ async function phase2_applyReadyCVs(page) {
           queue.update(job.jobId, { status: 'skipped' });
           queue.markApplied(job.jobId);
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Already applied');
-          console.log(`  [Indeed Bot] Already applied — skipping: ${job.title}`);
+          console.log(`  [Indeed Agent] Already applied — skipping: ${job.title}`);
           continue;
         }
 
@@ -204,23 +204,23 @@ async function phase2_applyReadyCVs(page) {
           applied ? 'APPLIED' : 'APPLY_FAILED',
           applied ? 'Indeed SmartApply' : 'Indeed form could not be completed'
         );
-        console.log(`  [Indeed Bot] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
+        console.log(`  [Indeed Agent] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
       } catch (err) {
         const isPageIssue = /apply button not found|no apply button|external/i.test(err.message);
         if (isPageIssue) {
           queue.update(job.jobId, { status: 'skipped', reason: err.message });
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', err.message.substring(0, 100));
-          console.log(`  [Indeed Bot] Page issue — skipping: ${job.title} (${err.message})`);
+          console.log(`  [Indeed Agent] Page issue — skipping: ${job.title} (${err.message})`);
         } else {
           queue.update(job.jobId, { status: 'apply_failed', error: err.message });
           logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
-          console.error(`  [Indeed Bot] Error applying to "${job.title}": ${err.message}`);
+          console.error(`  [Indeed Agent] Error applying to "${job.title}": ${err.message}`);
         }
       }
 
       // Human-like pause between applications: 10–18 seconds
       const pause = 10000 + Math.random() * 8000;
-      console.log(`  [Indeed Bot] Pausing ${Math.round(pause / 1000)}s before next application...`);
+      console.log(`  [Indeed Agent] Pausing ${Math.round(pause / 1000)}s before next application...`);
       await DELAY(pause);
     }
 
@@ -229,10 +229,10 @@ async function phase2_applyReadyCVs(page) {
     } else if (pendingCount > 0) {
       idleCount = 0;
       try { queue.printStatus(); } catch (_) {}
-      console.log(`  [Indeed Bot] Waiting for Scorer bot... (${pendingCount} Indeed job(s) in progress)`);
+      console.log(`  [Indeed Agent] Waiting for Scorer agent... (${pendingCount} Indeed job(s) in progress)`);
     } else {
       idleCount++;
-      console.log(`  [Indeed Bot] Idle ${idleCount}/${MAX_IDLE} — no pending or ready Indeed jobs`);
+      console.log(`  [Indeed Agent] Idle ${idleCount}/${MAX_IDLE} — no pending or ready Indeed jobs`);
     }
 
     if (idleCount >= MAX_IDLE) break;
@@ -248,13 +248,13 @@ async function main() {
   const domain  = country === 'United States' ? 'indeed.com' : 'uk.indeed.com';
 
   console.log('═══════════════════════════════════════════════════════');
-  console.log(`  Indeed Bot — Starting (${domain}, continuous mode)`);
+  console.log(`  Indeed Agent — Starting (${domain}, continuous mode)`);
   console.log('═══════════════════════════════════════════════════════');
 
   // Recover jobs stuck in 'applying' from a previous interrupted run
   const stuckApplying = queue.getByStatus('applying').filter(j => j.source === 'indeed');
   if (stuckApplying.length > 0) {
-    console.log(`  [Indeed Bot] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
+    console.log(`  [Indeed Agent] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
     for (const j of stuckApplying) queue.update(j.jobId, { status: 'cv_ready' });
   }
 
@@ -272,7 +272,7 @@ async function main() {
       await phase1_searchAndQueue(indeedPage);
       await phase2_applyReadyCVs(indeedPage);
       logger.printSummary();
-      console.log('\n  [Indeed Bot] Cycle complete. Waiting 1 min before next search...');
+      console.log('\n  [Indeed Agent] Cycle complete. Waiting 1 min before next search...');
       await DELAY(60 * 1000);
     }
   } catch (err) {

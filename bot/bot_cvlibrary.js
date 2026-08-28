@@ -60,7 +60,7 @@ async function ensureLoggedIn(page) {
   if (!isLoggedIn) {
     throw new Error('CV-Library: not logged in. Click "Connect account" on the CV-Library card, log in, then click Start.');
   }
-  console.log('  [CV-Library Bot] Session active');
+  console.log('  [CV-Library Agent] Session active');
 }
 
 // Accept the OneTrust cookie consent banner if visible (new Next.js site)
@@ -74,13 +74,13 @@ async function acceptCookies(page) {
 // ── Phase 1: Search & queue ───────────────────────────────────────────────
 async function phase1_searchAndQueue(context, page) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [CV-Library Bot] Phase 1 — Searching for jobs');
+  console.log('  [CV-Library Agent] Phase 1 — Searching for jobs');
   console.log('══════════════════════════════════════════════════════');
 
   let cookiesAccepted = false;
 
   // Warm up on the homepage first so navigation looks human (not cold-jumping to /search-jobs)
-  console.log('  [CV-Library Bot] Warming up on homepage...');
+  console.log('  [CV-Library Agent] Warming up on homepage...');
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitForCloudflareSolve(page);
   await acceptCookies(page);
@@ -89,7 +89,7 @@ async function phase1_searchAndQueue(context, page) {
   await DELAY(2000 + Math.random() * 1500);
 
   for (const searchTerm of cfg.JOB_SEARCHES) {
-    console.log(`\n  [CV-Library Bot] Searching: "${searchTerm}"`);
+    console.log(`\n  [CV-Library Agent] Searching: "${searchTerm}"`);
 
     try {
       // CV-Library's new Next.js site requires using the search form, not query params
@@ -98,9 +98,9 @@ async function phase1_searchAndQueue(context, page) {
       if (!passed) {
         console.error('');
         console.error('  ════════════════════════════════════════════════════');
-        console.error('  [CV-Library Bot] IP BLOCKED by CV-Library security.');
+        console.error('  [CV-Library Agent] IP BLOCKED by CV-Library security.');
         console.error('  This is a temporary block on your IP address.');
-        console.error('  DO NOT restart the bot — every attempt extends the block.');
+        console.error('  DO NOT restart the agent — every attempt extends the block.');
         console.error('  Wait 24–48 hours, then try again.');
         console.error('  Reference: see "Blocked" page in the browser window.');
         console.error('  ════════════════════════════════════════════════════');
@@ -118,7 +118,7 @@ async function phase1_searchAndQueue(context, page) {
       await humanWarmup(page);
       await DELAY(2500);
     } catch (err) {
-      console.error(`  [CV-Library Bot] Failed to load search for "${searchTerm}": ${err.message}`);
+      console.error(`  [CV-Library Agent] Failed to load search for "${searchTerm}": ${err.message}`);
       continue;
     }
 
@@ -142,23 +142,23 @@ async function phase1_searchAndQueue(context, page) {
     }, cfg.MAX_JOBS_PER_SEARCH).catch(() => []);
 
     if (!jobCards.length) {
-      console.log(`  [CV-Library Bot] No results for "${searchTerm}"`);
+      console.log(`  [CV-Library Agent] No results for "${searchTerm}"`);
       continue;
     }
-    console.log(`  [CV-Library Bot] Found ${jobCards.length} listings`);
+    console.log(`  [CV-Library Agent] Found ${jobCards.length} listings`);
 
     for (const card of jobCards) {
       const { jobId, title, url, company, applyUrl } = card;
 
-      if (queue.has(jobId)) { console.log(`  [CV-Library Bot] Already queued: ${title}`); continue; }
-      if (queue.wasApplied(jobId)) { console.log(`  [CV-Library Bot] Already applied — skipping: ${title}`); continue; }
-      if (!isRelevantTitle(title)) { console.log(`  [CV-Library Bot] Title filter — skipping: ${title}`); continue; }
-      if (isBlockedCompany(company)) { console.log(`  [CV-Library Bot] Company blocked — skipping: ${title} @ ${company}`); continue; }
-      if (queue.hasCanonical(title, company)) { console.log(`  [CV-Library Bot] Duplicate (cross-site) — skipping: ${title} @ ${company}`); continue; }
+      if (queue.has(jobId)) { console.log(`  [CV-Library Agent] Already queued: ${title}`); continue; }
+      if (queue.wasApplied(jobId)) { console.log(`  [CV-Library Agent] Already applied — skipping: ${title}`); continue; }
+      if (!isRelevantTitle(title)) { console.log(`  [CV-Library Agent] Title filter — skipping: ${title}`); continue; }
+      if (isBlockedCompany(company)) { console.log(`  [CV-Library Agent] Company blocked — skipping: ${title} @ ${company}`); continue; }
+      if (queue.hasCanonical(title, company)) { console.log(`  [CV-Library Agent] Duplicate (cross-site) — skipping: ${title} @ ${company}`); continue; }
 
       // Skip if apply URL points to an external site
       if (applyUrl && !applyUrl.includes('cv-library.co.uk')) {
-        console.log(`  [CV-Library Bot] External site — skipping: ${title}`);
+        console.log(`  [CV-Library Agent] External site — skipping: ${title}`);
         queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'External site' });
         continue;
       }
@@ -177,41 +177,41 @@ async function phase1_searchAndQueue(context, page) {
         }).catch(() => '');
 
         if (!description || description.trim().split(/\s+/).length < 80) {
-          console.log(`  [CV-Library Bot] Short/missing JD — skipping: ${title}`);
+          console.log(`  [CV-Library Agent] Short/missing JD — skipping: ${title}`);
           queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'JD too short or missing' });
           continue;
         }
 
         if (cfg.isTrainingCourseJD(description, title)) {
-          console.log(`  [CV-Library Bot] Training course — skipping: ${title}`);
+          console.log(`  [CV-Library Agent] Training course — skipping: ${title}`);
           queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'Training course' });
           continue;
         }
 
         if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(description))) {
-          console.log(`  [CV-Library Bot] No sponsorship — skipping: ${title}`);
+          console.log(`  [CV-Library Agent] No sponsorship — skipping: ${title}`);
           queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'No sponsorship offered' });
           continue;
         }
 
         const workType = detectWorkType(description);
         if (!cfg.WORK_TYPE_PRIORITY.includes(workType)) {
-          console.log(`  [CV-Library Bot] Work type "${workType}" not wanted — skipping: ${title}`);
+          console.log(`  [CV-Library Agent] Work type "${workType}" not wanted — skipping: ${title}`);
           queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: `Work type (${workType}) not wanted` });
           continue;
         }
 
         if (!salary.isAcceptable(description, cfg.APPLICANT.salaryExpectation)) {
           const min = salary.extractMinSalary(description);
-          console.log(`  [CV-Library Bot] Below salary (${min ? '£' + min.toLocaleString() : '?'}) — skipping: ${title}`);
+          console.log(`  [CV-Library Agent] Below salary (${min ? '£' + min.toLocaleString() : '?'}) — skipping: ${title}`);
           queue.add({ jobId, title, company, url, source: 'cvlibrary', status: 'skipped', reason: 'Below salary expectation' });
           continue;
         }
 
         queue.add({ jobId, title, company, url, description, source: 'cvlibrary', workType });
-        console.log(`  [CV-Library Bot] → Queued for Scorer: ${title} @ ${company} [${workType}]`);
+        console.log(`  [CV-Library Agent] → Queued for Scorer: ${title} @ ${company} [${workType}]`);
       } catch (err) {
-        console.error(`  [CV-Library Bot] Error on "${title}": ${err.message}`);
+        console.error(`  [CV-Library Agent] Error on "${title}": ${err.message}`);
       }
 
       await DELAY(2000);
@@ -219,18 +219,18 @@ async function phase1_searchAndQueue(context, page) {
   }
 
   const pending = queue.getByStatus('pending').filter(j => j.source === 'cvlibrary').length;
-  console.log(`\n  [CV-Library Bot] Phase 1 complete. ${pending} CV-Library job(s) queued for Scorer.`);
+  console.log(`\n  [CV-Library Agent] Phase 1 complete. ${pending} CV-Library job(s) queued for Scorer.`);
   return page;
 }
 
 // ── Phase 2: Apply ────────────────────────────────────────────────────────
 async function phase2_applyReadyCVs(page) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [CV-Library Bot] Phase 2 — Waiting for Scorer bot...');
+  console.log('  [CV-Library Agent] Phase 2 — Waiting for Scorer agent...');
   console.log('══════════════════════════════════════════════════════');
 
   const retried = queue.requeueFailed('cvlibrary');
-  if (retried > 0) console.log(`  [CV-Library Bot] Requeueing ${retried} previously-failed job(s) for retry.`);
+  if (retried > 0) console.log(`  [CV-Library Agent] Requeueing ${retried} previously-failed job(s) for retry.`);
 
   const priority = workTypePriority();
   let idleCount = 0;
@@ -247,19 +247,19 @@ async function phase2_applyReadyCVs(page) {
     for (const job of readyJobs) {
       const appliedToday = queue.countAppliedToday();
       if (appliedToday >= cfg.MAX_APPLICATIONS_PER_DAY) {
-        console.log(`  [CV-Library Bot] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing until tomorrow`);
+        console.log(`  [CV-Library Agent] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing until tomorrow`);
         return;
       }
 
       if (!isRelevantTitle(job.title)) {
         queue.update(job.jobId, { status: 'skipped', reason: 'Title filter (post-queue)' });
         logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', 'Title filter');
-        console.log(`  [CV-Library Bot] Post-queue title filter — skipping: ${job.title}`);
+        console.log(`  [CV-Library Agent] Post-queue title filter — skipping: ${job.title}`);
         continue;
       }
 
       queue.update(job.jobId, { status: 'applying' });
-      console.log(`\n  [CV-Library Bot] Applying: ${job.title} @ ${job.company} [${job.workType || 'onsite'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
+      console.log(`\n  [CV-Library Agent] Applying: ${job.title} @ ${job.company} [${job.workType || 'onsite'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
 
       try {
         await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -269,7 +269,7 @@ async function phase2_applyReadyCVs(page) {
         if (!applyBtn) {
           queue.update(job.jobId, { status: 'skipped', reason: 'Apply button not found' });
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', 'No apply button');
-          console.log(`  [CV-Library Bot] Apply button gone — skipping: ${job.title}`);
+          console.log(`  [CV-Library Agent] Apply button gone — skipping: ${job.title}`);
           continue;
         }
 
@@ -289,27 +289,27 @@ async function phase2_applyReadyCVs(page) {
           queue.update(job.jobId, { status: 'applied' });
           queue.markApplied(job.jobId);
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'APPLIED', '');
-          console.log(`  [CV-Library Bot] ✓ Applied: ${job.title} @ ${job.company}`);
+          console.log(`  [CV-Library Agent] ✓ Applied: ${job.title} @ ${job.company}`);
         } else {
           queue.update(job.jobId, { status: 'apply_failed', reason: 'No confirmation detected' });
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'FAILED', 'No confirmation');
-          console.log(`  [CV-Library Bot] No confirmation — marking failed: ${job.title}`);
+          console.log(`  [CV-Library Agent] No confirmation — marking failed: ${job.title}`);
         }
       } catch (err) {
         const isPageIssue = /apply button not found|no apply button|external/i.test(err.message);
         if (isPageIssue) {
           queue.update(job.jobId, { status: 'skipped', reason: err.message });
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', err.message.substring(0, 100));
-          console.log(`  [CV-Library Bot] Page issue — skipping: ${job.title} (${err.message})`);
+          console.log(`  [CV-Library Agent] Page issue — skipping: ${job.title} (${err.message})`);
         } else {
           queue.update(job.jobId, { status: 'apply_failed', error: err.message });
           logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
-          console.error(`  [CV-Library Bot] Error applying to "${job.title}": ${err.message}`);
+          console.error(`  [CV-Library Agent] Error applying to "${job.title}": ${err.message}`);
         }
       }
 
       const pause = 8000 + Math.random() * 7000;
-      console.log(`  [CV-Library Bot] Pausing ${Math.round(pause / 1000)}s before next application...`);
+      console.log(`  [CV-Library Agent] Pausing ${Math.round(pause / 1000)}s before next application...`);
       await DELAY(pause);
     }
 
@@ -318,10 +318,10 @@ async function phase2_applyReadyCVs(page) {
     } else if (pendingJobs > 0) {
       idleCount = 0;
       try { queue.printStatus(); } catch (_) {}
-      console.log(`  [CV-Library Bot] Waiting for Scorer bot... (${pendingJobs} CV-Library job(s) in progress)`);
+      console.log(`  [CV-Library Agent] Waiting for Scorer agent... (${pendingJobs} CV-Library job(s) in progress)`);
     } else {
       idleCount++;
-      console.log(`  [CV-Library Bot] Idle ${idleCount}/${MAX_IDLE} — no pending or ready CV-Library jobs`);
+      console.log(`  [CV-Library Agent] Idle ${idleCount}/${MAX_IDLE} — no pending or ready CV-Library jobs`);
     }
 
     if (idleCount >= MAX_IDLE) break;
@@ -335,12 +335,12 @@ async function main() {
   await queue.init(process.env.JOBBOT_USERDATA);
 
   console.log('═══════════════════════════════════════════════════════');
-  console.log('  CV-Library Bot — Starting (continuous mode)');
+  console.log('  CV-Library Agent — Starting (continuous mode)');
   console.log('═══════════════════════════════════════════════════════');
 
   const stuckApplying = queue.getByStatus('applying').filter(j => j.source === 'cvlibrary');
   if (stuckApplying.length > 0) {
-    console.log(`  [CV-Library Bot] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
+    console.log(`  [CV-Library Agent] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
     for (const j of stuckApplying) queue.update(j.jobId, { status: 'cv_ready' });
   }
 
@@ -364,7 +364,7 @@ async function main() {
     page = await phase1_searchAndQueue(context, page);
     await phase2_applyReadyCVs(page);
     logger.printSummary();
-    console.log('\n  [CV-Library Bot] Cycle complete. Waiting 1 min before next search...');
+    console.log('\n  [CV-Library Agent] Cycle complete. Waiting 1 min before next search...');
     await DELAY(60 * 1000);
   }
 }

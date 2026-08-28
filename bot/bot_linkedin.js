@@ -4,9 +4,9 @@
  * Phase 1 — Search LinkedIn for remote/hybrid Easy Apply jobs matching the
  *            configured search terms, extract JDs, add each job to queue.db
  *            (source: 'linkedin') with status "pending".
- *            The Scorer bot then scores and tailors the CV.
+ *            The Scorer agent then scores and tailors the CV.
  *
- * Phase 2 — Poll the queue every 10 s. When the Scorer bot sets a LinkedIn
+ * Phase 2 — Poll the queue every 10 s. When the Scorer agent sets a LinkedIn
  *            job to "cv_ready", pick up the CV path and submit via Easy Apply.
  */
 
@@ -58,14 +58,14 @@ async function drainReadyCVs(liPage) {
 
   if (!readyJobs.length) return;
   if (queue.reconnectNeeded('linkedin')) {
-    console.log('  [LinkedIn Bot] [Drain] Reconnect needed — skipping this apply pass until the LinkedIn account is reconnected.');
+    console.log('  [LinkedIn Agent] [Drain] Reconnect needed — skipping this apply pass until the LinkedIn account is reconnected.');
     return;
   }
-  console.log(`\n  [LinkedIn Bot] [Drain] ${readyJobs.length} cv_ready job(s) — applying before next search...`);
+  console.log(`\n  [LinkedIn Agent] [Drain] ${readyJobs.length} cv_ready job(s) — applying before next search...`);
 
   for (const job of readyJobs) {
     if (queue.countAppliedToday() >= cfg.MAX_APPLICATIONS_PER_DAY) {
-      console.log(`  [LinkedIn Bot] Daily limit reached — stopping drain`);
+      console.log(`  [LinkedIn Agent] Daily limit reached — stopping drain`);
       return;
     }
     if (!isRelevantTitle(job.title)) {
@@ -73,7 +73,7 @@ async function drainReadyCVs(liPage) {
       continue;
     }
     queue.update(job.jobId, { status: 'applying' });
-    console.log(`  [LinkedIn Bot] [Drain] Applying: ${job.title} @ ${job.company}`);
+    console.log(`  [LinkedIn Agent] [Drain] Applying: ${job.title} @ ${job.company}`);
     try {
       const applied = await linkedin.applyToJob(liPage, job, job.cvPath);
       if (applied === null) {
@@ -83,10 +83,10 @@ async function drainReadyCVs(liPage) {
       } else if (applied === 'cv_not_attached') {
         queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
-        console.log(`  [LinkedIn Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
+        console.log(`  [LinkedIn Agent] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
         const _cb = queue.recordUploadFailure('linkedin');
         if (_cb.tripped) {
-          console.log('  [LinkedIn Bot] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your LinkedIn account (Connect account on the dashboard), then press Start applying. Pausing LinkedIn applications + tailoring until then.');
+          console.log('  [LinkedIn Agent] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your LinkedIn account (Connect account on the dashboard), then press Start applying. Pausing LinkedIn applications + tailoring until then.');
           return;
         }
       } else {
@@ -94,12 +94,12 @@ async function drainReadyCVs(liPage) {
         queue.update(job.jobId, { status: finalStatus });
         if (applied) { queue.markApplied(job.jobId); queue.recordUploadSuccess('linkedin'); }
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, applied ? 'APPLIED' : 'APPLY_FAILED', applied ? 'LinkedIn Easy Apply' : 'LinkedIn form could not be completed');
-        console.log(`  [LinkedIn Bot] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
+        console.log(`  [LinkedIn Agent] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
       }
     } catch (err) {
       queue.update(job.jobId, { status: 'apply_failed', error: err.message });
       logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
-      console.error(`  [LinkedIn Bot] [Drain] Error: ${err.message}`);
+      console.error(`  [LinkedIn Agent] [Drain] Error: ${err.message}`);
     }
     await DELAY(8000 + Math.random() * 7000);
   }
@@ -107,44 +107,44 @@ async function drainReadyCVs(liPage) {
 
 async function phase1_searchAndQueue(liPage) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [LinkedIn Bot] Phase 1 — Searching for jobs');
+  console.log('  [LinkedIn Agent] Phase 1 — Searching for jobs');
   console.log('══════════════════════════════════════════════════════');
 
   for (const searchTerm of cfg.JOB_SEARCHES) {
     // Drain any cv_ready jobs before starting the next search term
     await drainReadyCVs(liPage);
 
-    console.log(`\n  [LinkedIn Bot] Searching: "${searchTerm}"`);
+    console.log(`\n  [LinkedIn Agent] Searching: "${searchTerm}"`);
     let jobs;
     try {
       jobs = await linkedin.searchJobs(liPage, searchTerm, cfg.MAX_JOBS_PER_SEARCH);
     } catch (err) {
-      console.error(`  [LinkedIn Bot] Search failed: ${err.message}`);
+      console.error(`  [LinkedIn Agent] Search failed: ${err.message}`);
       continue;
     }
 
     for (const job of jobs) {
       if (queue.has(job.jobId)) {
-        console.log(`  [LinkedIn Bot] Already queued: ${job.title}`);
+        console.log(`  [LinkedIn Agent] Already queued: ${job.title}`);
         continue;
       }
       if (queue.wasApplied(job.jobId)) {
-        console.log(`  [LinkedIn Bot] Already applied previously — skipping: ${job.title}`);
+        console.log(`  [LinkedIn Agent] Already applied previously — skipping: ${job.title}`);
         continue;
       }
       if (!isRelevantTitle(job.title)) {
-        console.log(`  [LinkedIn Bot] Title filter — skipping: ${job.title}`);
+        console.log(`  [LinkedIn Agent] Title filter — skipping: ${job.title}`);
         continue;
       }
 
       if (isBlockedCompany(job.company)) {
-        console.log(`  [LinkedIn Bot] Company blocked — skipping: ${job.title} @ ${job.company}`);
+        console.log(`  [LinkedIn Agent] Company blocked — skipping: ${job.title} @ ${job.company}`);
         continue;
       }
 
 
       if (queue.hasCanonical(job.title, job.company)) {
-        console.log(`  [LinkedIn Bot] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`);
+        console.log(`  [LinkedIn Agent] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`);
         continue;
       }
 
@@ -152,19 +152,19 @@ async function phase1_searchAndQueue(liPage) {
         const jobDetails = await linkedin.getJobDescription(liPage, job);
 
         if (!jobDetails.description || jobDetails.description.trim().split(/\s+/).length < 80) {
-          console.log(`  [LinkedIn Bot] Short/missing JD — skipping: ${job.title}`);
+          console.log(`  [LinkedIn Agent] Short/missing JD — skipping: ${job.title}`);
           queue.add({ ...job, source: 'linkedin', status: 'skipped', reason: 'JD too short or missing' });
           continue;
         }
 
         if (cfg.isTrainingCourseJD(jobDetails.description, job.title)) {
-          console.log(`  [LinkedIn Bot] Training course — skipping: ${job.title}`);
+          console.log(`  [LinkedIn Agent] Training course — skipping: ${job.title}`);
           queue.add({ ...job, source: 'linkedin', status: 'skipped', reason: 'Training course' });
           continue;
         }
 
         if (!jobDetails.hasEasyApply) {
-          console.log(`  [LinkedIn Bot] No Easy Apply button found — skipping: ${job.title}`);
+          console.log(`  [LinkedIn Agent] No Easy Apply button found — skipping: ${job.title}`);
           queue.add({ ...job, source: 'linkedin', status: 'skipped', reason: 'No Easy Apply button' });
           continue;
         }
@@ -173,22 +173,22 @@ async function phase1_searchAndQueue(liPage) {
         const workType = detectWorkType(jobDetails.description);
 
         if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(jobDetails.description))) {
-          console.log(`  [LinkedIn Bot] No sponsorship offered — skipping: ${job.title}`);
+          console.log(`  [LinkedIn Agent] No sponsorship offered — skipping: ${job.title}`);
           queue.add({ ...job, source: 'linkedin', status: 'skipped', reason: 'No sponsorship offered' });
           continue;
         }
 
         if (!salary.isAcceptable(jobDetails.description, cfg.APPLICANT.salaryExpectation)) {
           const min = salary.extractMinSalary(jobDetails.description);
-          console.log(`  [LinkedIn Bot] Below salary expectation (£${min?.toLocaleString() || '?'} < ${cfg.APPLICANT.salaryExpectation}) — skipping: ${job.title}`);
+          console.log(`  [LinkedIn Agent] Below salary expectation (£${min?.toLocaleString() || '?'} < ${cfg.APPLICANT.salaryExpectation}) — skipping: ${job.title}`);
           queue.add({ ...job, source: 'linkedin', status: 'skipped', reason: 'Below salary expectation' });
           continue;
         }
 
         queue.add({ ...jobDetails, source: 'linkedin', workType });
-        console.log(`  [LinkedIn Bot] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
+        console.log(`  [LinkedIn Agent] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
       } catch (err) {
-        console.error(`  [LinkedIn Bot] Error on "${job.title}": ${err.message}`);
+        console.error(`  [LinkedIn Agent] Error on "${job.title}": ${err.message}`);
       }
 
       await DELAY(2000);
@@ -196,16 +196,16 @@ async function phase1_searchAndQueue(liPage) {
   }
 
   const pending = queue.getByStatus('pending').filter(j => j.source === 'linkedin').length;
-  console.log(`\n  [LinkedIn Bot] Phase 1 complete. ${pending} LinkedIn job(s) queued for Scorer.`);
+  console.log(`\n  [LinkedIn Agent] Phase 1 complete. ${pending} LinkedIn job(s) queued for Scorer.`);
 }
 
 async function phase2_applyReadyCVs(liPage) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [LinkedIn Bot] Phase 2 — Waiting for Scorer bot...');
+  console.log('  [LinkedIn Agent] Phase 2 — Waiting for Scorer agent...');
   console.log('══════════════════════════════════════════════════════');
 
   const retried = queue.requeueFailed('linkedin');
-  if (retried > 0) console.log(`  [LinkedIn Bot] Requeueing ${retried} previously-failed LinkedIn job(s) for retry.`);
+  if (retried > 0) console.log(`  [LinkedIn Agent] Requeueing ${retried} previously-failed LinkedIn job(s) for retry.`);
 
   const priority = workTypePriority();
   let idleCount = 0;
@@ -230,19 +230,19 @@ async function phase2_applyReadyCVs(liPage) {
     for (const job of readyJobs) {
       const appliedToday = queue.countAppliedToday();
       if (appliedToday >= cfg.MAX_APPLICATIONS_PER_DAY) {
-        console.log(`  [LinkedIn Bot] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing applications until tomorrow`);
+        console.log(`  [LinkedIn Agent] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing applications until tomorrow`);
         return;
       }
 
       if (!isRelevantTitle(job.title)) {
         queue.update(job.jobId, { status: 'skipped', reason: 'Title filter (post-queue)' });
         logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', 'Title filter');
-        console.log(`  [LinkedIn Bot] Post-queue title filter — skipping: ${job.title}`);
+        console.log(`  [LinkedIn Agent] Post-queue title filter — skipping: ${job.title}`);
         continue;
       }
 
       queue.update(job.jobId, { status: 'applying' });
-      console.log(`\n  [LinkedIn Bot] Applying: ${job.title} @ ${job.company} [${job.workType || 'hybrid'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
+      console.log(`\n  [LinkedIn Agent] Applying: ${job.title} @ ${job.company} [${job.workType || 'hybrid'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
 
       try {
         const applied = await linkedin.applyToJob(liPage, job, job.cvPath);
@@ -251,17 +251,17 @@ async function phase2_applyReadyCVs(liPage) {
           queue.update(job.jobId, { status: 'skipped' });
           queue.markApplied(job.jobId);
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Already applied');
-          console.log(`  [LinkedIn Bot] Already applied — skipping: ${job.title}`);
+          console.log(`  [LinkedIn Agent] Already applied — skipping: ${job.title}`);
           continue;
         }
 
         if (applied === 'cv_not_attached') {
           queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
-          console.log(`  [LinkedIn Bot] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
+          console.log(`  [LinkedIn Agent] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
           const _cb = queue.recordUploadFailure('linkedin');
           if (_cb.tripped) {
-            console.log('  [LinkedIn Bot] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your LinkedIn account (Connect account on the dashboard), then press Start applying. Pausing LinkedIn applications + tailoring until then.');
+            console.log('  [LinkedIn Agent] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your LinkedIn account (Connect account on the dashboard), then press Start applying. Pausing LinkedIn applications + tailoring until then.');
             return;
           }
           continue;
@@ -275,15 +275,15 @@ async function phase2_applyReadyCVs(liPage) {
           applied ? 'APPLIED' : 'APPLY_FAILED',
           applied ? 'LinkedIn Easy Apply' : 'LinkedIn form could not be completed'
         );
-        console.log(`  [LinkedIn Bot] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
+        console.log(`  [LinkedIn Agent] ${applied ? '✓ Applied' : '✗ Apply failed'}: ${job.title}`);
       } catch (err) {
         queue.update(job.jobId, { status: 'apply_failed', error: err.message });
         logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
-        console.error(`  [LinkedIn Bot] Error applying to "${job.title}": ${err.message}`);
+        console.error(`  [LinkedIn Agent] Error applying to "${job.title}": ${err.message}`);
       }
 
       const pause = 8000 + Math.random() * 7000;
-      console.log(`  [LinkedIn Bot] Pausing ${Math.round(pause / 1000)}s before next application...`);
+      console.log(`  [LinkedIn Agent] Pausing ${Math.round(pause / 1000)}s before next application...`);
       await DELAY(pause);
     }
 
@@ -292,10 +292,10 @@ async function phase2_applyReadyCVs(liPage) {
     } else if (pendingJobs > 0) {
       idleCount = 0;
       try { queue.printStatus(); } catch (_) {}
-      console.log(`  [LinkedIn Bot] Waiting for Scorer bot... (${pendingJobs} LinkedIn job(s) in progress)`);
+      console.log(`  [LinkedIn Agent] Waiting for Scorer agent... (${pendingJobs} LinkedIn job(s) in progress)`);
     } else {
       idleCount++;
-      console.log(`  [LinkedIn Bot] Idle ${idleCount}/${MAX_IDLE} — no pending or ready LinkedIn jobs`);
+      console.log(`  [LinkedIn Agent] Idle ${idleCount}/${MAX_IDLE} — no pending or ready LinkedIn jobs`);
     }
 
     if (idleCount >= MAX_IDLE) break;
@@ -311,13 +311,13 @@ async function main() {
   queue.markSessionChecking('linkedin');
 
   console.log('═══════════════════════════════════════════════════════');
-  console.log('  LinkedIn Bot — Starting (continuous mode)');
+  console.log('  LinkedIn Agent — Starting (continuous mode)');
   console.log('═══════════════════════════════════════════════════════');
 
   // Recover jobs left in 'applying' from a previous interrupted run
   const stuckApplying = queue.getByStatus('applying').filter(j => j.source === 'linkedin');
   if (stuckApplying.length > 0) {
-    console.log(`  [LinkedIn Bot] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
+    console.log(`  [LinkedIn Agent] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
     for (const j of stuckApplying) queue.update(j.jobId, { status: 'cv_ready' });
   }
 
@@ -328,14 +328,14 @@ async function main() {
     : await launchPersistentContext(profileDir);
   await stealth.applyToContext(context);
   // User closing the Chromium window → clean stop, not an error
-  const closeGuard = watchForManualClose(context, 'LinkedIn Bot');
+  const closeGuard = watchForManualClose(context, 'LinkedIn Agent');
 
   const liPage = await context.newPage();
   try {
     await linkedin.ensureLoggedIn(liPage);
   } catch (err) {
     if (BROWSER_CLOSED_RE.test(err.message || '')) {
-      console.log('  [LinkedIn Bot] Browser window closed — agent stopped.');
+      console.log('  [LinkedIn Agent] Browser window closed — agent stopped.');
       process.exit(0);
     }
     console.error('ERROR: ' + err.message);
@@ -354,7 +354,7 @@ async function main() {
     const n = queue.countAppliedToday();
     if (n >= cfg.MAX_APPLICATIONS_PER_DAY) {
       // "Daily limit reached" in the log also triggers the desktop notification (main.js).
-      console.log(`  [LinkedIn Bot] Daily limit reached (${n}/${cfg.MAX_APPLICATIONS_PER_DAY}) — stopping agent until tomorrow`);
+      console.log(`  [LinkedIn Agent] Daily limit reached (${n}/${cfg.MAX_APPLICATIONS_PER_DAY}) — stopping agent until tomorrow`);
       closeGuard.intentional = true;
       await context.close().catch(() => {});
       process.exit(0);
@@ -370,12 +370,12 @@ async function main() {
       await phase2_applyReadyCVs(liPage);
       await stopIfDailyLimit();
       logger.printSummary();
-      console.log('\n  [LinkedIn Bot] Cycle complete. Waiting 1 min before next search...');
+      console.log('\n  [LinkedIn Agent] Cycle complete. Waiting 1 min before next search...');
       await DELAY(60 * 1000);
     }
   } catch (err) {
     if (BROWSER_CLOSED_RE.test(err.message || '')) {
-      console.log('  [LinkedIn Bot] Browser window closed — agent stopped.');
+      console.log('  [LinkedIn Agent] Browser window closed — agent stopped.');
       closeGuard.intentional = true;
       await context.close().catch(() => {});
       process.exit(0);
@@ -386,7 +386,7 @@ async function main() {
 
 main().catch(err => {
   if (BROWSER_CLOSED_RE.test(err?.message || '')) {
-    console.log('  [LinkedIn Bot] Browser window closed — agent stopped.');
+    console.log('  [LinkedIn Agent] Browser window closed — agent stopped.');
     process.exit(0);
   }
   console.error('Fatal error:', err);

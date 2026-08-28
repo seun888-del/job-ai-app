@@ -60,24 +60,24 @@ async function ensureLoggedIn(page) {
            t.includes('sign out') || t.includes('my jobs');
   }).catch(() => false);
   if (!isLoggedIn) throw new Error('CWJobs: not logged in. Go to Job Site Login → Connect CWJobs Account first.');
-  console.log('  [CWJobs Bot] Session active');
+  console.log('  [CWJobs Agent] Session active');
 }
 
 // ── Phase 1: Search & queue ───────────────────────────────────────────────
 async function phase1_searchAndQueue(context, page) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [CWJobs Bot] Phase 1 — Searching for jobs');
+  console.log('  [CWJobs Agent] Phase 1 — Searching for jobs');
   console.log('══════════════════════════════════════════════════════');
 
   // Warm up on the homepage first — cold-jumping to a search URL triggers Akamai
-  console.log('  [CWJobs Bot] Warming up on homepage...');
+  console.log('  [CWJobs Agent] Warming up on homepage...');
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitForCloudflareSolve(page);
   await humanWarmup(page);
   await DELAY(2000 + Math.random() * 1500);
 
   for (const searchTerm of cfg.JOB_SEARCHES) {
-    console.log(`\n  [CWJobs Bot] Searching: "${searchTerm}"`);
+    console.log(`\n  [CWJobs Agent] Searching: "${searchTerm}"`);
 
     // Use the natural search URL format (/jobs?q=) that the search form produces,
     // not the legacy /jobs/{term} path — Akamai blocks the legacy path as scraping.
@@ -89,7 +89,7 @@ async function phase1_searchAndQueue(context, page) {
       await humanWarmup(page);
       await DELAY(2500 + Math.random() * 1500);
     } catch (err) {
-      console.error(`  [CWJobs Bot] Failed to load search: ${err.message}`);
+      console.error(`  [CWJobs Agent] Failed to load search: ${err.message}`);
       continue;
     }
 
@@ -99,18 +99,18 @@ async function phase1_searchAndQueue(context, page) {
     ).catch(() => []);
 
     if (!jobLinks.length) {
-      console.log(`  [CWJobs Bot] No results for "${searchTerm}"`);
+      console.log(`  [CWJobs Agent] No results for "${searchTerm}"`);
       continue;
     }
 
-    console.log(`  [CWJobs Bot] Found ${jobLinks.length} listings`);
+    console.log(`  [CWJobs Agent] Found ${jobLinks.length} listings`);
 
     for (const link of jobLinks.slice(0, cfg.MAX_JOBS_PER_SEARCH)) {
       const jobId = `cw_${link.url.replace(/[^a-z0-9]/gi, '_').slice(-40)}`;
 
-      if (queue.has(jobId)) { console.log(`  [CWJobs Bot] Already queued: ${link.title}`); continue; }
-      if (queue.wasApplied(jobId)) { console.log(`  [CWJobs Bot] Already applied — skipping: ${link.title}`); continue; }
-      if (!isRelevantTitle(link.title)) { console.log(`  [CWJobs Bot] Title filter — skipping: ${link.title}`); continue; }
+      if (queue.has(jobId)) { console.log(`  [CWJobs Agent] Already queued: ${link.title}`); continue; }
+      if (queue.wasApplied(jobId)) { console.log(`  [CWJobs Agent] Already applied — skipping: ${link.title}`); continue; }
+      if (!isRelevantTitle(link.title)) { console.log(`  [CWJobs Agent] Title filter — skipping: ${link.title}`); continue; }
 
       try {
         await page.goto(link.url, { waitUntil: 'domcontentloaded', timeout: 25000 });
@@ -122,13 +122,13 @@ async function phase1_searchAndQueue(context, page) {
         ).catch(() => '');
 
         if (isBlockedCompany(company)) {
-          console.log(`  [CWJobs Bot] Company blocked — skipping: ${link.title} @ ${company}`);
+          console.log(`  [CWJobs Agent] Company blocked — skipping: ${link.title} @ ${company}`);
           continue;
         }
 
 
         if (queue.hasCanonical(link.title, company)) {
-          console.log(`  [CWJobs Bot] Duplicate (cross-site) — skipping: ${link.title} @ ${company}`);
+          console.log(`  [CWJobs Agent] Duplicate (cross-site) — skipping: ${link.title} @ ${company}`);
           continue;
         }
 
@@ -137,7 +137,7 @@ async function phase1_searchAndQueue(context, page) {
           el => el.href || ''
         ).catch(() => '');
         if (applyHref && !applyHref.includes('cwjobs.co.uk') && /^https?:\/\//.test(applyHref)) {
-          console.log(`  [CWJobs Bot] External site — skipping: ${link.title}`);
+          console.log(`  [CWJobs Agent] External site — skipping: ${link.title}`);
           queue.add({ jobId, title: link.title, company, url: link.url, source: 'cwjobs', status: 'skipped', reason: 'External site' });
           continue;
         }
@@ -148,40 +148,40 @@ async function phase1_searchAndQueue(context, page) {
         ).catch(() => '');
 
         if (!description || description.trim().split(/\s+/).length < 80) {
-          console.log(`  [CWJobs Bot] Short/missing JD — skipping: ${link.title}`);
+          console.log(`  [CWJobs Agent] Short/missing JD — skipping: ${link.title}`);
           queue.add({ jobId, title: link.title, company, url: link.url, source: 'cwjobs', status: 'skipped', reason: 'JD too short or missing' });
           continue;
         }
 
         if (cfg.isTrainingCourseJD(description, link.title)) {
-          console.log(`  [CWJobs Bot] Training course — skipping: ${link.title}`);
+          console.log(`  [CWJobs Agent] Training course — skipping: ${link.title}`);
           queue.add({ jobId, title: link.title, company, url: link.url, source: 'cwjobs', status: 'skipped', reason: 'Training course' });
           continue;
         }
 
         if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(description))) {
-          console.log(`  [CWJobs Bot] No sponsorship — skipping: ${link.title}`);
+          console.log(`  [CWJobs Agent] No sponsorship — skipping: ${link.title}`);
           queue.add({ jobId, title: link.title, company, url: link.url, source: 'cwjobs', status: 'skipped', reason: 'No sponsorship offered' });
           continue;
         }
 
         const workType = detectWorkType(description);
         if (!cfg.WORK_TYPE_PRIORITY.includes(workType)) {
-          console.log(`  [CWJobs Bot] Work type "${workType}" not wanted — skipping: ${link.title}`);
+          console.log(`  [CWJobs Agent] Work type "${workType}" not wanted — skipping: ${link.title}`);
           queue.add({ jobId, title: link.title, company, url: link.url, source: 'cwjobs', status: 'skipped', reason: `Work type (${workType}) not wanted` });
           continue;
         }
 
         if (!salary.isAcceptable(description, cfg.APPLICANT.salaryExpectation)) {
-          console.log(`  [CWJobs Bot] Below salary expectation — skipping: ${link.title}`);
+          console.log(`  [CWJobs Agent] Below salary expectation — skipping: ${link.title}`);
           queue.add({ jobId, title: link.title, company, url: link.url, source: 'cwjobs', status: 'skipped', reason: 'Below salary expectation' });
           continue;
         }
 
         queue.add({ jobId, title: link.title, company, url: link.url, description, source: 'cwjobs', workType });
-        console.log(`  [CWJobs Bot] → Queued for Scorer: ${link.title} @ ${company} [${workType}]`);
+        console.log(`  [CWJobs Agent] → Queued for Scorer: ${link.title} @ ${company} [${workType}]`);
       } catch (err) {
-        console.error(`  [CWJobs Bot] Error on "${link.title}": ${err.message}`);
+        console.error(`  [CWJobs Agent] Error on "${link.title}": ${err.message}`);
       }
 
       await DELAY(2000);
@@ -189,18 +189,18 @@ async function phase1_searchAndQueue(context, page) {
   }
 
   const pending = queue.getByStatus('pending').filter(j => j.source === 'cwjobs').length;
-  console.log(`\n  [CWJobs Bot] Phase 1 complete. ${pending} CWJobs job(s) queued for Scorer.`);
+  console.log(`\n  [CWJobs Agent] Phase 1 complete. ${pending} CWJobs job(s) queued for Scorer.`);
   return page;
 }
 
 // ── Phase 2: Apply ────────────────────────────────────────────────────────
 async function phase2_applyReadyCVs(page) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [CWJobs Bot] Phase 2 — Waiting for Scorer bot...');
+  console.log('  [CWJobs Agent] Phase 2 — Waiting for Scorer agent...');
   console.log('══════════════════════════════════════════════════════');
 
   const retried = queue.requeueFailed('cwjobs');
-  if (retried > 0) console.log(`  [CWJobs Bot] Requeueing ${retried} previously-failed job(s) for retry.`);
+  if (retried > 0) console.log(`  [CWJobs Agent] Requeueing ${retried} previously-failed job(s) for retry.`);
 
   const priority = workTypePriority();
   let idleCount = 0;
@@ -217,19 +217,19 @@ async function phase2_applyReadyCVs(page) {
     for (const job of readyJobs) {
       const appliedToday = queue.countAppliedToday();
       if (appliedToday >= cfg.MAX_APPLICATIONS_PER_DAY) {
-        console.log(`  [CWJobs Bot] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing until tomorrow`);
+        console.log(`  [CWJobs Agent] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing until tomorrow`);
         return;
       }
 
       if (!isRelevantTitle(job.title)) {
         queue.update(job.jobId, { status: 'skipped', reason: 'Title filter (post-queue)' });
         logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', 'Title filter');
-        console.log(`  [CWJobs Bot] Post-queue title filter — skipping: ${job.title}`);
+        console.log(`  [CWJobs Agent] Post-queue title filter — skipping: ${job.title}`);
         continue;
       }
 
       queue.update(job.jobId, { status: 'applying' });
-      console.log(`\n  [CWJobs Bot] Applying: ${job.title} @ ${job.company} [${job.workType || 'onsite'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
+      console.log(`\n  [CWJobs Agent] Applying: ${job.title} @ ${job.company} [${job.workType || 'onsite'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
 
       try {
         await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -246,7 +246,7 @@ async function phase2_applyReadyCVs(page) {
           queue.update(job.jobId, { status: 'skipped' });
           queue.markApplied(job.jobId);
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', 'Already applied');
-          console.log(`  [CWJobs Bot] Already applied — skipping: ${job.title}`);
+          console.log(`  [CWJobs Agent] Already applied — skipping: ${job.title}`);
           continue;
         }
 
@@ -268,7 +268,7 @@ async function phase2_applyReadyCVs(page) {
         if (!clicked) {
           queue.update(job.jobId, { status: 'skipped', reason: 'Apply button not found' });
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', 'No apply button');
-          console.log(`  [CWJobs Bot] Apply button gone — skipping: ${job.title}`);
+          console.log(`  [CWJobs Agent] Apply button gone — skipping: ${job.title}`);
           continue;
         }
 
@@ -279,7 +279,7 @@ async function phase2_applyReadyCVs(page) {
         if (!postClickUrl.includes('cwjobs.co.uk') && !postClickUrl.includes('stepstone')) {
           queue.update(job.jobId, { status: 'skipped', reason: 'External application site' });
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', 'External site');
-          console.log(`  [CWJobs Bot] External redirect — skipping: ${job.title}`);
+          console.log(`  [CWJobs Agent] External redirect — skipping: ${job.title}`);
           continue;
         }
 
@@ -304,7 +304,7 @@ async function phase2_applyReadyCVs(page) {
             if (fileInput) {
               await fileInput.setInputFiles(job.cvPath);
               await DELAY(2000);
-              console.log(`  [CWJobs Bot] CV uploaded: ${path.basename(job.cvPath)}`);
+              console.log(`  [CWJobs Agent] CV uploaded: ${path.basename(job.cvPath)}`);
             }
           } catch (_) {}
         }
@@ -349,27 +349,27 @@ async function phase2_applyReadyCVs(page) {
           queue.update(job.jobId, { status: 'applied' });
           queue.markApplied(job.jobId);
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'APPLIED', 'CWJobs');
-          console.log(`  [CWJobs Bot] ✓ Applied: ${job.title} @ ${job.company}`);
+          console.log(`  [CWJobs Agent] ✓ Applied: ${job.title} @ ${job.company}`);
         } else {
           queue.update(job.jobId, { status: 'apply_failed', reason: 'No confirmation detected' });
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'FAILED', 'No confirmation');
-          console.log(`  [CWJobs Bot] No confirmation — marking failed: ${job.title}`);
+          console.log(`  [CWJobs Agent] No confirmation — marking failed: ${job.title}`);
         }
       } catch (err) {
         const isPageIssue = /apply button not found|no apply button|external/i.test(err.message);
         if (isPageIssue) {
           queue.update(job.jobId, { status: 'skipped', reason: err.message });
           logger.log(job.title, job.company, job.url, job.cvName || 'N/A', job.cvScore || 0, 'SKIPPED', err.message.substring(0, 100));
-          console.log(`  [CWJobs Bot] Page issue — skipping: ${job.title} (${err.message})`);
+          console.log(`  [CWJobs Agent] Page issue — skipping: ${job.title} (${err.message})`);
         } else {
           queue.update(job.jobId, { status: 'apply_failed', error: err.message });
           logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
-          console.error(`  [CWJobs Bot] Error applying to "${job.title}": ${err.message}`);
+          console.error(`  [CWJobs Agent] Error applying to "${job.title}": ${err.message}`);
         }
       }
 
       const pause = 8000 + Math.random() * 7000;
-      console.log(`  [CWJobs Bot] Pausing ${Math.round(pause / 1000)}s before next application...`);
+      console.log(`  [CWJobs Agent] Pausing ${Math.round(pause / 1000)}s before next application...`);
       await DELAY(pause);
     }
 
@@ -378,10 +378,10 @@ async function phase2_applyReadyCVs(page) {
     } else if (pendingJobs > 0) {
       idleCount = 0;
       try { queue.printStatus(); } catch (_) {}
-      console.log(`  [CWJobs Bot] Waiting for Scorer bot... (${pendingJobs} CWJobs job(s) in progress)`);
+      console.log(`  [CWJobs Agent] Waiting for Scorer agent... (${pendingJobs} CWJobs job(s) in progress)`);
     } else {
       idleCount++;
-      console.log(`  [CWJobs Bot] Idle ${idleCount}/${MAX_IDLE} — no pending or ready CWJobs jobs`);
+      console.log(`  [CWJobs Agent] Idle ${idleCount}/${MAX_IDLE} — no pending or ready CWJobs jobs`);
     }
 
     if (idleCount >= MAX_IDLE) break;
@@ -395,12 +395,12 @@ async function main() {
   await queue.init(process.env.JOBBOT_USERDATA);
 
   console.log('═══════════════════════════════════════════════════════');
-  console.log('  CWJobs Bot — Starting (continuous mode)');
+  console.log('  CWJobs Agent — Starting (continuous mode)');
   console.log('═══════════════════════════════════════════════════════');
 
   const stuckApplying = queue.getByStatus('applying').filter(j => j.source === 'cwjobs');
   if (stuckApplying.length > 0) {
-    console.log(`  [CWJobs Bot] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
+    console.log(`  [CWJobs Agent] Recovering ${stuckApplying.length} interrupted job(s) → cv_ready`);
     for (const j of stuckApplying) queue.update(j.jobId, { status: 'cv_ready' });
   }
 
@@ -424,7 +424,7 @@ async function main() {
     page = await phase1_searchAndQueue(context, page);
     await phase2_applyReadyCVs(page);
     logger.printSummary();
-    console.log('\n  [CWJobs Bot] Cycle complete. Waiting 1 min before next search...');
+    console.log('\n  [CWJobs Agent] Cycle complete. Waiting 1 min before next search...');
     await DELAY(60 * 1000);
   }
 }
