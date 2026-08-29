@@ -21,6 +21,46 @@ const MONTHS  = 'January|February|March|April|May|June|July|August|September|Oct
 const DATE_RE = new RegExp(`(?:${MONTHS}|\\d{1,2}/\\d{4})\\s*\\d{0,4}`, 'i');
 const DATE_ANY = new RegExp(`(${MONTHS})\\s+\\d{4}|\\b(19|20)\\d{2}\\b|\\bPresent\\b|\\bCurrent\\b`, 'i');
 
+// PDF text extraction (pdf-parse) frequently drops the space between a heading's
+// words ("PROFESSIONALPROFILE") and between an acronym and the next word
+// ("ITSupport", "NFUMutual"). Both broke parsing: jammed headings matched no
+// section regex, so every section came back empty and the whole structured
+// render fell back to the messy text path. Repair both up front.
+
+// Jammed all-caps headings → spaced form (keyed by letters only, case-insensitive)
+const JAMMED_HEADINGS = {
+  PROFESSIONALPROFILE: 'PROFESSIONAL PROFILE', PERSONALPROFILE: 'PERSONAL PROFILE',
+  CAREERPROFILE: 'CAREER PROFILE', EXECUTIVEPROFILE: 'EXECUTIVE PROFILE',
+  PROFESSIONALSUMMARY: 'PROFESSIONAL SUMMARY', CAREERSUMMARY: 'CAREER SUMMARY',
+  EXECUTIVESUMMARY: 'EXECUTIVE SUMMARY', PERSONALSUMMARY: 'PERSONAL SUMMARY',
+  PERSONALSTATEMENT: 'PERSONAL STATEMENT', ABOUTME: 'ABOUT ME',
+  WORKEXPERIENCE: 'WORK EXPERIENCE', PROFESSIONALEXPERIENCE: 'PROFESSIONAL EXPERIENCE',
+  EMPLOYMENTHISTORY: 'EMPLOYMENT HISTORY', EMPLOYMENTEXPERIENCE: 'EMPLOYMENT EXPERIENCE',
+  CAREERHISTORY: 'CAREER HISTORY', KEYPROJECTS: 'KEY PROJECTS',
+  TECHNICALSKILLS: 'TECHNICAL SKILLS', KEYSKILLS: 'KEY SKILLS', CORESKILLS: 'CORE SKILLS',
+  CORECOMPETENCIES: 'CORE COMPETENCIES', PROFESSIONALSKILLS: 'PROFESSIONAL SKILLS',
+  ITSKILLS: 'IT SKILLS', EDUCATIONANDCERTIFICATIONS: 'EDUCATION AND CERTIFICATIONS',
+  EDUCATIONCERTIFICATIONS: 'EDUCATION & CERTIFICATIONS', QUALIFICATIONS: 'QUALIFICATIONS',
+};
+// If a line is a jammed heading, return its spaced form; otherwise return it unchanged.
+function normalizeHeading(line) {
+  const key = line.trim().replace(/\s+/g, '').toUpperCase();
+  return JAMMED_HEADINGS[key] || line;
+}
+// Re-insert a dropped space when an acronym (2+ caps) runs straight into a
+// following Titlecase word: "ITSupport" → "IT Support", "NFUMutual" → "NFU
+// Mutual", "ITTechnician" → "IT Technician". Safe for camelCase brand names
+// (ServiceNow, McAfee, VMware, PowerShell) — they have no 2-capital run before a
+// lowercase word, so they are left untouched. Also fixes the mixed-case "SaaS".
+function repairSpacing(line) {
+  return line
+    // Require 2+ lowercase after the capital so a plural acronym ("SOPs", "PCs",
+    // "IDs", "APIs") is NOT split into "SO Ps" — only a real following word
+    // ("Support", "Mutual", "Technician") triggers the space.
+    .replace(/([A-Z]{2,})([A-Z][a-z]{2,})/g, '$1 $2')
+    .replace(/\bSaaS(?=[A-Z][a-z])/g, 'SaaS ');
+}
+
 // Section classification by heading text
 const HEAD = {
   profile:    /\b(PROFESSIONAL PROFILE|PERSONAL PROFILE|CAREER PROFILE|EXECUTIVE PROFILE|PROFESSIONAL SUMMARY|CAREER SUMMARY|EXECUTIVE SUMMARY|PERSONAL SUMMARY|PERSONAL STATEMENT|OBJECTIVE|ABOUT ME|SUMMARY|PROFILE)\b/i,
@@ -77,6 +117,7 @@ function splitLines(cvText) {
     .replace(/\s*References available on request\.?\s*/gi, '')  // never keep this line
     .split('\n')
     .map(l => l.replace(/\s+$/,'').replace(/^\s+/,''))           // trim both ends but keep words
+    .map(repairSpacing)                                         // fix extraction-glued words ("ITSupport" → "IT Support")
     .map(l => l.replace(/\s{2,}/g, m => m))                      // keep internal double-spaces (date sep)
     .filter((l, i, arr) => !(l === '' && arr[i - 1] === ''));    // collapse blank runs
 }
@@ -106,7 +147,7 @@ function parseCV(cvText, opts = {}) {
     const t = lines[i].trim();
     if (i < headerConsumed && !classifyHeading(t)) continue; // skip header lines
     if (isHeadingLine(t)) {
-      const key = classifyHeading(t);
+      const key = classifyHeading(normalizeHeading(t));
       current = key;
       if (key && !sections[key]) sections[key] = [];
       continue;
@@ -170,6 +211,12 @@ function parseCV(cvText, opts = {}) {
   for (const raw of (sections.education || [])) {
     const line = raw.trim();
     if (!line) continue;
+    // The base CV can carry an "Additional Skills & Competencies:" keyword dump
+    // trailing the real qualifications. It reads as ATS keyword stuffing (and had
+    // duplicates like "Communications skills, Communication skills"), so stop
+    // here — it must never render as an education entry. Genuine JD keywords are
+    // woven into KEY SKILLS by the tailor instead.
+    if (/^additional\s+(skills|keywords|competenc)/i.test(line)) break;
     const isDetail = line.includes('|') || DATE_ANY.test(line) || /^[a-z]/.test(line);
     if (isDetail && education.length && !education[education.length - 1].detail) {
       education[education.length - 1].detail = line;

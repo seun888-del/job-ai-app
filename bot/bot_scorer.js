@@ -26,6 +26,7 @@ const { lightTailorDocx }             = require('./modules/cv_light_tailor');
 const { parseCV }                     = require('./modules/cv_parser');
 const { tailorStructured }            = require('./modules/cv_tailor_structured');
 const { generateCoverLetter }         = require('./modules/cover_letter');
+const { isRelevantRole }              = require('./modules/relevance_gate');
 const { llmAvailable, mode: llmMode } = require('../src/services/llm');
 
 // Minimum GENUINE (pre-addendum) keyword match a job must have before we let
@@ -169,6 +170,24 @@ async function processJob(job) {
     queue.update(job.jobId, { status: 'skipped', reason: preFilter.reason });
     return;
   }
+
+  // Relevance gate: the keyword score can rate an off-target role highly on
+  // shared soft-skills alone (an Occupational Therapist JD scored 85% against an
+  // IT-support CV). Ask the licensed LLM whether the job is in the SAME field as
+  // the candidate's OWN search terms — domain-agnostic, fail-open — and hard-skip
+  // if not, BEFORE we spend AI tokens tailoring a CV we'd never want submitted.
+  try {
+    const rel = await isRelevantRole({
+      jobTitle: job.title.split('\n')[0].trim(),
+      jdText: job.description,
+      targetRoles: cfg.JOB_SEARCHES,
+    });
+    if (!rel.relevant) {
+      console.log(`  [Scorer Agent] Off-target role (${rel.reason}) — skipping before tailoring`);
+      queue.update(job.jobId, { status: 'skipped', reason: `Off-target role: ${rel.reason}` });
+      return;
+    }
+  } catch (_) { /* fail open — never block on gate failure */ }
 
   queue.update(job.jobId, { status: 'processing' });
 
