@@ -68,15 +68,10 @@ async function searchJobs(page, searchTerm, limit = 10) {
   const url = `https://www.linkedin.com/jobs/search/?keywords=${encoded}&location=${location}&f_WT=2%2C3&f_AL=true${jtParam}${tprParam}&sortBy=DD`;
 
   console.log(`\n  [LinkedIn] Searching: "${searchTerm}" (remote+hybrid, Easy Apply)`);
-  await page.goto(url, { waitUntil: 'load', timeout: 60000 });
-  await DELAY(3000);
 
-  for (let i = 0; i < 3; i++) {
-    await page.evaluate(() => window.scrollBy(0, 800));
-    await DELAY(800);
-  }
-
-  const jobs = await page.evaluate((lim) => {
+  // Scrape the job cards off the current page. Kept as a local helper so we can
+  // run it again after a session re-assert without duplicating the selectors.
+  const scrapeCards = () => page.evaluate((lim) => {
     // Use job view links as the primary anchor — /jobs/view/NNN is stable across UI changes.
     // LinkedIn class names change too frequently to rely on as primary selectors.
     const seen = new Set();
@@ -114,10 +109,52 @@ async function searchJobs(page, searchTerm, limit = 10) {
     }).filter(j => j.url && j.jobId);
   }, limit);
 
+  // Load the results and scrape. `domcontentloaded` (not `load`): LinkedIn's job
+  // pages fire endless tracking/beacon requests so the `load` event frequently
+  // never arrives inside 60s — that made every search time out AND collide with
+  // the next one ("interrupted by another navigation"). The job cards are in the
+  // DOM well before `load`, so this returns in a few seconds and actually scrapes.
+  const loadAndScrape = async () => {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await DELAY(3000);
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => window.scrollBy(0, 800)).catch(() => {});
+      await DELAY(800);
+    }
+    return scrapeCards();
+  };
+
+  // A direct deep-link to /jobs/search sometimes renders LinkedIn's signed-OUT
+  // guest view even with a valid session (shows "Sign in to view more jobs" +
+  // Join now / Sign in, no member nav). That's the "signs in and out every
+  // search" flicker. Detect it so we can re-assert the session and retry once.
+  const isSignedOutView = () => page.evaluate(() => {
+    const t = (document.body?.innerText || '').toLowerCase();
+    const memberNav = document.querySelector(
+      '[class*="global-nav__me"], img.global-nav__me-photo, [data-control-name="nav.settings"]'
+    );
+    const wallText = t.includes('sign in to view more jobs') || t.includes('sign in to see') ||
+      t.includes('join now') && t.includes('new to linkedin');
+    return !memberNav && wallText;
+  }).catch(() => false);
+
+  let jobs = await loadAndScrape();
+
+  if (jobs.length === 0 && await isSignedOutView()) {
+    console.log('  [LinkedIn] Search showed the signed-out view — re-asserting session and retrying once...');
+    // Bounce through the authenticated feed to re-establish the member context,
+    // then hit the search URL again. Own-IP sessions are stable, so one retry
+    // is enough; if it still shows signed-out, that's a real re-auth need.
+    await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    await DELAY(2000);
+    jobs = await loadAndScrape();
+  }
+
   console.log(`  [LinkedIn] Found ${jobs.length} jobs for "${searchTerm}"`);
   if (jobs.length === 0) {
     const currentUrl = page.url();
-    console.log(`  [LinkedIn] 0 jobs found. URL: ${currentUrl}`);
+    const signedOut = await isSignedOutView();
+    console.log(`  [LinkedIn] 0 jobs found${signedOut ? ' (still signed-out — reconnect the LinkedIn account)' : ''}. URL: ${currentUrl}`);
     await page.screenshot({ path: require('path').join(SSDIR, 'li_search_empty.png') }).catch(() => {});
   }
   return jobs;
@@ -185,7 +222,7 @@ function extractJobContent(rawText) {
 
 // ── GET JOB DESCRIPTION ────────────────────────────────────────────────────
 async function getJobDescription(page, job) {
-  await page.goto(job.url, { waitUntil: 'load', timeout: 60000 });
+  await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await DELAY(3000);
 
   const showMoreSelectors = [
@@ -244,7 +281,7 @@ async function getJobDescription(page, job) {
 async function applyToJob(page, job, resumePath) {
   console.log(`  [LinkedIn] Applying: ${job.title} @ ${job.company}`);
 
-  await page.goto(job.url, { waitUntil: 'load', timeout: 60000 });
+  await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await DELAY(4000);
   await page.evaluate(() => window.scrollBy(0, 300));
   await DELAY(800);
