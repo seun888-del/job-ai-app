@@ -29,11 +29,20 @@ const BASE_ARGS = [
   '--disable-popup-blocking',
 ];
 
-// Built-in residential proxy — replaced at build time by GitHub Actions.
-// env var JOBBOT_PROXY_URL takes priority (allows user override via UI).
+// Proxy is OFF by default: the Agents run on THIS computer's own IP. That keeps
+// each user's job-site sessions consistent with where they logged in — which is
+// what stops LinkedIn's "new sign-in location" logout (a shared/rotating proxy
+// IP never matches the login IP, so LinkedIn kept dropping the session). It also
+// removes the shared metered-proxy cost and its single point of failure. At the
+// low daily volume (<=25 applications/day) a clean home IP is both cheaper and
+// LESS bot-suspicious than a shared proxy IP. A user who ever gets IP-blocked on
+// an aggressive site can opt back in to THEIR OWN proxy via Search Preferences →
+// Connection, which arrives here as JOBBOT_PROXY_URL.
+// (_BUILTIN_PROXY is still injected by the build so the CI step has a target, but
+// it is intentionally no longer used.)
 const _BUILTIN_PROXY = '__PROXY_URL__';
-const PROXY_URL = process.env.JOBBOT_PROXY_URL ||
-  (_BUILTIN_PROXY.startsWith('__') ? '' : _BUILTIN_PROXY);
+void _BUILTIN_PROXY;
+const PROXY_URL = process.env.JOBBOT_PROXY_URL || '';
 
 function buildProxyOpts() {
   if (!PROXY_URL) return {};

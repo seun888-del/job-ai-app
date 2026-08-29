@@ -670,7 +670,7 @@ async function renderSearch() {
 
     <div class="card">
       <h3>Connection (Advanced)</h3>
-      <p class="card-hint">Job-AI routes the Agents through a secure connection by default, so you normally don't need to touch this. If the Agents can't connect to the job sites, you can enter your own proxy here as a backup. Leave it blank to use the built-in connection.</p>
+      <p class="card-hint">By default the Agents run on this computer's own internet connection, which keeps your job-site logins stable (LinkedIn especially). You only need this if a job site starts blocking you — enter your own proxy and the Agents will route through it. Leave it blank to use your normal connection.</p>
       <div class="field">
         <label>Backup proxy URL</label>
         <input id="proxy_url" placeholder="http://username:password@host:port" autocomplete="off" spellcheck="false">
@@ -736,7 +736,7 @@ async function renderSearch() {
       return;
     }
     await window.api.searchPrefs.save({ proxy_url: url });
-    showStatus(document.getElementById('status-proxy'), url ? 'Saved. Restart the Agents to use it.' : 'Cleared. Using the built-in connection.');
+    showStatus(document.getElementById('status-proxy'), url ? 'Saved. Restart the Agents to use it.' : 'Cleared. Using your normal connection.');
     showToast('Connection settings saved');
   });
 
