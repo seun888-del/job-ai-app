@@ -318,6 +318,13 @@ app.whenReady().then(async () => {
     autoUpdater.on('error', (err) => {
       console.error('[Updater] Error:', err?.message);
     });
+    // Re-check periodically. The Agents are designed to run all day, so users
+    // rarely quit and relaunch — and the startup-only check meant a new release
+    // could sit unnoticed until the next cold start. Re-checking every 2 hours
+    // lets a long-running install download the update and show the restart
+    // banner on its own. Cheap when already latest; electron-updater won't
+    // re-download a version it has already staged.
+    setInterval(() => { autoUpdater.checkForUpdates().catch(() => {}); }, 2 * 60 * 60 * 1000);
   }
 
   app.on('activate', () => {
