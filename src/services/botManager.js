@@ -126,6 +126,16 @@ function start(botName, userDataPath, opts = {}) {
     env.JOBBOT_LICENSE_KEY = license.license_key;
   }
 
+  // Backup proxy override: if the user has entered their own proxy in Search
+  // Preferences (Connection card), pass it through so browser_launcher uses it
+  // INSTEAD of the built-in one. This is the escape hatch for when the shared
+  // built-in proxy is down/expired — a user can point the Agents at their own
+  // proxy without waiting for a new build. Empty = fall back to the built-in.
+  try {
+    const userProxy = (db.getSearchPreferences().proxy_url || '').trim();
+    if (userProxy) env.JOBBOT_PROXY_URL = userProxy;
+  } catch (_) { /* prefs unavailable → keep built-in proxy */ }
+
   // All bots use Chrome profiles from "Connect account" — no stored credentials needed.
 
   const scriptPath = path.join(BOT_DIR, BOT_SCRIPTS[botName]);

@@ -67,6 +67,11 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('bot:status', handler);
       return () => ipcRenderer.removeListener('bot:status', handler);
     },
+    onConnectionError: (callback) => {
+      const handler = (event, data) => callback(data);
+      ipcRenderer.on('agents:connection-error', handler);
+      return () => ipcRenderer.removeListener('agents:connection-error', handler);
+    },
   },
   shell: {
     openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),

@@ -195,6 +195,16 @@ app.whenReady().then(async () => {
   };
   pruneAgentLogs();
 
+  // Chrome proxy/tunnel error codes. When the built-in residential proxy is down,
+  // expired, or out of quota, EVERY agent fails at its first navigation with one
+  // of these — the browser never reaches the job site, so the agent stops itself.
+  // From the outside that looks like the app "crashing", so we detect it and
+  // surface a plain-English message instead of a silent stop. Throttled because
+  // the agents retry on a loop and would otherwise fire this many times a minute.
+  const PROXY_ERR_RE = /ERR_TUNNEL_CONNECTION_FAILED|ERR_PROXY_CONNECTION_FAILED|ERR_NO_SUPPORTED_PROXIES|ERR_SOCKS_CONNECTION_FAILED|ERR_PROXY_AUTH_(?:UNSUPPORTED|REQUESTED)/;
+  const PROXY_ERR_MSG = "Connection problem: the agents couldn't reach the job sites through the secure connection. This is a network or proxy issue, not a problem with your data or your account, and your saved data is safe. Please try starting the agents again in a few minutes. If it keeps happening, email jobaisupport@gmail.com.";
+  let proxyErrorNotifiedAt = 0;
+
   botManager.setLogHandler((bot, stream, text) => {
     // Agents run minimised, so surface "human verification needed" as a desktop
     // notification (the bot emits a [[JOBBOT_NOTIFY]] marker in its log stream).
@@ -202,6 +212,27 @@ app.whenReady().then(async () => {
     if (idx !== -1 && Notification.isSupported()) {
       const msg = text.slice(idx + 17).trim() || 'Action needed in the Agent browser window.';
       new Notification({ title: `${BOT_DISPLAY[bot] || bot}: action needed`, body: msg, silent: false }).show();
+    }
+    // A dead/expired/quota-exhausted proxy makes every agent fail at first
+    // navigation with a tunnel error and stop, which looks like a crash. Surface
+    // it plainly: a friendly line in the on-screen log (so it's on the record),
+    // a dedicated event the renderer turns into a persistent notice, and a
+    // clickable desktop notification (agents run minimised, so the OS toast is
+    // what the user actually sees). Throttle to once every 3 minutes so the
+    // agents' retry loop can't spam it.
+    if (PROXY_ERR_RE.test(text)) {
+      const now = Date.now();
+      if (now - proxyErrorNotifiedAt > 3 * 60 * 1000) {
+        proxyErrorNotifiedAt = now;
+        mainWindow?.webContents.send('bot:log', { bot, stream: 'system', text: `  [Job-AI] ${PROXY_ERR_MSG}\n` });
+        mainWindow?.webContents.send('agents:connection-error', { bot, message: PROXY_ERR_MSG });
+        errorReporter.report({ source: 'agent', name: 'proxy-tunnel-failed', message: (text.match(/ERR_[A-Z_]+/) || ['proxy error'])[0] });
+        if (Notification.isSupported()) {
+          const note = new Notification({ title: 'Job-AI: connection problem', body: PROXY_ERR_MSG, silent: false });
+          note.on('click', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
+          note.show();
+        }
+      }
     }
     // When an agent hits the user's daily application limit, notify ONCE per day
     // (the agents log this many times as they keep checking, so we de-dupe).

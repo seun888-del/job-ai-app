@@ -668,6 +668,18 @@ async function renderSearch() {
       <div class="status-msg" id="status"></div>
     </div>
 
+    <div class="card">
+      <h3>Connection (Advanced)</h3>
+      <p class="card-hint">Job-AI routes the Agents through a secure connection by default, so you normally don't need to touch this. If the Agents can't connect to the job sites, you can enter your own proxy here as a backup. Leave it blank to use the built-in connection.</p>
+      <div class="field">
+        <label>Backup proxy URL</label>
+        <input id="proxy_url" placeholder="http://username:password@host:port" autocomplete="off" spellcheck="false">
+        <span class="field-hint">Format: http://user:pass@host:port (or socks5://host:port). Restart the Agents after saving for it to take effect.</span>
+      </div>
+      <button class="primary" id="save-proxy">Save connection</button>
+      <div class="status-msg" id="status-proxy"></div>
+    </div>
+
   `;
 
   // Pre-select work type priority
@@ -713,6 +725,19 @@ async function renderSearch() {
     });
     showStatus(document.getElementById('status'), 'Saved');
     showToast('Search preferences saved');
+  });
+
+  // Backup proxy override (set via JS, not inline, so a stored value can't inject HTML)
+  document.getElementById('proxy_url').value = prefs.proxy_url || '';
+  document.getElementById('save-proxy').addEventListener('click', async () => {
+    const url = document.getElementById('proxy_url').value.trim();
+    if (url && !/^(https?|socks[45]?):\/\/[^\s]+$/i.test(url)) {
+      showStatus(document.getElementById('status-proxy'), 'Enter a URL like http://user:pass@host:port, or leave blank.', 'error');
+      return;
+    }
+    await window.api.searchPrefs.save({ proxy_url: url });
+    showStatus(document.getElementById('status-proxy'), url ? 'Saved. Restart the Agents to use it.' : 'Cleared. Using the built-in connection.');
+    showToast('Connection settings saved');
   });
 
   document.getElementById('add-term').addEventListener('click', async () => {
@@ -2271,6 +2296,29 @@ if (window.api?.onUpdateReady) {
       btn.textContent = 'Restarting…';
       try { await window.api.installUpdate(); } catch (_) {}
     });
+  });
+}
+
+// â”€â”€ Agent connection-error notice â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// When every agent fails to reach the job sites (a dead/expired proxy), the app
+// used to just stop silently, which reads as a crash. Show a persistent,
+// dismissible banner making clear it's a connection problem and the data is safe.
+// Subscribed globally (not per-view) so it shows whatever screen the user is on.
+if (window.api?.bot?.onConnectionError) {
+  window.api.bot.onConnectionError(({ message }) => {
+    let bar = document.getElementById('agent-connection-error');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'agent-connection-error';
+      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;display:flex;align-items:center;gap:12px;padding:12px 18px;background:#b91c1c;color:#fff;font-family:inherit;font-size:13px;line-height:1.4;box-shadow:0 -2px 12px rgba(0,0,0,0.25)';
+      document.body.appendChild(bar);
+    }
+    bar.innerHTML = `
+      <span style="flex:1">⚠ <strong>Agents can't connect right now.</strong> ${message}</span>
+      <button id="agent-conn-dismiss" style="background:rgba(255,255,255,0.2);color:#fff;border:none;padding:6px 14px;border-radius:7px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">Dismiss</button>`;
+    bar.style.display = 'flex';
+    const btn = document.getElementById('agent-conn-dismiss');
+    if (btn) btn.addEventListener('click', () => { bar.style.display = 'none'; });
   });
 }
 
