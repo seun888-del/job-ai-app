@@ -1210,6 +1210,75 @@ function ucPendingSentence(n) {
     : 'Your journal is up to date.';
 }
 
+// Assisted UC flow (the default): show the applied jobs formatted for the user to
+// copy into their own Universal Credit journal, then let them mark them logged.
+// The user does the actual submitting, so nothing is auto-filed to the DWP system.
+async function showUcCopyModal() {
+  let list = [];
+  try { list = (await window.api.queue.ucPendingList()) || []; } catch (_) {}
+  const fmtDate = (s) => {
+    const p = String(s || '').slice(0, 10).split('-'); // YYYY-MM-DD
+    return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : '';
+  };
+  const lines = list.map(j => `${cleanTitle(j.title)} at ${j.company || 'Unknown employer'} (applied ${fmtDate(j.appliedAt)})`);
+  const jobIds = list.map(j => j.jobId);
+  const bodyText = lines.length
+    ? 'Job search log\n\n' + lines.map(l => '- ' + l).join('\n')
+    : 'Nothing to log right now. Your journal is up to date.';
+
+  let overlay = document.getElementById('uc-copy-modal');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'uc-copy-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);padding:24px';
+    overlay.innerHTML = `
+      <div style="background:#fff;color:#1a1a1a;max-width:640px;width:100%;max-height:82vh;border-radius:12px;box-shadow:0 12px 48px rgba(0,0,0,0.3);display:flex;flex-direction:column;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #eee">
+          <div><div style="font-weight:700;font-size:15px">Your Universal Credit work search log</div><div id="uc-copy-sub" style="font-size:12px;color:#666"></div></div>
+          <button id="uc-copy-close" style="background:none;border:none;font-size:24px;cursor:pointer;line-height:1;color:#666">&times;</button>
+        </div>
+        <div id="uc-copy-body" style="padding:20px;overflow:auto;white-space:pre-wrap;line-height:1.55;font-size:13.5px;font-family:inherit"></div>
+        <div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:11.5px;color:#94a3b8;flex:1;min-width:180px">Add these to your journal, then click Mark as logged so they don't show again.</span>
+          <div style="display:flex;gap:10px">
+            <button id="uc-copy-mark" class="secondary" style="padding:7px 14px;border-radius:7px;cursor:pointer;font-family:inherit">Mark as logged</button>
+            <button id="uc-copy-copy" class="primary" style="padding:7px 16px;border-radius:7px;border:none;cursor:pointer;font-family:inherit">Copy</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const hide = () => { overlay.style.display = 'none'; };
+    overlay.addEventListener('click', e => { if (e.target === overlay) hide(); });
+    overlay.querySelector('#uc-copy-close').addEventListener('click', hide);
+  }
+  overlay.querySelector('#uc-copy-sub').textContent = lines.length ? `${lines.length} application${lines.length === 1 ? '' : 's'} ready to add` : '';
+  overlay.querySelector('#uc-copy-body').textContent = bodyText; // textContent = safe
+  const copyBtn = overlay.querySelector('#uc-copy-copy');
+  const markBtn = overlay.querySelector('#uc-copy-mark');
+  copyBtn.disabled = lines.length === 0;
+  markBtn.disabled = lines.length === 0;
+  copyBtn.textContent = 'Copy';
+  markBtn.textContent = 'Mark as logged';
+  copyBtn.onclick = () => {
+    navigator.clipboard?.writeText(bodyText)
+      .then(() => { copyBtn.textContent = 'Copied'; setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500); })
+      .catch(() => {});
+  };
+  markBtn.onclick = async () => {
+    markBtn.disabled = true; markBtn.textContent = 'Marking…';
+    try { await window.api.queue.ucMarkLogged(jobIds); } catch (_) {}
+    overlay.style.display = 'none';
+    try {
+      const n = await window.api.queue.ucPending();
+      const t = document.getElementById('uc-pending-text');
+      if (t) t.innerHTML = ucPendingSentence(n);
+      const cb = document.getElementById('uc-copy-btn');
+      if (cb) cb.disabled = Number(n) === 0;
+    } catch (_) {}
+  };
+  overlay.style.display = 'flex';
+}
+
 // Cover letters are text (not a file), so we can't open them via the OS like the
 // CV. Hold them here keyed by job_id and show them in a modal on demand.
 const _coverLetters = {};
@@ -1423,10 +1492,20 @@ async function renderDashboard() {
         <strong>📋 Universal Credit journal</strong>
         <span class="bot-status bot-status-${status.uc || 'stopped'}" id="status-uc">${status.uc || 'stopped'}</span>
       </div>
-      <p style="font-size:13px;color:#64748b;margin:6px 0 12px">Logs the jobs Job-AI has applied to straight into your Universal Credit "log your work search" journal, each on the real date it was applied. <span id="uc-pending-text">${ucPendingSentence(ucPending)}</span> You sign in to your UC account once; the session is remembered after that.</p>
+      <p style="font-size:13px;color:#64748b;margin:6px 0 12px">Keeps a running log of every job Job-AI has applied to, each with the real date it was applied, ready to add to your Universal Credit "log your work search" journal. <span id="uc-pending-text">${ucPendingSentence(ucPending)}</span></p>
       <div class="bot-card-actions">
-        <button class="primary" data-bot="uc" data-action="start" ${(!dashboardHasLicense || status.uc === 'running' || (ucPending || 0) === 0) ? 'disabled' : ''}>▶ Log to UC journal</button>
-        <button class="secondary" data-bot="uc" data-action="stop" ${status.uc === 'running' ? '' : 'disabled'}>Stop</button>
+        <button class="primary" id="uc-copy-btn" ${(ucPending || 0) === 0 ? 'disabled' : ''}>View / copy my work search log</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:#64748b;cursor:pointer">
+        <input type="checkbox" id="uc-auto-toggle" ${localStorage.getItem('uc_auto_optin') === '1' ? 'checked' : ''}>
+        Let Job-AI sign in and submit them for me (advanced)
+      </label>
+      <div id="uc-auto-actions" style="${localStorage.getItem('uc_auto_optin') === '1' ? '' : 'display:none'};margin-top:8px">
+        <p style="font-size:11.5px;color:#94a3b8;margin:0 0 8px;line-height:1.45">This signs in to your Universal Credit account and submits each entry automatically. Most people prefer to paste the log in themselves. Only use this if you're comfortable with the app filling in your journal for you.</p>
+        <div class="bot-card-actions">
+          <button class="secondary" data-bot="uc" data-action="start" ${(!dashboardHasLicense || status.uc === 'running' || (ucPending || 0) === 0) ? 'disabled' : ''}>Auto-log to UC journal</button>
+          <button class="secondary" data-bot="uc" data-action="stop" ${status.uc === 'running' ? '' : 'disabled'}>Stop</button>
+        </div>
       </div>
     </div>` : ''}
 
@@ -1469,6 +1548,17 @@ async function renderDashboard() {
   });
 
   bindViewCvButtons();
+
+  // Universal Credit card: assisted "copy my log" flow (default) + the advanced
+  // opt-in that reveals the auto-submit buttons.
+  const ucCopyBtn = document.getElementById('uc-copy-btn');
+  if (ucCopyBtn) ucCopyBtn.addEventListener('click', showUcCopyModal);
+  const ucAutoToggle = document.getElementById('uc-auto-toggle');
+  if (ucAutoToggle) ucAutoToggle.addEventListener('change', () => {
+    try { localStorage.setItem('uc_auto_optin', ucAutoToggle.checked ? '1' : '0'); } catch (_) {}
+    const acts = document.getElementById('uc-auto-actions');
+    if (acts) acts.style.display = ucAutoToggle.checked ? '' : 'none';
+  });
 
   // Per-site run toggles: remember which job sites the user wants included when
   // they click Start applying (default: all on).
@@ -1674,6 +1764,9 @@ async function renderDashboard() {
           const html = ucPendingSentence(ucPendingLive);
           if (ucText.innerHTML !== html) ucText.innerHTML = html;
         }
+        // The assisted "copy my log" button (default flow) tracks the count too.
+        const ucCopy = document.getElementById('uc-copy-btn');
+        if (ucCopy) ucCopy.disabled = Number(ucPendingLive) === 0;
         // Match the "Log to UC journal" button to the live count — but leave it
         // alone while the agent is running (setBotControlsState owns it then).
         const ucStart = content.querySelector('button[data-bot="uc"][data-action="start"]');

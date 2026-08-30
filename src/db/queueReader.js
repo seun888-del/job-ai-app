@@ -47,6 +47,40 @@ function getUcPendingCount() {
   }, 0);
 }
 
+// The applied jobs not yet logged to the UC journal, oldest first, as a list the
+// user can copy into their journal themselves (the assisted / non-automated flow).
+function getUcPendingList(limit = 200) {
+  return withQueueDb(db => {
+    let rows;
+    try {
+      rows = all(db, "SELECT job_id, title, company, applied_at FROM applied_jobs WHERE uc_logged_at IS NULL AND title IS NOT NULL AND title != '' ORDER BY applied_at ASC LIMIT ?", [limit]);
+    } catch (_) {
+      rows = all(db, "SELECT job_id, title, company, applied_at FROM applied_jobs WHERE title IS NOT NULL AND title != '' ORDER BY applied_at ASC LIMIT ?", [limit]);
+    }
+    return rows.map(r => ({ jobId: r.job_id, title: r.title, company: r.company || '', appliedAt: r.applied_at }));
+  }, []);
+}
+
+// The ONE write this otherwise read-only module performs: after the user has
+// copied their log into their UC journal by hand, mark those applications logged
+// so they drop off the pending list. Rare, user-initiated; uses the same
+// read-modify-write-whole-file approach the bots use for queue.db.
+async function markUcLoggedManual(jobIds) {
+  if (!dbPath || !fs.existsSync(dbPath) || !Array.isArray(jobIds) || jobIds.length === 0) return 0;
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(fs.readFileSync(dbPath));
+  try {
+    try { db.run("ALTER TABLE applied_jobs ADD COLUMN uc_logged_at TEXT"); } catch (_) {}
+    for (const id of jobIds) {
+      db.run("UPDATE applied_jobs SET uc_logged_at = datetime('now') WHERE job_id = ? AND uc_logged_at IS NULL", [id]);
+    }
+    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    return jobIds.length;
+  } finally {
+    db.close();
+  }
+}
+
 function getQueueSummary() {
   return withQueueDb(db => {
     const rows = all(db, 'SELECT status, COUNT(*) AS count FROM queue GROUP BY status');
@@ -182,4 +216,4 @@ function getAnalytics() {
   }, null);
 }
 
-module.exports = { init, getQueueSummary, getUcPendingCount, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics };
+module.exports = { init, getQueueSummary, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics };

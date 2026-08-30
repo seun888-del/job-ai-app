@@ -555,6 +555,8 @@ ipcMain.handle('analytics:get', () => queueReader.getAnalytics());
 // ── Queue / dashboard ──────────────────────────────────────────────────────
 ipcMain.handle('queue:summary', () => queueReader.getQueueSummary());
 ipcMain.handle('queue:ucPending', () => queueReader.getUcPendingCount());
+ipcMain.handle('queue:ucPendingList', () => queueReader.getUcPendingList(200));
+ipcMain.handle('uc:markLogged', (_e, jobIds) => queueReader.markUcLoggedManual(jobIds));
 ipcMain.handle('queue:recent', (event, limit) => queueReader.getRecentApplications(limit));
 ipcMain.handle('queue:dailyApplications', (event, days) => queueReader.getDailyApplications(days || 14));
 // Daily application cap status for the "limit reached" prompt shown on Start.
