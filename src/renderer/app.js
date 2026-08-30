@@ -1699,6 +1699,23 @@ async function renderDashboard() {
           return;
         }
       }
+      // One-time informed consent before auto-submitting to the UC (government)
+      // account. Gated here on the actual run, so it covers every path to the
+      // auto agent regardless of how the opt-in toggle was set.
+      if (btn.dataset.action === 'start' && btn.dataset.bot === 'uc' && localStorage.getItem('uc_auto_consent') !== '1') {
+        const ok = await showConfirm({
+          title: 'Turn on automatic Universal Credit logging?',
+          bodyHtml: `<p>This signs in to your Universal Credit account and adds each application to your work-search journal for you.</p>
+            <ul style="margin:10px 0 0;padding-left:18px;line-height:1.55">
+              <li>This automates a government account. There is a chance the DWP could flag automated activity on your account. Most people use the copy option and add the entries themselves.</li>
+              <li>You are responsible for what's in your journal. Job-AI only logs jobs you genuinely applied to, on their real dates, but please review your journal.</li>
+            </ul>`,
+          confirmText: 'I understand, turn it on',
+          cancelText: 'Cancel',
+        });
+        if (!ok) return;
+        try { localStorage.setItem('uc_auto_consent', '1'); } catch (_) {}
+      }
       try {
         await window.api.bot[btn.dataset.action](btn.dataset.bot);
       } catch (err) {
