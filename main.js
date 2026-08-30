@@ -73,9 +73,25 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Disable DevTools entirely in the shipped app — it would let anyone
+      // inspect the renderer, read the licence key, and probe the IPC bridge.
+      // Kept available in development (unpackaged) for the developer.
+      devTools: !app.isPackaged,
     },
   });
   mainWindow.loadFile(path.join(__dirname, 'src/renderer/index.html'));
+
+  // Development only: keep DevTools reachable via Ctrl/Cmd+Shift+I. In the
+  // packaged app devTools:false above makes this a no-op, so end users can't
+  // open DevTools by any shortcut or menu.
+  if (!app.isPackaged) {
+    mainWindow.webContents.on('before-input-event', (_e, input) => {
+      const mod = process.platform === 'darwin' ? input.meta : input.control;
+      if (mod && input.shift && String(input.key || '').toLowerCase() === 'i') {
+        mainWindow.webContents.toggleDevTools();
+      }
+    });
+  }
 
   // Right-click context menu with clipboard actions. Electron has no context menu
   // by default, so a user who doesn't know Ctrl/Cmd+V has no way to paste (e.g.
@@ -124,7 +140,7 @@ ipcMain.handle('win:action', (_e, action) => {
     case 'close':          w.close(); break;
     case 'quit':           app.quit(); break;
     case 'reload':         wc.reload(); break;
-    case 'toggleDevTools': wc.toggleDevTools(); break;
+    case 'toggleDevTools': if (!app.isPackaged) wc.toggleDevTools(); break;
     case 'fullscreen':     w.setFullScreen(!w.isFullScreen()); break;
     case 'zoomIn':         wc.setZoomLevel(wc.getZoomLevel() + 0.5); break;
     case 'zoomOut':        wc.setZoomLevel(wc.getZoomLevel() - 0.5); break;
