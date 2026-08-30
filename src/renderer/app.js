@@ -1239,7 +1239,7 @@ async function showUcCopyModal() {
         </div>
         <div id="uc-copy-body" style="padding:20px;overflow:auto;white-space:pre-wrap;line-height:1.55;font-size:13.5px;font-family:inherit"></div>
         <div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-          <span style="font-size:11.5px;color:#94a3b8;flex:1;min-width:180px">Add these to your journal, then click Mark as logged so they don't show again.</span>
+          <span style="font-size:11.5px;color:#4a453b;flex:1;min-width:180px">Add these to your journal, then click Mark as logged so they don't show again.</span>
           <div style="display:flex;gap:10px">
             <button id="uc-copy-mark" class="secondary" style="padding:7px 14px;border-radius:7px;cursor:pointer;font-family:inherit">Mark as logged</button>
             <button id="uc-copy-copy" class="primary" style="padding:7px 16px;border-radius:7px;border:none;cursor:pointer;font-family:inherit">Copy</button>
@@ -1501,7 +1501,7 @@ async function renderDashboard() {
         Click to let Job-AI sign in and submit them for me (advanced)
       </label>
       <div id="uc-auto-actions" style="${localStorage.getItem('uc_auto_optin') === '1' ? '' : 'display:none'};margin-top:8px">
-        <p style="font-size:11.5px;color:#94a3b8;margin:0 0 8px;line-height:1.45">This signs in to your Universal Credit account and submits each entry automatically. Most people prefer to paste the log in themselves. Only use this if you're comfortable with the app filling in your journal for you.</p>
+        <p style="font-size:12px;color:#4a453b;margin:0 0 8px;line-height:1.45">This signs in to your Universal Credit account and submits each entry automatically. Most people prefer to paste the log in themselves. Only use this if you're comfortable with the app filling in your journal for you.</p>
         <div class="bot-card-actions">
           <button class="secondary" data-bot="uc" data-action="start" ${(!dashboardHasLicense || status.uc === 'running' || (ucPending || 0) === 0) ? 'disabled' : ''}>Auto-log to UC journal</button>
           <button class="secondary" data-bot="uc" data-action="stop" ${status.uc === 'running' ? '' : 'disabled'}>Stop</button>

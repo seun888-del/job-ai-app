@@ -17,8 +17,8 @@
   --border: #e6e1d6;        /* warm hairline */
   --border-strong: #d8d2c4;
   --text: #1c1b17;          /* warm near-black ink */
-  --text-muted: #6f685b;    /* warm gray */
-  --text-faint: #a49c8c;
+  --text-muted: #4a453b;    /* darker warm gray — readable small text (WCAG AA) */
+  --text-faint: #6b6456;    /* was #a49c8c (failed contrast); now passes AA */
 
   --primary: #3b82f6;       /* light blue — buttons + interactive (a shade lighter than the logo) */
   --primary-hover: #2563eb; /* logo blue on hover */
