@@ -2238,8 +2238,8 @@ const TOUR_STEPS = [
     view: 'dashboard',
     ukOnly: true,
     title: 'One more thing: your Universal Credit journal',
-    tip: 'If you claim Universal Credit, Job-AI can log every application into your "log your work search" journal for you, each on the day it was actually applied, so there is nothing to type in by hand. On the Dashboard you will see a "Universal Credit journal" card showing how many applications are ready to log.',
-    action: 'Once the Agents have applied to some jobs, click "Log to UC journal" on that card and sign in to your Universal Credit account once (the session is remembered after that). It only ever logs jobs that were genuinely applied, on their real dates.',
+    tip: 'If you claim Universal Credit, Job-AI keeps a running log of every application it makes, each with the day it was actually applied, ready to add to your "log your work search" journal. On the Dashboard you will see a "Universal Credit journal" card.',
+    action: 'Once the Agents have applied to some jobs, click "View / copy my work search log" on that card. Copy the list into your journal, then click "Mark as logged". If you would rather Job-AI signed in and submitted them for you, tick "Click to let Job-AI sign in and submit them for me" (advanced) and confirm the one-time notice. Either way, it only ever uses jobs that were genuinely applied, on their real dates.',
   },
 ];
 
