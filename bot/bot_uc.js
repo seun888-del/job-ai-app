@@ -25,6 +25,11 @@ const { launchPersistentContext, watchForManualClose, BROWSER_CLOSED_RE } = requ
 const UC_BASE = 'https://www.universal-credit.service.gov.uk';
 const DELAY = (ms) => new Promise(r => setTimeout(r, ms));
 
+// The UC agent needs a VISIBLE window: the user signs in interactively (GOV.UK
+// One Login, often with 2FA), which they can't do in a minimised window. Force
+// the browser visible for this agent regardless of the global setting.
+process.env.JOBBOT_SHOW_BROWSER = process.env.JOBBOT_SHOW_BROWSER || '1';
+
 process.on('uncaughtException', (err) => { console.error('Fatal error:', err.message); process.exit(1); });
 process.on('unhandledRejection', (reason) => { console.error('Fatal error:', reason); process.exit(1); });
 
@@ -45,14 +50,34 @@ async function dismissCookieBanner(page) {
   } catch (_) {}
 }
 
-async function isSignedOut(page) {
-  const url = page.url();
-  return url.includes('sign-in') || url.includes('login') || !url.includes('universal-credit.service.gov.uk');
+// Session is dead / logged out mid-run: not on the UC domain, or bounced to a
+// sign-in page.
+function sessionDead(page) {
+  const u = page.url();
+  return !u.includes('universal-credit.service.gov.uk') || /\/sign-in|\/signin|\/login/.test(u);
+}
+
+// Positive, RELIABLE "logged in and ready" check: we're on the work-search page
+// AND its "Add a job" control is present. URL heuristics alone misfire on the
+// GOV.UK One Login redirect chain, which is what made the agent quit before the
+// user could sign in.
+async function readyToLog(page) {
+  if (!/universal-credit\.service\.gov\.uk\/work-search/.test(page.url())) return false;
+  return await page.locator('a:has-text("Add a job"), button:has-text("Add a job")')
+    .first().isVisible({ timeout: 2500 }).catch(() => false);
+}
+
+// True once the user has FINISHED the One Login flow (back on the UC domain, off
+// every sign-in page and off account.gov.uk) — so it's safe to reload
+// work-search without interrupting a half-completed login form.
+function loginFlowDone(page) {
+  const u = page.url();
+  return u.includes('universal-credit.service.gov.uk') && !/\/sign-in|\/signin|\/login/.test(u) && !u.includes('account.gov.uk');
 }
 
 async function navigateToAddJob(page) {
   await page.goto(`${UC_BASE}/work-search`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-  if (await isSignedOut(page)) return false;
+  if (sessionDead(page)) return false;
   await dismissCookieBanner(page);
 
   for (const sel of ['a:has-text("Add a job")', 'button:has-text("Add a job")', 'text="Add a job"']) {
@@ -149,29 +174,36 @@ async function main() {
   const page = await context.newPage();
 
   try {
-    // Ensure we have a live UC session; if not, ask the user to log in once.
+    // Ensure we're genuinely logged in and on the work-search page before we
+    // touch anything. If not, WAIT (up to 10 min) for the user to sign in — the
+    // window is visible so they can complete GOV.UK One Login. We only reload
+    // work-search once their login flow is finished, never mid-login.
     await page.goto(`${UC_BASE}/work-search`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-    if (await isSignedOut(page)) {
-      await page.goto(`${UC_BASE}/sign-in`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-      console.log('  [Universal Credit Agent] Please sign in to your Universal Credit account in the window.');
+    if (!(await readyToLog(page))) {
+      console.log('  [Universal Credit Agent] Please sign in to your Universal Credit account in the window that just opened. Waiting up to 10 minutes...');
       console.log('  [[JOBBOT_NOTIFY]] Sign in to your Universal Credit account in the Agent window to log your applications.');
       const deadline = Date.now() + 10 * 60 * 1000;
+      let ready = false;
       while (Date.now() < deadline) {
-        await DELAY(3000);
-        if (!(await isSignedOut(page))) break;
+        await DELAY(4000);
+        if (await readyToLog(page)) { ready = true; break; }
+        if (loginFlowDone(page)) {
+          await page.goto(`${UC_BASE}/work-search`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+          if (await readyToLog(page)) { ready = true; break; }
+        }
       }
-      if (await isSignedOut(page)) {
-        console.log('  [Universal Credit Agent] Sign-in not completed — stopping. Start again once logged in.');
+      if (!ready) {
+        console.log('  [Universal Credit Agent] Not signed in yet — stopping. Start again once you are logged in (your session is remembered next time).');
         closeGuard.intentional = true;
         await context.close().catch(() => {});
         process.exit(0);
       }
-      console.log('  [Universal Credit Agent] Signed in. Logging applications...');
     }
+    console.log('  [Universal Credit Agent] Signed in. Logging applications...');
 
     let ok = 0, fail = 0;
     for (const job of pending) {
-      if (await isSignedOut(page)) { console.log('  [Universal Credit Agent] Session ended — stopping.'); break; }
+      if (sessionDead(page)) { console.log('  [Universal Credit Agent] Session ended — stopping.'); break; }
       try {
         if (!(await navigateToAddJob(page))) { console.log('  [Universal Credit Agent] Could not open the "Add a job" form — skipping.'); fail++; continue; }
         if (await fillJobForm(page, job)) {
