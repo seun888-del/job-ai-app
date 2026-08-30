@@ -1200,9 +1200,18 @@ function cleanTitle(t) {
   return first.replace(/\s+with verification$/i, '');
 }
 
+// Cover letters are text (not a file), so we can't open them via the OS like the
+// CV. Hold them here keyed by job_id and show them in a modal on demand.
+const _coverLetters = {};
+
 // Recent Activity rows — shared by the initial render and the 5 s poll so the
 // table stays in sync in real time, not just on page load.
 function recentRowsHtml(recent) {
+  (recent || []).forEach(r => {
+    if (r.cover_letter && r.job_id) {
+      _coverLetters[r.job_id] = { text: r.cover_letter, title: cleanTitle(r.title), company: r.company || '' };
+    }
+  });
   return (recent || []).map(r => `
             <tr>
               <td>${cleanTitle(r.title)}</td>
@@ -1210,7 +1219,7 @@ function recentRowsHtml(recent) {
               <td><span class="badge ${statusBadgeClass(r.status)}">${r.status}</span></td>
               <td class="cv-name-cell">${r.cv_name || '—'}</td>
               <td>${r.updated_at ? r.updated_at.slice(0, 10) : ''}</td>
-              <td>${r.cv_path ? `<button class="view-cv-btn" data-path="${r.cv_path}" title="View CV" aria-label="View CV"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}</td>
+              <td class="row-actions">${r.cv_path ? `<button class="view-cv-btn" data-path="${r.cv_path}" title="View CV" aria-label="View CV"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}${r.cover_letter ? `<button class="view-cl-btn" data-jobid="${r.job_id}" title="View cover letter" aria-label="View cover letter"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg></button>` : ''}</td>
             </tr>`).join('') || '<tr><td colspan="6"><div class="empty-state">No activity yet</div></td></tr>';
 }
 
@@ -1220,6 +1229,47 @@ function bindViewCvButtons(root = content) {
     btn._bound = true;
     btn.addEventListener('click', () => window.api.shell.openPath(btn.dataset.path));
   });
+  root.querySelectorAll('.view-cl-btn').forEach(btn => {
+    if (btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener('click', () => showCoverLetterModal(btn.dataset.jobid));
+  });
+}
+
+// Show a stored cover letter in a themed modal. Body is set via textContent, so
+// the letter text can never inject markup.
+function showCoverLetterModal(jobId) {
+  const cl = _coverLetters[jobId];
+  if (!cl) return;
+  let overlay = document.getElementById('cl-modal');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'cl-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);padding:24px';
+    overlay.innerHTML = `
+      <div style="background:#fff;color:#1a1a1a;max-width:680px;width:100%;max-height:82vh;border-radius:12px;box-shadow:0 12px 48px rgba(0,0,0,0.3);display:flex;flex-direction:column;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #eee">
+          <div><div style="font-weight:700;font-size:15px">Cover letter</div><div id="cl-modal-sub" style="font-size:12px;color:#666"></div></div>
+          <button id="cl-modal-close" style="background:none;border:none;font-size:24px;cursor:pointer;line-height:1;color:#666">&times;</button>
+        </div>
+        <div id="cl-modal-body" style="padding:20px;overflow:auto;white-space:pre-wrap;line-height:1.55;font-size:13.5px"></div>
+        <div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end">
+          <button id="cl-modal-copy" class="primary" style="padding:7px 18px;border-radius:7px;border:none;cursor:pointer;font-family:inherit">Copy</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const hide = () => { overlay.style.display = 'none'; };
+    overlay.addEventListener('click', e => { if (e.target === overlay) hide(); });
+    overlay.querySelector('#cl-modal-close').addEventListener('click', hide);
+    overlay.querySelector('#cl-modal-copy').addEventListener('click', () => {
+      const btn = overlay.querySelector('#cl-modal-copy');
+      const txt = overlay.querySelector('#cl-modal-body').textContent;
+      navigator.clipboard?.writeText(txt).then(() => { btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500); }).catch(() => {});
+    });
+  }
+  overlay.querySelector('#cl-modal-sub').textContent = cl.title + (cl.company ? '  ·  ' + cl.company : '');
+  overlay.querySelector('#cl-modal-body').textContent = cl.text;
+  overlay.style.display = 'flex';
 }
 
 // A license only counts for starting agents if it exists, is active/trial, and

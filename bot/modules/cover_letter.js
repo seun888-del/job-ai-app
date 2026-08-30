@@ -50,7 +50,7 @@ Sentence 1: name the role and company in a confident, specific opening — NOT "
 Sentence 2: say one concrete thing about why this specific role or company — pulled from what the JD actually says (a challenge, a mission, a technology) — not generic enthusiasm.
 
 PARAGRAPH 2 — MATCH (3 sentences):
-Take the top 3 requirements from the JD. For each, write one sentence that maps it directly to a specific skill or experience from the CV. Be explicit: "[JD requirement] — [candidate proof point from CV]". No vague claims.
+Take the top 3 requirements from the JD. For each, write one sentence that maps it directly to a specific skill or experience from the CV. Be explicit, e.g. "Your need for X is matched by my Y". No vague claims.
 
 PARAGRAPH 3 — EVIDENCE (2 sentences):
 State one concrete, quantified achievement from the CV. Explain in one sentence exactly why it proves the candidate can do this job.
@@ -61,7 +61,8 @@ Genuine, specific enthusiasm for this role. End with a clear ask for the intervi
 ─────────────────────────────────────────────
 HARD RULES:
 - 230 words maximum total
-- Every sentence must be specific to THIS job — cut anything that could appear in any other cover letter
+- Never use em dashes (—) or en dashes (–) anywhere. Use commas or full stops instead; for a range write "to". They read as AI-written.
+- Every sentence must be specific to THIS job. Cut anything that could appear in any other cover letter
 - BANNED openers: "I am writing to", "I would like to apply", "I am interested in", "With X years", "As a", "I am excited to", "I am passionate"
 - BANNED words: "passionate", "team player", "results-driven", "hard-working", "go-getter", "leveraging", "spearheading", "seamlessly", "proactive", "dynamic", "fast learner", "hit the ground running", "self-motivated"
 - Do NOT invent experience not in the CV
@@ -70,10 +71,24 @@ HARD RULES:
 
   try {
     const letter = await llmChat(prompt);
-    return (letter || '').trim() || null;
+    const clean = sanitizeDashes((letter || '').trim());
+    return clean || null;
   } catch {
     return null;
   }
+}
+
+// Safety net for the prompt's no-dash rule: strip any em/en dashes the model
+// still emits. A dash between digits becomes "to" (a range); anywhere else it
+// becomes a comma, then we tidy the spacing/doubles it leaves behind.
+function sanitizeDashes(text) {
+  return String(text)
+    .replace(/(\d)\s*[—–]\s*(\d)/g, '$1 to $2')  // "2019 – 2022" -> "2019 to 2022"
+    .replace(/\s*[—–]\s*/g, ', ')                // clause dash -> comma
+    .replace(/\s+([,.;:])/g, '$1')               // no space before punctuation
+    .replace(/,\s*,/g, ',')                       // collapse double commas
+    .replace(/,\s*\./g, '.')                      // ", ." -> "."
+    .trim();
 }
 
 module.exports = { generateCoverLetter };
