@@ -1079,7 +1079,9 @@ function updateStartAllState() {
   const startAll = content && content.querySelector('.start-applying-btn');
   const stopAll  = content && content.querySelector('.stop-all-btn');
   if (!startAll && !stopAll) return;
-  const statuses = Array.from(content.querySelectorAll('.bot-card .bot-status')).map(b => b.textContent.trim());
+  // Exclude the UC card — it runs independently and must not affect the
+  // "Start applying" / "Stop" state for the job-search agents.
+  const statuses = Array.from(content.querySelectorAll('.bot-card:not(.uc-card) .bot-status')).map(b => b.textContent.trim());
   const anyRunning = statuses.some(s => s === 'running');
   const allRunning = statuses.length > 0 && statuses.every(s => s === 'running');
   if (startAll) startAll.disabled = !dashboardHasLicense || allRunning;
@@ -1283,7 +1285,7 @@ function licenseIsActive(lic) {
 }
 
 async function renderDashboard() {
-  const [summary, recent, status, license, profile, dailyApps, cvs, reedCred, liCred, gdCred, cvlibCred, tjCred, cwCred, connectedStatus] = await Promise.all([
+  const [summary, recent, status, license, profile, dailyApps, cvs, reedCred, liCred, gdCred, cvlibCred, tjCred, cwCred, connectedStatus, ucPending] = await Promise.all([
     window.api.queue.summary(),
     window.api.queue.recent(20),
     window.api.bot.status(),
@@ -1298,6 +1300,7 @@ async function renderDashboard() {
     window.api.credentials.get('totaljobs'),
     window.api.credentials.get('cwjobs'),
     window.api.site.connectedStatus().catch(() => ({})),
+    window.api.queue.ucPending().catch(() => 0),
   ]);
   const anyConnected = Object.values(connectedStatus || {}).some(Boolean);
   const isUS = (profile?.country || 'United Kingdom') === 'United States';
@@ -1404,6 +1407,19 @@ async function renderDashboard() {
         </div>
       </div>
     </div>
+
+    ${!isUS ? `
+    <div class="card bot-card uc-card${status.uc === 'running' ? ' bot-card-running' : ''}" id="bot-card-uc">
+      <div class="bot-card-header">
+        <strong>📋 Universal Credit journal</strong>
+        <span class="bot-status bot-status-${status.uc || 'stopped'}" id="status-uc">${status.uc || 'stopped'}</span>
+      </div>
+      <p style="font-size:13px;color:#64748b;margin:6px 0 12px">Logs the jobs Job-AI has applied to straight into your Universal Credit "log your work search" journal, each on the real date it was applied. ${ucPending > 0 ? `<strong>${ucPending}</strong> application${ucPending === 1 ? '' : 's'} ready to log.` : 'Your journal is up to date.'} You sign in to your UC account once; the session is remembered after that.</p>
+      <div class="bot-card-actions">
+        <button class="primary" data-bot="uc" data-action="start" ${(!dashboardHasLicense || status.uc === 'running' || (ucPending || 0) === 0) ? 'disabled' : ''}>▶ Log to UC journal</button>
+        <button class="secondary" data-bot="uc" data-action="stop" ${status.uc === 'running' ? '' : 'disabled'}>Stop</button>
+      </div>
+    </div>` : ''}
 
     <div class="status-msg" id="bot-error"></div>
     <div id="login-prompt" class="login-prompt" style="display:none">
@@ -1574,8 +1590,9 @@ async function renderDashboard() {
       const errorEl = document.getElementById('bot-error');
       errorEl.className = 'status-msg';
       errorEl.textContent = '';
-      // Same daily-cap heads-up for a single-agent Start.
-      if (btn.dataset.action === 'start') {
+      // Same daily-cap heads-up for a single-agent Start — but NOT for the UC
+      // agent, which logs already-applied jobs and isn't bound by the apply cap.
+      if (btn.dataset.action === 'start' && btn.dataset.bot !== 'uc') {
         let limit = null;
         try { limit = await window.api.bot.dailyLimit(); } catch (_) {}
         if (limit && limit.reached) {

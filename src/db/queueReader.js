@@ -33,6 +33,20 @@ function all(db, sql, params) {
   return rows;
 }
 
+// How many genuinely-applied jobs are not yet logged to the UC journal.
+// Guarded: the uc_logged_at column may not exist on an older queue.db.
+function getUcPendingCount() {
+  return withQueueDb(db => {
+    try {
+      const rows = all(db, "SELECT COUNT(*) AS c FROM applied_jobs WHERE uc_logged_at IS NULL AND title IS NOT NULL AND title != ''");
+      return rows[0]?.c || 0;
+    } catch (_) {
+      const rows = all(db, "SELECT COUNT(*) AS c FROM applied_jobs WHERE title IS NOT NULL AND title != ''");
+      return rows[0]?.c || 0;
+    }
+  }, 0);
+}
+
 function getQueueSummary() {
   return withQueueDb(db => {
     const rows = all(db, 'SELECT status, COUNT(*) AS count FROM queue GROUP BY status');
@@ -168,4 +182,4 @@ function getAnalytics() {
   }, null);
 }
 
-module.exports = { init, getQueueSummary, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics };
+module.exports = { init, getQueueSummary, getUcPendingCount, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics };

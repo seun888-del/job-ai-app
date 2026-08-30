@@ -161,7 +161,7 @@ app.whenReady().then(async () => {
   createWindow();
   refreshLicense('startup'); // recover a reinstated/renewed licence on relaunch, no re-paste
 
-  const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent' };
+  const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent', uc: 'Universal Credit Agent' };
   // The user-facing job-site agents. The scorer runs alongside them but is an
   // internal helper, so it never triggers a "finished" notification of its own.
   const JOB_SITE_KEYS = ['reed', 'linkedin'];
@@ -541,6 +541,7 @@ ipcMain.handle('analytics:get', () => queueReader.getAnalytics());
 
 // ── Queue / dashboard ──────────────────────────────────────────────────────
 ipcMain.handle('queue:summary', () => queueReader.getQueueSummary());
+ipcMain.handle('queue:ucPending', () => queueReader.getUcPendingCount());
 ipcMain.handle('queue:recent', (event, limit) => queueReader.getRecentApplications(limit));
 ipcMain.handle('queue:dailyApplications', (event, days) => queueReader.getDailyApplications(days || 14));
 // Daily application cap status for the "limit reached" prompt shown on Start.

@@ -89,6 +89,14 @@ async function init(userDataPath) {
   if (!cols.includes('cover_letter')) db.run('ALTER TABLE queue ADD COLUMN cover_letter TEXT');
   if (!cols.includes('retry_count'))  db.run('ALTER TABLE queue ADD COLUMN retry_count INTEGER DEFAULT 0');
 
+  // Track which applied jobs have been logged to the user's Universal Credit
+  // work-search journal, so the UC agent never double-logs one.
+  const ajStmt = db.prepare('PRAGMA table_info(applied_jobs)');
+  const ajCols = [];
+  while (ajStmt.step()) ajCols.push(ajStmt.getAsObject().name);
+  ajStmt.free();
+  if (!ajCols.includes('uc_logged_at')) db.run('ALTER TABLE applied_jobs ADD COLUMN uc_logged_at TEXT');
+
   // ── Auto-reconcile the queue when the user changes their inputs ─────────────
   // Two triggers, both detected by fingerprinting the active inputs and running
   // on the first bot to start after a change (inside the queue-owning process,
@@ -301,6 +309,44 @@ function countAppliedToday() {
   });
 }
 
+// ── Universal Credit journal logging ────────────────────────────────────────
+// Applied jobs not yet logged to the UC work-search journal, oldest first. The
+// UC agent records each against its REAL application date (applied_at), never a
+// chosen/backdated one.
+function getUcPending(limit = 20) {
+  return withDb((db) => {
+    const stmt = db.prepare(
+      "SELECT job_id, title, company, applied_at FROM applied_jobs " +
+      "WHERE uc_logged_at IS NULL AND title IS NOT NULL AND title != '' " +
+      "ORDER BY applied_at ASC LIMIT ?"
+    );
+    stmt.bind([limit]);
+    const rows = [];
+    while (stmt.step()) {
+      const r = stmt.getAsObject();
+      rows.push({ jobId: r.job_id, title: r.title, company: r.company || '', appliedAt: r.applied_at });
+    }
+    stmt.free();
+    return rows;
+  });
+}
+
+function ucPendingCount() {
+  return withDb((db) => {
+    const stmt = db.prepare("SELECT COUNT(*) AS c FROM applied_jobs WHERE uc_logged_at IS NULL AND title IS NOT NULL AND title != ''");
+    const c = stmt.step() ? (stmt.getAsObject().c || 0) : 0;
+    stmt.free();
+    return c;
+  });
+}
+
+function markUcLogged(jobId) {
+  withDb((db, markMutated) => {
+    db.run("UPDATE applied_jobs SET uc_logged_at = datetime('now') WHERE job_id = ?", [jobId]);
+    markMutated();
+  });
+}
+
 // Cross-site deduplication — normalise title+company and check across all sources.
 // Returns true if a job with the same role at the same company already exists.
 function _normalise(str) {
@@ -489,4 +535,4 @@ function clearReconnect(source) {
   } catch (_) { /* non-fatal */ }
 }
 
-module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, wasApplied, countAppliedToday, hasCanonical, requeueFailed, wasAppliedToCompanyRecently, isQualityJD, getMeta, setMeta, markSessionChecking, markSessionHealthy, markSessionDead, sessionState, recordUploadFailure, recordUploadSuccess, reconnectNeeded, reconnectSources, tailoringPausedSources, clearReconnect };
+module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, wasApplied, countAppliedToday, getUcPending, ucPendingCount, markUcLogged, hasCanonical, requeueFailed, wasAppliedToCompanyRecently, isQualityJD, getMeta, setMeta, markSessionChecking, markSessionHealthy, markSessionDead, sessionState, recordUploadFailure, recordUploadSuccess, reconnectNeeded, reconnectSources, tailoringPausedSources, clearReconnect };

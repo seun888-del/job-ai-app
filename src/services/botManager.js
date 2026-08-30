@@ -15,6 +15,7 @@ const BOT_SCRIPTS = {
   cvlibrary:  'bot_cvlibrary.js',
   totaljobs:  'bot_totaljobs.js',
   cwjobs:     'bot_cwjobs.js',
+  uc:         'bot_uc.js',
 };
 
 const bots = {
@@ -26,6 +27,7 @@ const bots = {
   cvlibrary:  { proc: null, status: 'stopped', stopping: false },
   totaljobs:  { proc: null, status: 'stopped', stopping: false },
   cwjobs:     { proc: null, status: 'stopped', stopping: false },
+  uc:         { proc: null, status: 'stopped', stopping: false },
 };
 
 let logHandler = null;
@@ -49,6 +51,7 @@ function getStatus() {
     cvlibrary:  bots.cvlibrary.status,
     totaljobs:  bots.totaljobs.status,
     cwjobs:     bots.cwjobs.status,
+    uc:         bots.uc.status,
   };
 }
 
@@ -79,8 +82,9 @@ function start(botName, userDataPath, opts = {}) {
   if (!BOT_SCRIPTS[botName]) throw new Error(`Unknown bot: ${botName}`);
   if (bots[botName].proc) return;
 
-  // Scorer processes the queue regardless of schedule — only search bots are time-gated
-  if (botName !== 'scorer' && !isWithinSchedule()) {
+  // Scorer processes the queue regardless of schedule — only search bots are
+  // time-gated. UC logs already-applied jobs to the journal, so it's not gated.
+  if (botName !== 'scorer' && botName !== 'uc' && !isWithinSchedule()) {
     const prefs = db.getSearchPreferences();
     throw new Error(`Outside scheduled hours (${prefs.schedule_start}:00–${prefs.schedule_end}:00). Change your schedule in Search Preferences.`);
   }
