@@ -1202,6 +1202,14 @@ function cleanTitle(t) {
   return first.replace(/\s+with verification$/i, '');
 }
 
+// The dynamic sentence in the Universal Credit card — kept as a function so the
+// 5s poll can refresh it in place as applications are applied to / logged.
+function ucPendingSentence(n) {
+  return Number(n) > 0
+    ? `<strong>${n}</strong> application${Number(n) === 1 ? '' : 's'} ready to log.`
+    : 'Your journal is up to date.';
+}
+
 // Cover letters are text (not a file), so we can't open them via the OS like the
 // CV. Hold them here keyed by job_id and show them in a modal on demand.
 const _coverLetters = {};
@@ -1415,7 +1423,7 @@ async function renderDashboard() {
         <strong>📋 Universal Credit journal</strong>
         <span class="bot-status bot-status-${status.uc || 'stopped'}" id="status-uc">${status.uc || 'stopped'}</span>
       </div>
-      <p style="font-size:13px;color:#64748b;margin:6px 0 12px">Logs the jobs Job-AI has applied to straight into your Universal Credit "log your work search" journal, each on the real date it was applied. ${ucPending > 0 ? `<strong>${ucPending}</strong> application${ucPending === 1 ? '' : 's'} ready to log.` : 'Your journal is up to date.'} You sign in to your UC account once; the session is remembered after that.</p>
+      <p style="font-size:13px;color:#64748b;margin:6px 0 12px">Logs the jobs Job-AI has applied to straight into your Universal Credit "log your work search" journal, each on the real date it was applied. <span id="uc-pending-text">${ucPendingSentence(ucPending)}</span> You sign in to your UC account once; the session is remembered after that.</p>
       <div class="bot-card-actions">
         <button class="primary" data-bot="uc" data-action="start" ${(!dashboardHasLicense || status.uc === 'running' || (ucPending || 0) === 0) ? 'disabled' : ''}>▶ Log to UC journal</button>
         <button class="secondary" data-bot="uc" data-action="stop" ${status.uc === 'running' ? '' : 'disabled'}>Stop</button>
@@ -1653,10 +1661,26 @@ async function renderDashboard() {
   _statsPoll = setInterval(async () => {
     if (!document.getElementById('stat-applied')) { clearInterval(_statsPoll); _statsPoll = null; return; }
     try {
-      const [summary, recent] = await Promise.all([
+      const [summary, recent, ucPendingLive] = await Promise.all([
         window.api.queue.summary(),
         window.api.queue.recent(20),
+        window.api.queue.ucPending().catch(() => null),
       ]);
+      // Keep the Universal Credit card's pending count accurate as jobs get
+      // applied to (count rises) and logged (count falls), without a re-render.
+      if (ucPendingLive !== null) {
+        const ucText = document.getElementById('uc-pending-text');
+        if (ucText) {
+          const html = ucPendingSentence(ucPendingLive);
+          if (ucText.innerHTML !== html) ucText.innerHTML = html;
+        }
+        // Match the "Log to UC journal" button to the live count — but leave it
+        // alone while the agent is running (setBotControlsState owns it then).
+        const ucStart = content.querySelector('button[data-bot="uc"][data-action="start"]');
+        const ucStatusEl = document.getElementById('status-uc');
+        const ucRunning = ucStatusEl && ucStatusEl.textContent.trim() === 'running';
+        if (ucStart && !ucRunning) ucStart.disabled = !dashboardHasLicense || Number(ucPendingLive) === 0;
+      }
       const c = {};
       summary.forEach(r => { c[r.status] = r.count; });
       const map = { 'stat-applied': c.applied || 0, 'stat-pending': c.pending || 0, 'stat-tailored': c.tailored || 0, 'stat-skipped': c.skipped || 0, 'stat-failed': c.apply_failed || 0 };
