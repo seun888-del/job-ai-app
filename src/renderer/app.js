@@ -1519,7 +1519,10 @@ async function renderDashboard() {
     </div>
 
     <div class="card card-wide">
-      <h3>Recent Activity</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px">
+        <h3 style="margin:0">Recent Activity</h3>
+        <button id="clear-activity-btn" class="secondary" style="font-size:12px;padding:5px 12px">Clear</button>
+      </div>
       <table class="data-table">
         <thead>
           <tr><th>Title</th><th>Company</th><th>Status</th><th>CV Used</th><th>Updated</th><th></th></tr>
@@ -1558,6 +1561,30 @@ async function renderDashboard() {
     try { localStorage.setItem('uc_auto_optin', ucAutoToggle.checked ? '1' : '0'); } catch (_) {}
     const acts = document.getElementById('uc-auto-actions');
     if (acts) acts.style.display = ucAutoToggle.checked ? '' : 'none';
+  });
+
+  // Clear Recent Activity: removes the finished (applied / failed / skipped) rows
+  // from the list. The permanent record is kept, so nothing is re-applied to.
+  const clearActivityBtn = document.getElementById('clear-activity-btn');
+  if (clearActivityBtn) clearActivityBtn.addEventListener('click', async () => {
+    const ok = await showConfirm({
+      title: 'Clear recent activity?',
+      bodyHtml: `<p>This clears the applied, failed and skipped entries from the list, and the numbers above.</p>
+        <p style="margin-top:8px">It does not undo anything: Job-AI keeps a permanent record, so no job will be re-applied to, and your Universal Credit log is unaffected.</p>`,
+      confirmText: 'Clear',
+      cancelText: 'Cancel',
+    });
+    if (!ok) return;
+    try { await window.api.queue.clearRecent(); } catch (_) {}
+    const body = document.getElementById('recent-activity-body');
+    if (body) { body.innerHTML = recentRowsHtml([]); body._lastHtml = body.innerHTML; }
+    // Refresh the stat cards immediately (the 5s poll would catch up anyway)
+    try {
+      const summary = await window.api.queue.summary();
+      const c = {}; summary.forEach(r => { c[r.status] = r.count; });
+      const map = { 'stat-applied': c.applied || 0, 'stat-pending': c.pending || 0, 'stat-tailored': c.tailored || 0, 'stat-skipped': c.skipped || 0, 'stat-failed': c.apply_failed || 0 };
+      for (const [id, val] of Object.entries(map)) { const el = document.getElementById(id); if (el) el.textContent = val; }
+    } catch (_) {}
   });
 
   // Per-site run toggles: remember which job sites the user wants included when

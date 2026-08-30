@@ -81,6 +81,25 @@ async function markUcLoggedManual(jobIds) {
   }
 }
 
+// Clear the Recent Activity list: delete the finished rows (applied, failed,
+// skipped) from the queue. The permanent applied_jobs table is NOT touched, so
+// nothing is ever re-applied to and the Universal Credit log is unaffected.
+// In-flight rows (pending / processing / cv_ready / applying) are left alone.
+async function clearRecentActivity() {
+  if (!dbPath || !fs.existsSync(dbPath)) return 0;
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(fs.readFileSync(dbPath));
+  try {
+    const res = db.exec("SELECT COUNT(*) AS c FROM queue WHERE status IN ('applied','apply_failed','skipped')");
+    const n = res.length ? (res[0].values[0][0] || 0) : 0;
+    db.run("DELETE FROM queue WHERE status IN ('applied','apply_failed','skipped')");
+    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    return n;
+  } finally {
+    db.close();
+  }
+}
+
 function getQueueSummary() {
   return withQueueDb(db => {
     const rows = all(db, 'SELECT status, COUNT(*) AS count FROM queue GROUP BY status');
@@ -216,4 +235,4 @@ function getAnalytics() {
   }, null);
 }
 
-module.exports = { init, getQueueSummary, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics };
+module.exports = { init, getQueueSummary, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics };

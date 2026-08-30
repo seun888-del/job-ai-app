@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   queue: {
     summary: () => ipcRenderer.invoke('queue:summary'),
+    clearRecent: () => ipcRenderer.invoke('queue:clearRecent'),
     ucPending: () => ipcRenderer.invoke('queue:ucPending'),
     ucPendingList: () => ipcRenderer.invoke('queue:ucPendingList'),
     ucMarkLogged: (jobIds) => ipcRenderer.invoke('uc:markLogged', jobIds),
