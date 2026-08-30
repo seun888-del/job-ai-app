@@ -1498,7 +1498,7 @@ async function renderDashboard() {
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:#64748b;cursor:pointer">
         <input type="checkbox" id="uc-auto-toggle" ${localStorage.getItem('uc_auto_optin') === '1' ? 'checked' : ''}>
-        Let Job-AI sign in and submit them for me (advanced)
+        Click to let Job-AI sign in and submit them for me (advanced)
       </label>
       <div id="uc-auto-actions" style="${localStorage.getItem('uc_auto_optin') === '1' ? '' : 'display:none'};margin-top:8px">
         <p style="font-size:11.5px;color:#94a3b8;margin:0 0 8px;line-height:1.45">This signs in to your Universal Credit account and submits each entry automatically. Most people prefer to paste the log in themselves. Only use this if you're comfortable with the app filling in your journal for you.</p>
@@ -1710,7 +1710,7 @@ async function renderDashboard() {
               <li>This automates a government account. There is a chance the DWP could flag automated activity on your account. Most people use the copy option and add the entries themselves.</li>
               <li>You are responsible for what's in your journal. Job-AI only logs jobs you genuinely applied to, on their real dates, but please review your journal.</li>
             </ul>
-            <p style="margin-top:12px">You turn this on and off with the <strong>"Let Job-AI sign in and submit them for me"</strong> tick box on the Universal Credit card. Untick it any time to go back to copying your log in yourself.</p>`,
+            <p style="margin-top:12px">You turn this on and off with the <strong>"Click to let Job-AI sign in and submit them for me"</strong> tick box on the Universal Credit card. Untick it any time to go back to copying your log in yourself.</p>`,
           confirmText: 'I understand, turn it on',
           cancelText: 'Cancel',
         });
