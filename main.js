@@ -234,6 +234,19 @@ app.whenReady().then(async () => {
         }
       }
     }
+    // Universal Credit agent finished a run — tell the user how many applications
+    // were logged to their UC journal (the window may be minimised or closed).
+    const ucDone = text.match(/\[Universal Credit Agent\] Done\. Logged (\d+)(?:, skipped\/failed (\d+))?\.\s*(\d+)? still pending/);
+    if (ucDone && Notification.isSupported()) {
+      const logged = ucDone[1];
+      const pending = ucDone[3] || '0';
+      const body = Number(logged) > 0
+        ? `${logged} application${logged === '1' ? '' : 's'} logged to your Universal Credit journal${pending !== '0' ? `, ${pending} still to log — run it again to finish.` : '. Your journal is up to date.'}`
+        : `Couldn't log any applications this run. Open the Universal Credit card and try again, and make sure you complete sign-in in the window.`;
+      const note = new Notification({ title: 'Universal Credit journal updated', body, silent: false });
+      note.on('click', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
+      note.show();
+    }
     // When an agent hits the user's daily application limit, notify ONCE per day
     // (the agents log this many times as they keep checking, so we de-dupe).
     if (/daily limit reached/i.test(text) && !dailyLimitNotifiedToday() && Notification.isSupported()) {
