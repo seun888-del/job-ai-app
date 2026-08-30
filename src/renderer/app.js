@@ -1709,7 +1709,8 @@ async function renderDashboard() {
             <ul style="margin:10px 0 0;padding-left:18px;line-height:1.55">
               <li>This automates a government account. There is a chance the DWP could flag automated activity on your account. Most people use the copy option and add the entries themselves.</li>
               <li>You are responsible for what's in your journal. Job-AI only logs jobs you genuinely applied to, on their real dates, but please review your journal.</li>
-            </ul>`,
+            </ul>
+            <p style="margin-top:12px">You turn this on and off with the <strong>"Let Job-AI sign in and submit them for me"</strong> tick box on the Universal Credit card. Untick it any time to go back to copying your log in yourself.</p>`,
           confirmText: 'I understand, turn it on',
           cancelText: 'Cancel',
         });
