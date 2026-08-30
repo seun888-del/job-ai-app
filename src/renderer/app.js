@@ -1304,6 +1304,7 @@ async function renderDashboard() {
   ]);
   const anyConnected = Object.values(connectedStatus || {}).some(Boolean);
   const isUS = (profile?.country || 'United Kingdom') === 'United States';
+  _isUKUser = !isUS;  // gates the UK-only Universal Credit tour step
   // A currently-valid license (not just any key) is required to start the agents.
   dashboardHasLicense = licenseIsActive(license);
 
@@ -2052,6 +2053,9 @@ async function updateNavProgress() {
 
 // â”€â”€ Onboarding tour (first launch only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+// Set from the dashboard render — the UC tour step (and card) are UK-only.
+let _isUKUser = true;
+
 const TOUR_STEPS = [
   {
     view: 'personal',
@@ -2095,6 +2099,13 @@ const TOUR_STEPS = [
     tip: 'When you click Start applying, only the ticked sites launch. Each opens a Chrome window and works inside it automatically, searching, tailoring your CV, and applying to matching roles on its own.',
     action: 'Click "Start applying" (the checklist flags anything still missing). Important: the Chrome windows that open are the Agent working, not your own browser. Please leave them alone. Do not click, type in, or close them. Simply minimise them and carry on with your day. Closing a window stops that Agent.',
   },
+  {
+    view: 'dashboard',
+    ukOnly: true,
+    title: 'One more thing: your Universal Credit journal',
+    tip: 'If you claim Universal Credit, Job-AI can log every application into your "log your work search" journal for you, each on the day it was actually applied, so there is nothing to type in by hand. On the Dashboard you will see a "Universal Credit journal" card showing how many applications are ready to log.',
+    action: 'Once the Agents have applied to some jobs, click "Log to UC journal" on that card and sign in to your Universal Credit account once (the session is remembered after that). It only ever logs jobs that were genuinely applied, on their real dates.',
+  },
 ];
 
 function tourNavigateTo(view) {
@@ -2120,14 +2131,16 @@ function tourNavigateTo(view) {
 
 function startTour() {
   let step = 0;
+  // UK-only steps (the Universal Credit journal) are dropped for US users.
+  const steps = TOUR_STEPS.filter(s => !s.ukOnly || _isUKUser);
 
   function showPanel() {
     const existing = document.getElementById('tour-panel');
     if (existing) existing.remove();
 
-    const s      = TOUR_STEPS[step];
-    const isLast = step === TOUR_STEPS.length - 1;
-    const pct    = Math.round(((step + 1) / TOUR_STEPS.length) * 100);
+    const s      = steps[step];
+    const isLast = step === steps.length - 1;
+    const pct    = Math.round(((step + 1) / steps.length) * 100);
 
     const panel = document.createElement('div');
     panel.id        = 'tour-panel';
@@ -2137,7 +2150,7 @@ function startTour() {
         <div class="tour-progress-fill" style="width:${pct}%"></div>
       </div>
       <div class="tour-body">
-        <div class="tour-step-label">Step ${step + 1} of ${TOUR_STEPS.length}</div>
+        <div class="tour-step-label">Step ${step + 1} of ${steps.length}</div>
         <div class="tour-step-title">${s.title}</div>
         <p class="tour-tip">${s.tip}</p>
         <div class="tour-action">${s.action}</div>
@@ -2174,7 +2187,7 @@ function startTour() {
     showPanel();
     // Navigate sidebar + page in background
     try {
-      await tourNavigateTo(TOUR_STEPS[step].view);
+      await tourNavigateTo(steps[step].view);
     } catch (e) {
       console.warn('[Tour] Navigation error:', e);
     }
