@@ -102,13 +102,18 @@ async function clearRecentActivity() {
 
 function getQueueSummary() {
   return withQueueDb(db => {
-    const rows = all(db, 'SELECT status, COUNT(*) AS count FROM queue GROUP BY status');
-    // "Tailored so far" — every job that has had a CV generated keeps its
-    // cv_path through later status changes, so this is a persistent total that
-    // doesn't get consumed the way the momentary cv_ready status does.
-    const tailored = all(db, "SELECT COUNT(*) AS count FROM queue WHERE cv_path IS NOT NULL AND cv_path != ''");
-    rows.push({ status: 'tailored', count: tailored[0]?.count || 0 });
-    return rows;
+    // A brand-new profile has a queue.db (meta table) but no `queue` table yet —
+    // the bots create it on their first run. Tolerate that so the Dashboard shows
+    // an empty state instead of "Failed to load".
+    try {
+      const rows = all(db, 'SELECT status, COUNT(*) AS count FROM queue GROUP BY status');
+      // "Tailored so far" — every job that has had a CV generated keeps its
+      // cv_path through later status changes, so this is a persistent total that
+      // doesn't get consumed the way the momentary cv_ready status does.
+      const tailored = all(db, "SELECT COUNT(*) AS count FROM queue WHERE cv_path IS NOT NULL AND cv_path != ''");
+      rows.push({ status: 'tailored', count: tailored[0]?.count || 0 });
+      return rows;
+    } catch (_) { return []; }
   }, []);
 }
 
@@ -119,16 +124,20 @@ function getRecentApplications(limit = 50) {
   // wrong work type, already applied, duplicate, training course) are noise that
   // buries the real activity, so they're excluded here — the aggregate count is
   // still shown in the stats tile and the full detail is in the Agent Logs.
-  return withQueueDb(db => all(db, `
-    SELECT * FROM queue
-    WHERE status IN ('applied','apply_failed')
-       OR (status = 'skipped' AND (
-             reason LIKE '%not attached%'
-             OR reason LIKE '%reconnect%'
-             OR reason LIKE '%session%'
-       ))
-    ORDER BY updated_at DESC LIMIT ?
-  `, [limit]), []);
+  return withQueueDb(db => {
+    try {
+      return all(db, `
+        SELECT * FROM queue
+        WHERE status IN ('applied','apply_failed')
+           OR (status = 'skipped' AND (
+                 reason LIKE '%not attached%'
+                 OR reason LIKE '%reconnect%'
+                 OR reason LIKE '%session%'
+           ))
+        ORDER BY updated_at DESC LIMIT ?
+      `, [limit]);
+    } catch (_) { return []; }  // no `queue` table yet on a fresh profile
+  }, []);
 }
 
 // Applications submitted today. Mirrors the bots' own cap counter

@@ -332,6 +332,11 @@ app.whenReady().then(async () => {
   setInterval(() => refreshLicense('periodic'), 15 * 60 * 1000);
   maybeSendDailySummary(); // also run immediately on launch in case it's past 6 PM
 
+  // Phone companion: push an activity snapshot to the backend on a timer so the
+  // user can see their job hunt on tryjobai.com/app. Best-effort, no-op until a
+  // licence key exists.
+  try { require('./src/services/companionSync').start(); } catch (_) {}
+
   // Anonymous install beacon (once per install) — feeds the founder funnel stats
   sendInstallBeacon();
 
