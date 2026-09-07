@@ -15,6 +15,7 @@ const queue     = require('./modules/queue_manager');
 const logger    = require('./modules/logger');
 const salary    = require('./modules/salary_filter');
 const sponsorship = require('./modules/sponsorship');
+const jobFeed   = require('./modules/job_feed');
 const stealth   = require('./modules/stealth');
 const atsFiller = require('./modules/ats_filler');
 const { launchPersistentContext, connectToRunningChrome, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
@@ -188,23 +189,40 @@ async function phase1_searchAndQueue(context, reedPage) {
   console.log('  [Reed Agent] Phase 1 — Searching for jobs');
   console.log('══════════════════════════════════════════════════════');
 
-  for (const searchTerm of cfg.JOB_SEARCHES) {
-    // Drain any cv_ready jobs that built up before starting the next search
-    reedPage = await drainReadyCVs(context, reedPage);
+  // Preferred source: the backend candidate feed (official Reed API search for
+  // the user's terms, server-side). Opt-in + fail-safe — an empty list here
+  // means we drop straight to the live reed.co.uk search below. Either way each
+  // job goes through the SAME getJobDescription + filterAndQueue path, so JD
+  // extraction, all skip rules and the apply flow are unchanged.
+  let feedStubs = [];
+  try { feedStubs = await jobFeed.fetchReedStubs({ country: 'GB' }); } catch (_) { feedStubs = []; }
 
-    console.log(`\n  [Reed Agent] Searching: "${searchTerm}"`);
-    let jobs;
-    try {
-      const result = await reed.searchJobs(context, reedPage, searchTerm, cfg.MAX_JOBS_PER_SEARCH, false);
-      jobs     = result.jobs;
-      reedPage = result.page;
-    } catch (err) {
-      console.error(`  [Reed Agent] Search failed: ${err.message}`);
-      continue;
-    }
-    for (const job of jobs) {
+  if (feedStubs.length) {
+    console.log(`  [Reed Agent] Discovery via backend feed — ${feedStubs.length} job(s), skipping live search`);
+    for (const job of feedStubs) {
+      reedPage = await drainReadyCVs(context, reedPage);
       await filterAndQueue(job, j => reed.getJobDescription(reedPage, j));
       await DELAY(2000);
+    }
+  } else {
+    for (const searchTerm of cfg.JOB_SEARCHES) {
+      // Drain any cv_ready jobs that built up before starting the next search
+      reedPage = await drainReadyCVs(context, reedPage);
+
+      console.log(`\n  [Reed Agent] Searching: "${searchTerm}"`);
+      let jobs;
+      try {
+        const result = await reed.searchJobs(context, reedPage, searchTerm, cfg.MAX_JOBS_PER_SEARCH, false);
+        jobs     = result.jobs;
+        reedPage = result.page;
+      } catch (err) {
+        console.error(`  [Reed Agent] Search failed: ${err.message}`);
+        continue;
+      }
+      for (const job of jobs) {
+        await filterAndQueue(job, j => reed.getJobDescription(reedPage, j));
+        await DELAY(2000);
+      }
     }
   }
 
