@@ -154,6 +154,12 @@ async function init(userDataPath) {
   if (!searchPrefsCols.includes('proxy_url')) {
     db.exec("ALTER TABLE search_preferences ADD COLUMN proxy_url TEXT DEFAULT ''");
   }
+  // Faster job discovery: pull the Reed job list from the licensed backend feed
+  // instead of scraping the Reed website. Default off for now; a future default-on
+  // (change this default to 1) makes it automatic with no user action.
+  if (!searchPrefsCols.includes('use_job_feed')) {
+    db.exec('ALTER TABLE search_preferences ADD COLUMN use_job_feed INTEGER DEFAULT 0');
+  }
 
   // Seed singleton rows
   if (!db.prepare('SELECT id FROM profile WHERE id = 1').get()) {

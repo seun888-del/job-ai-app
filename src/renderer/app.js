@@ -643,6 +643,16 @@ async function renderSearch() {
     </div>
 
     <div class="card">
+      <h3>Job Discovery</h3>
+      <p class="card-hint">Find Reed jobs through Job-AI's servers, faster, more reliable, and matched to your search terms, instead of scanning the Reed website in the browser. If it is ever unavailable the Agent falls back to the normal search on its own.</p>
+      <div class="checkbox-field">
+        <input id="use_job_feed" type="checkbox" ${prefs.use_job_feed ? 'checked' : ''}>
+        <label for="use_job_feed">Use faster job discovery (beta)</label>
+      </div>
+      <div class="status-msg" id="status-jobfeed"></div>
+    </div>
+
+    <div class="card">
       <h3>Application Limits</h3>
       <div class="field">
         <label>Max applications per day</label>
@@ -813,7 +823,21 @@ async function renderSearch() {
     });
     showStatus(document.getElementById('status-schedule'), 'Schedule saved');
     showToast('Schedule saved');
-  });}
+  });
+
+  // Job discovery toggle — saves immediately on change.
+  const jobFeedToggle = document.getElementById('use_job_feed');
+  if (jobFeedToggle) {
+    jobFeedToggle.addEventListener('change', async () => {
+      try {
+        await window.api.searchPrefs.save({ use_job_feed: jobFeedToggle.checked ? 1 : 0 });
+        showStatus(document.getElementById('status-jobfeed'), jobFeedToggle.checked ? 'On. Restart the Agents to apply.' : 'Off');
+        showToast('Saved');
+      } catch (e) {
+        jobFeedToggle.checked = !jobFeedToggle.checked; // revert on failure
+      }
+    });
+  }}
 
 // â”€â”€ 5. License â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LICENSE_ERRORS = {

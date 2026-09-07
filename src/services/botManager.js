@@ -130,6 +130,14 @@ function start(botName, userDataPath, opts = {}) {
     env.JOBBOT_LICENSE_KEY = license.license_key;
   }
 
+  // Faster job discovery (Search Preferences → Job Discovery): pull the Reed job
+  // list from the backend candidate feed instead of scraping the Reed site. The
+  // bot falls back to the live search on its own if the feed is off/unavailable.
+  // Opt-in for now; built so a future default-on needs no user action here.
+  try {
+    if (db.getSearchPreferences().use_job_feed) env.JOBBOT_USE_JOB_FEED = '1';
+  } catch (_) { /* prefs unavailable → feed off, live search used */ }
+
   // Backup proxy override: if the user has entered their own proxy in Search
   // Preferences (Connection card), pass it through so browser_launcher uses it
   // INSTEAD of the built-in one. This is the escape hatch for when the shared
