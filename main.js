@@ -177,7 +177,7 @@ app.whenReady().then(async () => {
   createWindow();
   refreshLicense('startup'); // recover a reinstated/renewed licence on relaunch, no re-paste
 
-  const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent', greenhouse: 'Greenhouse Agent', uc: 'Universal Credit Agent' };
+  const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent', greenhouse: 'Auto-Apply Agent', uc: 'Universal Credit Agent' };
   // The user-facing job-site agents. The scorer runs alongside them but is an
   // internal helper, so it never triggers a "finished" notification of its own.
   const JOB_SITE_KEYS = ['reed', 'linkedin', 'greenhouse'];

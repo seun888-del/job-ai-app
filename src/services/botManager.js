@@ -143,10 +143,10 @@ function start(botName, userDataPath, opts = {}) {
     if (db.getSearchPreferences().use_job_feed) env.JOBBOT_USE_JOB_FEED = '1';
   } catch (_) { /* prefs unavailable → feed off, live search used */ }
 
-  // The Greenhouse agent's ONLY source is the backend candidate feed (there is
-  // no site to scrape), so it always uses the feed regardless of the toggle.
-  // JOBBOT_GREENHOUSE_SUBMIT is deliberately left unset → the agent runs in DRY
-  // RUN (fills forms, never submits) until we flip it on after a supervised test.
+  // The ATS Auto-Apply agent's ONLY source is the backend candidate feed (there
+  // is no site to scrape), so it always uses the feed regardless of the toggle.
+  // JOBBOT_ATS_SUBMIT is deliberately left unset → the agent runs in DRY RUN
+  // (fills forms, never submits) until we flip it on after a supervised test.
   if (botName === 'greenhouse') env.JOBBOT_USE_JOB_FEED = '1';
 
   // Backup proxy override: if the user has entered their own proxy in Search

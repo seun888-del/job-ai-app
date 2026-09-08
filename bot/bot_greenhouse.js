@@ -1,23 +1,23 @@
 /**
- * Greenhouse Agent
+ * ATS Auto-Apply Agent  (file kept as bot_greenhouse.js / key "greenhouse")
  * ─────────────────────────────────────────────────────────────────────────
- * Auto-applies to Greenhouse-hosted jobs — the ATS whose PUBLIC hosted form
- * (job-boards.greenhouse.io/{company}/jobs/{id}) can be completed without an
- * employer key or a candidate account. Same shape as the Reed agent:
+ * Auto-applies to SIMPLE-FORM ATS jobs — the ATSes whose public hosted forms
+ * can be completed with no employer key and no candidate account, and which the
+ * shared ats_filler already drives: Greenhouse, SmartRecruiters, Workable,
+ * Breezy (+ Lever/Ashby/Teamtailor/Recruitee/Pinpoint as the feed adds them).
  *
- *  Phase 1 — Pull auto-appliable jobs from the backend candidate feed, fetch
- *            each job's JD + screening questions from the public Greenhouse
- *            Job Board API (one job at a time, so no OOM), filter, and queue
- *            with source 'greenhouse'. The Scorer agent then tailors the CV.
- *  Phase 2 — For each cv_ready Greenhouse job, open the hosted form and complete
- *            it with the shared ats_filler.
+ *  Phase 1 — Pull auto-appliable jobs from the backend candidate feed
+ *            (/v1/jobs/candidates, auto_apply=true across all these ATSes),
+ *            fetch each JD (Greenhouse via its public single-job API; every
+ *            other ATS by loading the posting headlessly and reading its text),
+ *            filter, and queue with source 'ats'. The Scorer tailors the CV.
+ *  Phase 2 — For each cv_ready job, open the hosted form, DETECT the ATS from
+ *            the URL, and complete it with the shared ats_filler.
  *
- * SAFE BY DEFAULT: the final submit is only clicked when JOBBOT_GREENHOUSE_SUBMIT=1.
- * Otherwise it is a DRY RUN — every field is filled but nothing is sent — so the
- * whole pipeline can be tested against real forms without applying to employers.
- *
- * No login needed (the hosted form is public), so there is no account/session to
- * verify — unlike the Reed/LinkedIn agents.
+ * SAFE BY DEFAULT: the final submit is only clicked when JOBBOT_ATS_SUBMIT=1
+ * (JOBBOT_GREENHOUSE_SUBMIT still honoured). Otherwise it is a DRY RUN — every
+ * field is filled but nothing is sent — so the pipeline can be tested against
+ * real forms without applying to employers. Runs HEADLESS (no login needed).
  */
 
 const cfg         = require('./config');
@@ -28,13 +28,14 @@ const sponsorship = require('./modules/sponsorship');
 const jobFeed     = require('./modules/job_feed');
 const stealth     = require('./modules/stealth');
 const atsFiller   = require('./modules/ats_filler');
-const { launchPersistentContext, connectToRunningChrome, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
+const { launchPersistentContext, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
 const path        = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
 const POLL_INTERVAL = 10000;   // 10 s between queue polls
 const MAX_IDLE      = 6;       // give up after ~60 s of no pending/ready jobs
-const SUBMIT        = process.env.JOBBOT_GREENHOUSE_SUBMIT === '1'; // off = dry run
+const SUBMIT        = process.env.JOBBOT_ATS_SUBMIT === '1' || process.env.JOBBOT_GREENHOUSE_SUBMIT === '1'; // off = dry run
+const SOURCE        = 'ats';
 
 // ── filters (mirror the Reed agent) ────────────────────────────────────────
 function isRelevantTitle(title) {
@@ -64,7 +65,7 @@ function stripHtml(s) {
     .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-// Parse a Greenhouse hosted-form URL into { token, id } for the public API.
+// Greenhouse exposes a cheap single-job API (JD + questions, one job, no OOM).
 function parseGh(url) {
   try {
     const u = new URL(url);
@@ -73,64 +74,70 @@ function parseGh(url) {
     return m ? { token: m[1], id: m[2] } : null;
   } catch (_) { return null; }
 }
-
-// Fetch ONE job's description + location from the public Greenhouse Job Board
-// API (GET needs no key; one job at a time so no OOM). null on any problem.
-async function fetchGhDetails(job) {
+async function fetchGhJD(job) {
   const p = parseGh(job.url);
   if (!p) return null;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     let res;
-    try {
-      res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${p.token}/jobs/${p.id}?questions=true`, { signal: controller.signal });
-    } finally { clearTimeout(timer); }
+    try { res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${p.token}/jobs/${p.id}?questions=true`, { signal: controller.signal }); }
+    finally { clearTimeout(timer); }
     if (!res.ok) return null;
     const d = await res.json().catch(() => null);
-    if (!d) return null;
-    return { description: stripHtml(d.content || '').slice(0, 8000), location: (d.location && d.location.name) || '' };
+    return d ? stripHtml(d.content || '').slice(0, 8000) : null;
   } catch (_) { return null; }
+}
+// Generic JD: Greenhouse via API, every other ATS by loading the posting and
+// reading its visible text (uniform, needs no per-ATS endpoint).
+async function fetchJD(page, job) {
+  const gh = await fetchGhJD(job);
+  if (gh) return gh;
+  try {
+    await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await DELAY(1500 + Math.random() * 1500);
+    const txt = await page.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
+    return String(txt || '').replace(/\s+/g, ' ').trim().slice(0, 8000);
+  } catch (_) { return ''; }
 }
 
 // ── Phase 1: source + filter + queue ───────────────────────────────────────
-async function filterAndQueue(job) {
-  if (queue.has(job.jobId)) { console.log(`  [Greenhouse Agent] Already queued: ${job.title}`); return; }
-  if (queue.wasApplied(job.jobId)) { console.log(`  [Greenhouse Agent] Already applied — skipping: ${job.title}`); return; }
-  if (!isRelevantTitle(job.title)) { console.log(`  [Greenhouse Agent] Title filter — skipping: ${job.title}`); return; }
-  if (isBlockedCompany(job.company)) { console.log(`  [Greenhouse Agent] Company blocked — skipping: ${job.title} @ ${job.company}`); return; }
-  if (queue.hasCanonical(job.title, job.company)) { console.log(`  [Greenhouse Agent] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`); return; }
+async function filterAndQueue(page, job) {
+  if (queue.has(job.jobId)) { console.log(`  [Auto-Apply] Already queued: ${job.title}`); return; }
+  if (queue.wasApplied(job.jobId)) { console.log(`  [Auto-Apply] Already applied — skipping: ${job.title}`); return; }
+  if (!isRelevantTitle(job.title)) { console.log(`  [Auto-Apply] Title filter — skipping: ${job.title}`); return; }
+  if (isBlockedCompany(job.company)) { console.log(`  [Auto-Apply] Company blocked — skipping: ${job.title} @ ${job.company}`); return; }
+  if (queue.hasCanonical(job.title, job.company)) { console.log(`  [Auto-Apply] Duplicate (cross-site) — skipping: ${job.title} @ ${job.company}`); return; }
 
-  const details = await fetchGhDetails(job);
-  const description = (details && details.description) || job.description || '';
-  if (!description || description.trim().split(/\s+/).length < 80) {
-    console.log(`  [Greenhouse Agent] Short/missing JD — skipping: ${job.title}`);
-    queue.add({ ...job, source: 'greenhouse', status: 'skipped', reason: 'JD too short or missing' });
+  const description = (await fetchJD(page, job)) || job.description || '';
+  if (!description || description.trim().split(/\s+/).length < 60) {
+    console.log(`  [Auto-Apply] Short/missing JD — skipping: ${job.title}`);
+    queue.add({ ...job, source: SOURCE, status: 'skipped', reason: 'JD too short or missing' });
     return;
   }
   const workType = detectWorkType(description);
   if (!cfg.WORK_TYPE_PRIORITY.includes(workType)) {
-    console.log(`  [Greenhouse Agent] Work type "${workType}" not wanted — skipping: ${job.title}`);
-    queue.add({ ...job, source: 'greenhouse', status: 'skipped', reason: `Work type (${workType}) not wanted` });
+    console.log(`  [Auto-Apply] Work type "${workType}" not wanted — skipping: ${job.title}`);
+    queue.add({ ...job, source: SOURCE, status: 'skipped', reason: `Work type (${workType}) not wanted` });
     return;
   }
   if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(description))) {
-    console.log(`  [Greenhouse Agent] No sponsorship offered — skipping: ${job.title}`);
-    queue.add({ ...job, source: 'greenhouse', status: 'skipped', reason: 'No sponsorship offered' });
+    console.log(`  [Auto-Apply] No sponsorship offered — skipping: ${job.title}`);
+    queue.add({ ...job, source: SOURCE, status: 'skipped', reason: 'No sponsorship offered' });
     return;
   }
   if (!salary.isAcceptable(description, cfg.APPLICANT.salaryExpectation)) {
-    console.log(`  [Greenhouse Agent] Below salary — skipping: ${job.title}`);
-    queue.add({ ...job, source: 'greenhouse', status: 'skipped', reason: 'Below salary expectation' });
+    console.log(`  [Auto-Apply] Below salary — skipping: ${job.title}`);
+    queue.add({ ...job, source: SOURCE, status: 'skipped', reason: 'Below salary expectation' });
     return;
   }
-  queue.add({ ...job, description, location: (details && details.location) || '', source: 'greenhouse', workType });
-  console.log(`  [Greenhouse Agent] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
+  queue.add({ ...job, description, source: SOURCE, workType });
+  console.log(`  [Auto-Apply] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
 }
 
-async function phase1_sourceAndQueue() {
+async function phase1_sourceAndQueue(page) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [Greenhouse Agent] Phase 1 — sourcing auto-appliable jobs from the feed');
+  console.log('  [Auto-Apply] Phase 1 — sourcing auto-appliable ATS jobs from the feed');
   console.log('══════════════════════════════════════════════════════');
 
   let jobs = [];
@@ -138,20 +145,20 @@ async function phase1_sourceAndQueue() {
     try { jobs = jobs.concat(await jobFeed.fetchAtsJobs({ country, limit: 100 })); } catch (_) {}
   }
   if (!jobs.length) {
-    console.log('  [Greenhouse Agent] No auto-appliable jobs in the feed right now (feed off, no licence, or none matched).');
+    console.log('  [Auto-Apply] No auto-appliable jobs in the feed right now (feed off, no licence, or none matched your terms).');
     return;
   }
-  console.log(`  [Greenhouse Agent] ${jobs.length} job(s) from the feed`);
-  for (const job of jobs) { await filterAndQueue(job); await DELAY(1500); }
+  console.log(`  [Auto-Apply] ${jobs.length} job(s) from the feed`);
+  for (const job of jobs) { await filterAndQueue(page, job); await DELAY(800); }
 
-  const pending = queue.getByStatus('pending').filter(j => j.source === 'greenhouse').length;
-  console.log(`\n  [Greenhouse Agent] Phase 1 complete. ${pending} job(s) queued for Scorer.`);
+  const pending = queue.getByStatus('pending').filter(j => j.source === SOURCE).length;
+  console.log(`\n  [Auto-Apply] Phase 1 complete. ${pending} job(s) queued for Scorer.`);
 }
 
 // ── Phase 2: apply cv_ready jobs ───────────────────────────────────────────
 async function phase2_applyReadyCVs(context, page) {
   console.log('\n══════════════════════════════════════════════════════');
-  console.log('  [Greenhouse Agent] Phase 2 — waiting for Scorer agent...');
+  console.log('  [Auto-Apply] Phase 2 — waiting for Scorer agent...');
   console.log('══════════════════════════════════════════════════════');
 
   const priority = workTypePriority();
@@ -159,41 +166,42 @@ async function phase2_applyReadyCVs(context, page) {
 
   while (true) {
     const readyJobs = queue.getByStatus('cv_ready')
-      .filter(j => j.source === 'greenhouse')
+      .filter(j => j.source === SOURCE)
       .sort((a, b) => (priority[a.workType] ?? 99) - (priority[b.workType] ?? 99));
     const pendingJobs = [
-      ...queue.getByStatus('pending').filter(j => j.source === 'greenhouse'),
-      ...queue.getByStatus('processing').filter(j => j.source === 'greenhouse'),
+      ...queue.getByStatus('pending').filter(j => j.source === SOURCE),
+      ...queue.getByStatus('processing').filter(j => j.source === SOURCE),
     ].length;
 
     for (const job of readyJobs) {
       const appliedToday = queue.countAppliedToday();
       if (appliedToday >= cfg.MAX_APPLICATIONS_PER_DAY) {
-        console.log(`  [Greenhouse Agent] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing until tomorrow`);
+        console.log(`  [Auto-Apply] Daily limit reached (${appliedToday}/${cfg.MAX_APPLICATIONS_PER_DAY}) — pausing until tomorrow`);
         return;
       }
       if (!isRelevantTitle(job.title)) { queue.update(job.jobId, { status: 'skipped', reason: 'Title filter (post-queue)' }); continue; }
 
+      const ats = atsFiller.detectATS(job.url);
       queue.update(job.jobId, { status: 'applying' });
-      console.log(`  [Greenhouse Agent] Applying${SUBMIT ? '' : ' (DRY RUN)'}: ${job.title} @ ${job.company}`);
+      console.log(`  [Auto-Apply] Applying${SUBMIT ? '' : ' (DRY RUN)'} [${ats}]: ${job.title} @ ${job.company}`);
       try {
         await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
         await DELAY(1500 + Math.random() * 1500);
-        const result = await atsFiller.fillExternalForm(page, job, job.cvPath, 'greenhouse', { submit: SUBMIT });
+        const result = await atsFiller.fillExternalForm(page, job, job.cvPath, ats, { submit: SUBMIT });
 
         if (result === true) {
           queue.update(job.jobId, { status: 'applied' });
           queue.markApplied(job.jobId);
-          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLIED', 'Greenhouse');
-          console.log(`  [Greenhouse Agent] ✓ Applied: ${job.title}`);
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLIED', ats);
+          console.log(`  [Auto-Apply] ✓ Applied [${ats}]: ${job.title}`);
         } else if (result === 'dry_run') {
           queue.update(job.jobId, { status: 'skipped', reason: 'Dry run (submit disabled)' });
-          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Dry run — form filled, not submitted');
-          console.log(`  [Greenhouse Agent] ✓ Dry run — filled, NOT submitted: ${job.title}`);
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', `Dry run — ${ats} form filled, not submitted`);
+          console.log(`  [Auto-Apply] ✓ Dry run — filled, NOT submitted [${ats}]: ${job.title}`);
         } else {
           queue.update(job.jobId, { status: 'apply_failed' });
-          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLY_FAILED', 'Greenhouse form could not be completed');
-          console.log(`  [Greenhouse Agent] ✗ Apply failed: ${job.title}`);
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLY_FAILED', `${ats} form could not be completed`);
+          console.log(`  [Auto-Apply] ✗ Apply failed [${ats}]: ${job.title}`);
         }
       } catch (err) {
         const isPageClosed = /Target page.*closed|context.*closed|browser.*closed|page.*closed/i.test(err.message);
@@ -204,15 +212,15 @@ async function phase2_applyReadyCVs(context, page) {
         } else {
           queue.update(job.jobId, { status: 'apply_failed', error: err.message });
           logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
-          console.error(`  [Greenhouse Agent] Error applying to "${job.title}": ${err.message}`);
+          console.error(`  [Auto-Apply] Error applying to "${job.title}": ${err.message}`);
         }
       }
       await DELAY(8000 + Math.random() * 7000);
     }
 
     if (readyJobs.length) { idleCount = 0; }
-    else if (pendingJobs > 0) { idleCount = 0; console.log(`  [Greenhouse Agent] Waiting for Scorer... (${pendingJobs} job(s) in progress)`); }
-    else { idleCount++; console.log(`  [Greenhouse Agent] Idle ${idleCount}/${MAX_IDLE} — no pending or ready jobs`); }
+    else if (pendingJobs > 0) { idleCount = 0; console.log(`  [Auto-Apply] Waiting for Scorer... (${pendingJobs} job(s) in progress)`); }
+    else { idleCount++; console.log(`  [Auto-Apply] Idle ${idleCount}/${MAX_IDLE} — no pending or ready jobs`); }
 
     if (idleCount >= MAX_IDLE) return;
     await DELAY(POLL_INTERVAL);
@@ -221,11 +229,9 @@ async function phase2_applyReadyCVs(context, page) {
 
 // ── browser + main ─────────────────────────────────────────────────────────
 async function launchBrowser() {
-  const profileDir = path.join(process.env.JOBBOT_USERDATA, 'greenhouse_profile');
-  // Greenhouse hosted forms are PUBLIC — no login, no captcha to solve by hand —
-  // so this agent runs HEADLESS by default (no window popping up, no confusing
-  // blank tab when there's nothing to apply to). JOBBOT_SHOW_BROWSER=1 forces a
-  // visible window for debugging.
+  const profileDir = path.join(process.env.JOBBOT_USERDATA, 'greenhouse_profile'); // matches botManager key 'greenhouse'
+  // Simple-form ATSes are public (no login, no hand-solved captcha), so run
+  // HEADLESS by default; JOBBOT_SHOW_BROWSER=1 forces a visible window.
   const headless = process.env.JOBBOT_SHOW_BROWSER !== '1';
   const context = await launchPersistentContext(profileDir, { headless });
   await stealth.applyToContext(context);
@@ -238,37 +244,35 @@ async function main() {
   await queue.init(process.env.JOBBOT_USERDATA);
 
   console.log('═══════════════════════════════════════════════════════');
-  console.log(`  Greenhouse Agent — Starting${SUBMIT ? '' : '  (DRY RUN — submissions disabled)'}`);
+  console.log(`  ATS Auto-Apply Agent — Starting${SUBMIT ? '' : '  (DRY RUN — submissions disabled)'}`);
   console.log('═══════════════════════════════════════════════════════');
 
   // Recover jobs left in 'applying' from a previous interrupted run
-  const stuck = queue.getByStatus('applying').filter(j => j.source === 'greenhouse');
+  const stuck = queue.getByStatus('applying').filter(j => j.source === SOURCE);
   for (const j of stuck) queue.update(j.jobId, { status: 'cv_ready' });
 
   let context, page, guard;
   try {
     ({ context, page } = await launchBrowser());
-    guard = watchForManualClose(context, 'Greenhouse Agent'); // user closing browser → clean stop
+    guard = watchForManualClose(context, 'Auto-Apply');
   } catch (err) {
-    if (BROWSER_CLOSED_RE.test(err.message || '')) { console.log('  [Greenhouse Agent] Browser closed — agent stopped.'); process.exit(0); }
-    console.error('  [Greenhouse Agent] Failed to launch browser: ' + err.message);
+    if (BROWSER_CLOSED_RE.test(err.message || '')) { console.log('  [Auto-Apply] Browser closed — agent stopped.'); process.exit(0); }
+    console.error('  [Auto-Apply] Failed to launch browser: ' + err.message);
     process.exit(1);
   }
 
   try {
-    await phase1_sourceAndQueue();
+    await phase1_sourceAndQueue(page);
     await phase2_applyReadyCVs(context, page);
   } catch (err) {
-    if (BROWSER_CLOSED_RE.test(err.message || '')) console.log('  [Greenhouse Agent] Browser closed — agent stopped.');
-    else console.error('  [Greenhouse Agent] Fatal: ' + err.message);
+    if (BROWSER_CLOSED_RE.test(err.message || '')) console.log('  [Auto-Apply] Browser closed — agent stopped.');
+    else console.error('  [Auto-Apply] Fatal: ' + err.message);
   } finally {
-    // We're closing the context ourselves — mark it intentional so the manual-close
-    // watcher doesn't report it as the user closing the window.
     if (guard) guard.intentional = true;
     await context?.close().catch(() => {});
   }
-  console.log('  [Greenhouse Agent] Done.');
+  console.log('  [Auto-Apply] Done.');
   process.exit(0);
 }
 
-main().catch(err => { console.error('  [Greenhouse Agent] Uncaught: ' + err.message); process.exit(1); });
+main().catch(err => { console.error('  [Auto-Apply] Uncaught: ' + err.message); process.exit(1); });
