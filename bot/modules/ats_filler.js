@@ -49,6 +49,11 @@ const ACCOUNT_REQUIRED_ATS = new Set(['workday', 'taleo', 'successfactors', 'adp
 // Returns true (submitted), 'dry_run' (filled, not submitted), or false.
 async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
   const dryRun = opts.submit === false;
+  // Bound every field interaction: SPA forms (Workable etc.) re-render as they
+  // load / after a CV import, leaving elements briefly un-actionable. Without a
+  // cap Playwright waits its 30s default per action, so a few stuck fields look
+  // like a hang. 6s means a stuck field is skipped fast, not blocking.
+  try { page.setDefaultTimeout(6000); } catch (_) {}
   // Most ATSes show a job-info page first with an "Apply" / "I'm interested"
   // button that opens (or navigates to) the actual form. Click it, then wait for
   // a form field to render (SPA apply pages, e.g. SmartRecruiters, load async).
@@ -73,12 +78,20 @@ async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
     }
   }
 
+  // Wait for the application form itself to render (SPA apply pages like Workable
+  // load the fields async and would otherwise be filled while still empty).
+  await page.waitForSelector('input[name*="first" i], input[name="firstname"], input[type="email"], input[name*="email" i]', { timeout: 12000 }).catch(() => {});
+
   const MAX_STEPS = 10;
   for (let step = 0; step < MAX_STEPS; step++) {
     await J(1000, 2000);
     console.log(`  [ATS] ${ats} form step ${step + 1}${dryRun ? ' (dry run)' : ''}`);
 
     await _uploadResume(page, resumePath);
+    // Let a CV-import autofill/re-render settle before typing — some ATSes
+    // (Workable) parse the CV and rebuild the form, which briefly detaches the
+    // name/email fields; typing into them mid-rebuild silently fails.
+    if (step === 0) await J(4000, 5500);
     await _fillStep(page, job);
 
     if (dryRun) {
