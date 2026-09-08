@@ -142,8 +142,11 @@ async function phase1_sourceAndQueue(page) {
 
   let jobs = [];
   for (const country of ['GB', 'US']) {
-    try { jobs = jobs.concat(await jobFeed.fetchAtsJobs({ country, limit: 100 })); } catch (_) {}
+    try { jobs = jobs.concat(await jobFeed.fetchAtsJobs({ country, limit: 40 })); } catch (_) {}
   }
+  // Cap the per-run candidate set: Phase 1 loads a page per non-Greenhouse job
+  // for its JD, and the daily apply cap is 25, so ~50 candidates is plenty.
+  jobs = jobs.slice(0, 50);
   if (!jobs.length) {
     console.log('  [Auto-Apply] No auto-appliable jobs in the feed right now (feed off, no licence, or none matched your terms).');
     return;
