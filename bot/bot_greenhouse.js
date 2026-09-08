@@ -28,6 +28,7 @@ const sponsorship = require('./modules/sponsorship');
 const jobFeed     = require('./modules/job_feed');
 const stealth     = require('./modules/stealth');
 const atsFiller   = require('./modules/ats_filler');
+const httpSubmit  = require('./modules/ats_http_submit');
 const { launchPersistentContext, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
 const path        = require('path');
 
@@ -185,12 +186,23 @@ async function phase2_applyReadyCVs(context, page) {
       if (!isRelevantTitle(job.title)) { queue.update(job.jobId, { status: 'skipped', reason: 'Title filter (post-queue)' }); continue; }
 
       const ats = atsFiller.detectATS(job.url);
+      // Prefer a pure-HTTP submitter (open ATSes like Recruitee): no browser,
+      // no fragile form-fill. Falls through to the browser for the rest.
+      const httpFn = httpSubmit.httpSubmitterFor(ats) || httpSubmit.httpSubmitterFor(job.source);
       queue.update(job.jobId, { status: 'applying' });
-      console.log(`  [Auto-Apply] Applying${SUBMIT ? '' : ' (DRY RUN)'} [${ats}]: ${job.title} @ ${job.company}`);
+      console.log(`  [Auto-Apply] Applying${SUBMIT ? '' : ' (DRY RUN)'} [${ats}${httpFn ? ' · HTTP' : ''}]: ${job.title} @ ${job.company}`);
       try {
-        await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-        await DELAY(1500 + Math.random() * 1500);
-        const result = await atsFiller.fillExternalForm(page, job, job.cvPath, ats, { submit: SUBMIT });
+        let result;
+        if (httpFn) {
+          const A = cfg.APPLICANT || {};
+          const r = await httpFn({ url: job.url, applicant: { firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone }, cvPath: job.cvPath, coverLetter: job.coverLetter || '', dryRun: !SUBMIT });
+          if (!r.ok && !r.dryRun) console.log(`  [Auto-Apply] HTTP submit not accepted (${r.reason}${r.status ? ' ' + r.status : ''})`);
+          result = r.submitted ? true : (r.dryRun ? 'dry_run' : false);
+        } else {
+          await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+          await DELAY(1500 + Math.random() * 1500);
+          result = await atsFiller.fillExternalForm(page, job, job.cvPath, ats, { submit: SUBMIT });
+        }
 
         if (result === true) {
           queue.update(job.jobId, { status: 'applied' });
