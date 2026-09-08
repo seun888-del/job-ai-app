@@ -15,6 +15,7 @@ const BOT_SCRIPTS = {
   cvlibrary:  'bot_cvlibrary.js',
   totaljobs:  'bot_totaljobs.js',
   cwjobs:     'bot_cwjobs.js',
+  greenhouse: 'bot_greenhouse.js',
   uc:         'bot_uc.js',
 };
 
@@ -27,6 +28,7 @@ const bots = {
   cvlibrary:  { proc: null, status: 'stopped', stopping: false },
   totaljobs:  { proc: null, status: 'stopped', stopping: false },
   cwjobs:     { proc: null, status: 'stopped', stopping: false },
+  greenhouse: { proc: null, status: 'stopped', stopping: false },
   uc:         { proc: null, status: 'stopped', stopping: false },
 };
 
@@ -51,11 +53,14 @@ function getStatus() {
     cvlibrary:  bots.cvlibrary.status,
     totaljobs:  bots.totaljobs.status,
     cwjobs:     bots.cwjobs.status,
+    greenhouse: bots.greenhouse.status,
     uc:         bots.uc.status,
   };
 }
 
-const JOB_SITE_BOTS = new Set(['reed', 'linkedin']);
+// Bots that produce jobs the Scorer must tailor CVs for (so the Scorer is
+// auto-started alongside them and auto-stopped when the last one exits).
+const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse']);
 
 function anyJobSiteBotRunning() {
   return [...JOB_SITE_BOTS].some(name => bots[name].proc !== null);
@@ -137,6 +142,12 @@ function start(botName, userDataPath, opts = {}) {
   try {
     if (db.getSearchPreferences().use_job_feed) env.JOBBOT_USE_JOB_FEED = '1';
   } catch (_) { /* prefs unavailable → feed off, live search used */ }
+
+  // The Greenhouse agent's ONLY source is the backend candidate feed (there is
+  // no site to scrape), so it always uses the feed regardless of the toggle.
+  // JOBBOT_GREENHOUSE_SUBMIT is deliberately left unset → the agent runs in DRY
+  // RUN (fills forms, never submits) until we flip it on after a supervised test.
+  if (botName === 'greenhouse') env.JOBBOT_USE_JOB_FEED = '1';
 
   // Backup proxy override: if the user has entered their own proxy in Search
   // Preferences (Connection card), pass it through so browser_launcher uses it

@@ -1045,7 +1045,7 @@ async function renderLicense() {
 }
 
 // â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent' };
+const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', greenhouse: 'Greenhouse Agent' };
 
 let botLogUnsub = null;
 let botStatusUnsub = null;
@@ -1905,7 +1905,7 @@ async function renderTracker() {
       ${TRACKER_STAGES.map(s => `<option value="${s}" ${s === currentStage ? 'selected' : ''}>${STAGE_LABELS[s]}</option>`).join('')}
     </select>`;
 
-  const SOURCE_BADGE = { reed: '#2563eb', linkedin: '#0077b5', indeed: '#2164f3', glassdoor: '#0caa41', cvlibrary: '#ff5c35', totaljobs: '#E84B2A', cwjobs: '#003057' };
+  const SOURCE_BADGE = { reed: '#2563eb', linkedin: '#0077b5', indeed: '#2164f3', glassdoor: '#0caa41', cvlibrary: '#ff5c35', totaljobs: '#E84B2A', cwjobs: '#003057', greenhouse: '#24a47f' };
 
   document.getElementById('tracker-body').innerHTML = !entries.length ? `
       <div class="card"><div class="empty-state">No applications tracked yet. The tracker syncs automatically once Agents start applying.</div></div>
@@ -2032,7 +2032,7 @@ async function renderAnalytics() {
     </div>`;
   };
 
-  const SOURCE_COLORS = { reed: '#2563eb', linkedin: '#0077b5', indeed: '#2164f3', glassdoor: '#0caa41', cvlibrary: '#ff5c35', totaljobs: '#E84B2A', cwjobs: '#003057' };
+  const SOURCE_COLORS = { reed: '#2563eb', linkedin: '#0077b5', indeed: '#2164f3', glassdoor: '#0caa41', cvlibrary: '#ff5c35', totaljobs: '#E84B2A', cwjobs: '#003057', greenhouse: '#24a47f' };
   const maxSource = bySource[0]?.count || 1;
   const maxCV     = byCV[0]?.count || 1;
   const maxSkip   = skipReasons[0]?.count || 1;

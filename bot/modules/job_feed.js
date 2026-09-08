@@ -55,4 +55,45 @@ async function fetchReedStubs({ country = 'GB', limit = 200 } = {}) {
   }
 }
 
-module.exports = { enabled, fetchReedStubs };
+// Auto-appliable ATS jobs (Greenhouse today) from the same candidate feed. These
+// carry auto_apply:true and an apply_url on the ATS's public hosted form, which
+// the shared ats_filler can complete end-to-end. Shaped for the Greenhouse agent:
+//   { jobId: 'gh_<id>', title, company, url, description, source }
+// Empty array on any problem (off, no key, network, none) — the agent just idles.
+async function fetchAtsJobs({ country = 'GB', limit = 100 } = {}) {
+  if (!enabled()) return [];
+  try {
+    const terms = (cfg.JOB_SEARCHES || []).slice(0, 5).map((t) => String(t).trim()).filter(Boolean).join(',');
+    const url = `${backendUrl()}/v1/jobs/candidates?country=${encodeURIComponent(country)}&limit=${limit}`
+      + (terms ? `&terms=${encodeURIComponent(terms)}` : '');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    let res;
+    try {
+      res = await fetch(url, { headers: { Authorization: `Bearer ${licenseKey()}` }, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) { console.warn(`  [Feed] candidates ${res.status} — no ATS jobs`); return []; }
+    const data = await res.json().catch(() => ({}));
+    const jobs = (data && data.jobs) || [];
+    const out = jobs
+      .filter((j) => j && j.auto_apply && j.apply_url)
+      .map((j) => ({
+        jobId: 'gh_' + String(j.id || '').split(':').pop(),
+        title: j.title,
+        company: j.company,
+        url: j.apply_url,
+        description: j.description || '',
+        source: j.source || 'greenhouse',
+      }))
+      .filter((s) => s.jobId !== 'gh_' && s.url);
+    console.log(`  [Feed] ${out.length} auto-appliable ATS job(s) from the feed (${terms || 'no terms'})`);
+    return out;
+  } catch (err) {
+    console.warn(`  [Feed] ATS jobs unavailable (${err.message})`);
+    return [];
+  }
+}
+
+module.exports = { enabled, fetchReedStubs, fetchAtsJobs };

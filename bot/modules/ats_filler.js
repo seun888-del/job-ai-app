@@ -43,7 +43,12 @@ const ACCOUNT_REQUIRED_ATS = new Set(['workday', 'taleo', 'successfactors', 'adp
 
 // ── Main entry point ───────────────────────────────────────────────────────
 // Call this after navigating to (or opening) the ATS apply page.
-async function fillExternalForm(page, job, resumePath, ats) {
+// opts.submit === false → DRY RUN: fill every field (and advance multi-step
+// forms) but never click the final submit, so the whole pipeline can be tested
+// against a real ATS form without ever sending an application to an employer.
+// Returns true (submitted), 'dry_run' (filled, not submitted), or false.
+async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
+  const dryRun = opts.submit === false;
   // Some ATS land on a job-info page first — click through to the actual form
   if (['greenhouse', 'lever', 'ashby'].includes(ats)) {
     for (const sel of [
@@ -61,10 +66,19 @@ async function fillExternalForm(page, job, resumePath, ats) {
   const MAX_STEPS = 10;
   for (let step = 0; step < MAX_STEPS; step++) {
     await J(1000, 2000);
-    console.log(`  [ATS] ${ats} form step ${step + 1}`);
+    console.log(`  [ATS] ${ats} form step ${step + 1}${dryRun ? ' (dry run)' : ''}`);
 
     await _uploadResume(page, resumePath);
     await _fillStep(page, job);
+
+    if (dryRun) {
+      // Fill this step, then either advance to the next or, if this was the last
+      // step, stop WITHOUT submitting.
+      const advanced = await _tryNext(page);
+      if (!advanced) { console.log('  [ATS] ✓ Dry run — form filled, NOT submitted'); return 'dry_run'; }
+      await J(1500, 2500);
+      continue;
+    }
 
     const submitted = await _trySubmit(page, ats);
     if (submitted) return true;
