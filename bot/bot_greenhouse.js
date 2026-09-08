@@ -222,10 +222,12 @@ async function phase2_applyReadyCVs(context, page) {
 // ── browser + main ─────────────────────────────────────────────────────────
 async function launchBrowser() {
   const profileDir = path.join(process.env.JOBBOT_USERDATA, 'greenhouse_profile');
-  const cdpPort = process.env.JOBBOT_CDP_PORT;
-  const context = cdpPort
-    ? await connectToRunningChrome(parseInt(cdpPort)).catch(() => launchPersistentContext(profileDir))
-    : await launchPersistentContext(profileDir);
+  // Greenhouse hosted forms are PUBLIC — no login, no captcha to solve by hand —
+  // so this agent runs HEADLESS by default (no window popping up, no confusing
+  // blank tab when there's nothing to apply to). JOBBOT_SHOW_BROWSER=1 forces a
+  // visible window for debugging.
+  const headless = process.env.JOBBOT_SHOW_BROWSER !== '1';
+  const context = await launchPersistentContext(profileDir, { headless });
   await stealth.applyToContext(context);
   const page = await context.newPage();
   return { context, page };
@@ -243,12 +245,12 @@ async function main() {
   const stuck = queue.getByStatus('applying').filter(j => j.source === 'greenhouse');
   for (const j of stuck) queue.update(j.jobId, { status: 'cv_ready' });
 
-  let context, page;
+  let context, page, guard;
   try {
     ({ context, page } = await launchBrowser());
-    watchForManualClose(context, 'Greenhouse Agent'); // user closing Chromium → clean stop
+    guard = watchForManualClose(context, 'Greenhouse Agent'); // user closing browser → clean stop
   } catch (err) {
-    if (BROWSER_CLOSED_RE.test(err.message || '')) { console.log('  [Greenhouse Agent] Browser window closed — agent stopped.'); process.exit(0); }
+    if (BROWSER_CLOSED_RE.test(err.message || '')) { console.log('  [Greenhouse Agent] Browser closed — agent stopped.'); process.exit(0); }
     console.error('  [Greenhouse Agent] Failed to launch browser: ' + err.message);
     process.exit(1);
   }
@@ -260,6 +262,9 @@ async function main() {
     if (BROWSER_CLOSED_RE.test(err.message || '')) console.log('  [Greenhouse Agent] Browser closed — agent stopped.');
     else console.error('  [Greenhouse Agent] Fatal: ' + err.message);
   } finally {
+    // We're closing the context ourselves — mark it intentional so the manual-close
+    // watcher doesn't report it as the user closing the window.
+    if (guard) guard.intentional = true;
     await context?.close().catch(() => {});
   }
   console.log('  [Greenhouse Agent] Done.');
