@@ -49,16 +49,26 @@ const ACCOUNT_REQUIRED_ATS = new Set(['workday', 'taleo', 'successfactors', 'adp
 // Returns true (submitted), 'dry_run' (filled, not submitted), or false.
 async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
   const dryRun = opts.submit === false;
-  // Some ATS land on a job-info page first — click through to the actual form
-  if (['greenhouse', 'lever', 'ashby'].includes(ats)) {
+  // Most ATSes show a job-info page first with an "Apply" / "I'm interested"
+  // button that opens (or navigates to) the actual form. Click it, then wait for
+  // a form field to render (SPA apply pages, e.g. SmartRecruiters, load async).
+  if (['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'breezy', 'teamtailor', 'recruitee'].includes(ats)) {
     for (const sel of [
+      'button:has-text("I\'m interested")', 'a:has-text("I\'m interested")',
       'a:has-text("Apply for this job")', 'button:has-text("Apply for this job")',
+      'a:has-text("Apply for this position")', 'button:has-text("Apply for this position")',
       'a:has-text("Apply now")', 'button:has-text("Apply now")',
+      'button:has-text("Apply")', 'a:has-text("Apply")',
       '.application-button', '[data-qa="btn-apply-bottom"]',
     ]) {
       try {
         const btn = await page.$(sel);
-        if (btn && await btn.isVisible()) { await btn.click(); await J(1500, 2500); break; }
+        if (btn && await btn.isVisible()) {
+          await Promise.all([page.waitForLoadState('domcontentloaded').catch(() => {}), btn.click()]);
+          await J(1500, 2500);
+          await page.waitForSelector('input[type="email"], input[name*="email" i], input[name*="first" i], input[type="file"]', { timeout: 8000 }).catch(() => {});
+          break;
+        }
       } catch (_) {}
     }
   }
