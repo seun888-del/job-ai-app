@@ -141,6 +141,16 @@ async function _uploadResume(page, resumePath) {
   }
 }
 
+// Set an input's value reliably. Playwright fill() is React-aware (uses the
+// native value setter + fires input/change) and doesn't need the click
+// actionability that fails on some SPA fields (Workable's form) — try it first,
+// fall back to click+type for anything fill() can't handle.
+async function _setValue(el, val) {
+  const v = String(val == null ? '' : val);
+  try { await el.fill(v, { timeout: 5000 }); return true; } catch (_) {}
+  try { await el.click({ timeout: 4000 }); await el.type(v, { delay: 40 }); return true; } catch (_) { return false; }
+}
+
 // ── Fill all visible fields on the current step ───────────────────────────
 async function _fillStep(page, job) {
   const { firstName, lastName, email, phone, linkedin, location,
@@ -164,8 +174,7 @@ async function _fillStep(page, job) {
         const el = await page.$(sel);
         if (el && await el.isVisible()) {
           if (await el.inputValue().catch(() => '')) break;
-          await el.click(); await J(80, 200);
-          await el.type(val, { delay: 55 + Math.random() * 75 });
+          await _setValue(el, val);
           await J(80, 150);
           break;
         }
@@ -190,8 +199,7 @@ async function _fillStep(page, job) {
       if (!question) continue;
       const answer = await _buildAnswer(question, 'text', job);
       if (answer) {
-        await inp.click(); await J(80, 200);
-        await inp.type(answer, { delay: 55 + Math.random() * 75 });
+        await _setValue(inp, answer);
         await J(80, 150);
         console.log(`  [ATS] Filled "${question.substring(0, 50)}" → "${answer.substring(0, 40)}"`);
       }
@@ -294,8 +302,7 @@ async function _fillStep(page, job) {
       }).catch(() => '');
       const answer = await _buildAnswer(question || 'cover letter', 'textarea', job);
       if (answer) {
-        await ta.click(); await J(100, 200);
-        await ta.type(answer, { delay: 25 + Math.random() * 35 });
+        await _setValue(ta, answer);
       }
     } catch (_) {}
   }
