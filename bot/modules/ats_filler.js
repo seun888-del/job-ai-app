@@ -54,6 +54,10 @@ async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
   // cap Playwright waits its 30s default per action, so a few stuck fields look
   // like a hang. 6s means a stuck field is skipped fast, not blocking.
   try { page.setDefaultTimeout(6000); } catch (_) {}
+  // Cookie-consent modals (Workable's is an aria-modal with a full-page backdrop)
+  // intercept EVERY pointer event — clear it first or nothing on the page is
+  // clickable. Runs again after the form renders in case it appears late.
+  await _dismissCookieModal(page);
   // Most ATSes show a job-info page first with an "Apply" / "I'm interested"
   // button that opens (or navigates to) the actual form. Click it, then wait for
   // a form field to render (SPA apply pages, e.g. SmartRecruiters, load async).
@@ -82,6 +86,11 @@ async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
   // load the fields async and would otherwise be filled while still empty).
   await page.waitForSelector('input[name*="first" i], input[name="firstname"], input[type="email"], input[name*="email" i]', { timeout: 12000 }).catch(() => {});
 
+  // Dismiss the cookie-consent modal again in case it rendered after page load —
+  // its aria-modal backdrop intercepts EVERY click, so a stray one silently
+  // blocks all field/radio/submit interactions.
+  await _dismissCookieModal(page);
+
   const MAX_STEPS = 10;
   for (let step = 0; step < MAX_STEPS; step++) {
     await J(1000, 2000);
@@ -93,6 +102,11 @@ async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
     // name/email fields; typing into them mid-rebuild silently fails.
     if (step === 0) await J(4000, 5500);
     await _fillStep(page, job);
+    // Answering a radio can REVEAL a dependent field (e.g. "How many years?"
+    // appears only after "Do you have 1+ year experience? → Yes"), and such
+    // fields render late — after the text pass, sometimes 15s+ in. Keep polling
+    // and re-filling until required fields stay filled across two clean checks.
+    if (step === 0) await _ensureRequiredFilled(page, job);
 
     if (dryRun) {
       // Fill this step, then either advance to the next or, if this was the last
@@ -151,6 +165,68 @@ async function _setValue(el, val) {
   try { await el.click({ timeout: 4000 }); await el.type(v, { delay: 40 }); return true; } catch (_) { return false; }
 }
 
+// Poll for late-rendered required fields and fill them. Dependent questions
+// (revealed by a radio answer) can appear 15s+ after the initial fill, so a
+// single pass misses them and a break-on-first-clean loop exits too early.
+// Concludes only after TWO consecutive checks find nothing empty. Bounded.
+async function _ensureRequiredFilled(page, job) {
+  let cleanStreak = 0;
+  for (let i = 0; i < 7 && cleanStreak < 2; i++) {
+    await J(1500, 2500);
+    const empty = await page.$$eval(
+      'input[required], select[required], textarea[required]',
+      els => els.filter(el => el.offsetParent !== null && !el.value && el.type !== 'radio' && el.type !== 'checkbox').length
+    ).catch(() => 0);
+    if (empty) { await _fillStep(page, job); cleanStreak = 0; }
+    else cleanStreak++;
+  }
+}
+
+// Dismiss a cookie-consent banner/modal. Workable renders it as a real
+// aria-modal dialog whose backdrop swallows every click until it's gone, so this
+// must succeed before any field interaction. Targets the specific accept control
+// (never a generic "Accept"/"I agree" that could hit the form's own consent).
+async function _dismissCookieModal(page) {
+  const sels = [
+    '[data-ui="cookie-consent-accept"]',   // Workable
+    '#onetrust-accept-btn-handler',        // OneTrust
+    'button:has-text("Accept all")', 'button:has-text("Accept All")',
+    'button:has-text("Accept cookies")', 'button:has-text("Allow all")',
+  ];
+  try {
+    const btn = await page.waitForSelector(sels.join(', '), { timeout: 4000 });
+    if (btn) {
+      try { await btn.click({ timeout: 2500 }); }
+      catch (_) { await btn.evaluate(el => el.click()).catch(() => {}); }
+      // Wait for the modal/backdrop to actually detach before returning.
+      await page.waitForSelector('[data-ui="cookie-consent"]', { state: 'detached', timeout: 3000 }).catch(() => {});
+      await J(300, 600);
+    }
+  } catch (_) { /* no cookie modal (e.g. returning profile) — fine */ }
+}
+
+// True if the radio group `groupName` has the option matching `chosenText`
+// selected. Re-queries the group FRESH by name (not by a captured element id) —
+// Workable re-renders the group after a selection, giving elements new ids, so a
+// stale-id check reads null even though the group is correctly set. Reads both
+// <input>.checked and the [role="radio"] wrapper's aria-checked.
+async function _radioGroupSetTo(page, groupName, chosenText) {
+  return await page.evaluate(({ name, want }) => {
+    const rs = Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`));
+    for (const r of rs) {
+      const w = r.closest('[role="radio"]');
+      const checked = r.checked || (w && w.getAttribute('aria-checked') === 'true');
+      if (!checked) continue;
+      const lab = r.closest('label'); let t = (lab && lab.innerText || '').trim();
+      if (!t && w) { const wl = w.getAttribute('aria-labelledby'); if (wl) for (const tok of wl.split(' ')) if (/radio_label/i.test(tok)) { const e = document.getElementById(tok); if (e && (e.innerText || '').trim()) { t = e.innerText.trim(); break; } } }
+      if (!t) t = r.value;
+      const a = t.trim().toLowerCase(), b = String(want).trim().toLowerCase();
+      return a === b || a.includes(b) || b.includes(a);
+    }
+    return false;
+  }, { name: groupName, want: chosenText }).catch(() => false);
+}
+
 // ── Fill all visible fields on the current step ───────────────────────────
 async function _fillStep(page, job) {
   const { firstName, lastName, email, phone, linkedin, location,
@@ -189,10 +265,19 @@ async function _fillStep(page, job) {
       if (!await inp.isVisible()) continue;
       if (await inp.inputValue().catch(() => '')) continue;
       const { label, placeholder } = await inp.evaluate(el => {
-        const lab  = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
+        const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
+        // Also accept a WRAPPING <label> (no for=) — Workable nests the input
+        // inside a <label> whose text is the question, with no fieldset/aria at
+        // all (e.g. "How many years of experience…"). Missing this skips the field.
+        const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
+        // Some custom questions instead carry their prompt via fieldset
+        // aria-labelledby, so resolve that too.
+        const fs   = el.closest('fieldset');
+        const alb  = (fs && fs.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
         const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="Question"]');
         const wl   = wrap?.querySelector('label, legend, [class*="label"], [class*="Label"]');
-        return { label: (lab?.innerText || wl?.innerText || '').trim(), placeholder: el.placeholder || '' };
+        const label = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || wl?.innerText || '').trim();
+        return { label, placeholder: el.placeholder || '' };
       }).catch(() => ({ label: '', placeholder: '' }));
 
       const question = label || placeholder;
@@ -215,10 +300,13 @@ async function _fillStep(page, job) {
       if (currentVal && currentVal !== '0' && currentVal !== '') continue;
 
       const { question, options } = await sel.evaluate(el => {
-        const lab  = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
+        const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
+        const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
+        const fs   = el.closest('fieldset');
+        const alb  = (fs && fs.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
         const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="Question"]');
         const wl   = wrap?.querySelector('label, legend, [class*="label"]');
-        const question = (lab?.innerText || wl?.innerText || el.getAttribute('aria-label') || '').trim();
+        const question = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || wl?.innerText || '').trim();
         const options  = Array.from(el.options).map(o => ({ val: o.value, text: o.text.trim() })).filter(o => o.val && o.val !== '0');
         return { question, options };
       }).catch(() => ({ question: '', options: [] }));
@@ -250,10 +338,19 @@ async function _fillStep(page, job) {
         const options = allR.map(r => {
           const lab = r.id ? document.querySelector(`label[for="${r.id}"]`) : r.closest('label');
           let text = (lab && lab.innerText || '').trim();
-          if (!text) { const alb = r.getAttribute('aria-labelledby'); if (alb) { const e = document.getElementById(alb.split(' ')[0]); if (e) text = (e.innerText || '').trim(); } }
+          // The real <input> is often opacity:0 / aria-hidden; the clickable proxy
+          // is a [role="radio"] wrapper (Workable) or the wrapping <label>. Capture
+          // both ids so the click targets the visible proxy, not the dead input.
+          const wrap = r.closest('[role="radio"]');
+          // Option text lives in a radio_label_* span referenced by the WRAPPER's
+          // aria-labelledby (not the input's). Some layouts (the consent question)
+          // leave label/parent text empty, so without this the text falls back to
+          // the numeric value and yes/no matching fails.
+          if (!text && wrap) { const wl = wrap.getAttribute('aria-labelledby'); if (wl) { for (const tok of wl.split(' ')) { if (/radio_label/i.test(tok)) { const e = document.getElementById(tok); if (e && (e.innerText || '').trim()) { text = e.innerText.trim(); break; } } } } }
+          if (!text) { const alb = r.getAttribute('aria-labelledby'); if (alb) { for (const tok of alb.split(' ')) { const e = document.getElementById(tok); if (e && (e.innerText || '').trim()) { text = e.innerText.trim(); break; } } } }
           if (!text && r.getAttribute('aria-label')) text = r.getAttribute('aria-label').trim();
           if (!text && r.parentElement) text = (r.parentElement.innerText || '').trim();
-          return { val: r.value, text: (text || r.value || '').trim() };
+          return { val: r.value, text: (text || r.value || '').trim(), inputId: r.id || '', wrapperId: (wrap && wrap.id) || '' };
         });
         const optSet = new Set(options.map(o => o.text.toLowerCase()));
         // Question text: prefer ARIA (fieldset[aria-labelledby] -> the labelled
@@ -286,26 +383,28 @@ async function _fillStep(page, job) {
 
       const chosen = _pickRadioOption(legend, options.map(o => o.text)) || await _aiPickOption(legend, options.map(o => o.text), job);
       if (chosen) {
-        // Click by index (LinkedIn hides the real <input> and styles the label,
-        // so a value-based click often does nothing). Verify it actually checked,
-        // and fall back to clicking the associated label.
-        const idx = options.findIndex(o => o.text === chosen);
-        const groupRadios = idx >= 0 ? await page.$$(`input[type="radio"][name="${groupName}"]`) : [];
-        const target = groupRadios[idx];
+        const opt = options.find(o => o.text === chosen);
         let ok = false;
-        if (target) {
-          try { await target.click({ timeout: 2000 }); ok = await target.isChecked().catch(() => false); } catch (_) {}
-          if (!ok) {
-            try {
-              await target.evaluate(el => {
-                const lab = el.id ? document.querySelector(`label[for="${el.id}"]`) : el.closest('label');
-                (lab || el).click();
-              });
-              ok = await target.isChecked().catch(() => false);
-            } catch (_) {}
+        if (opt) {
+          // 1) Playwright click on the VISIBLE proxy: the [role="radio"] wrapper is
+          //    actionable; the real <input> is opacity:0 and just times out.
+          if (opt.wrapperId) {
+            try { await page.click(`#${opt.wrapperId}`, { timeout: 2500 }); } catch (_) {}
+            ok = await _radioGroupSetTo(page, groupName, chosen);
           }
-          await J(200, 400);
-          if (!ok) ok = await target.isChecked().catch(() => false); // re-check: React updates checked state async
+          // 2) DOM-click the wrapper / wrapping <label> (fires React's handler).
+          if (!ok && opt.inputId) {
+            try { await page.$eval(`#${opt.inputId}`, el => { const p = el.closest('[role="radio"]') || el.closest('label') || el.parentElement; (p || el).click(); }); } catch (_) {}
+            ok = await _radioGroupSetTo(page, groupName, chosen);
+          }
+          // 3) Last resort: force the input state + dispatch input/change.
+          if (!ok && opt.inputId) {
+            try { await page.$eval(`#${opt.inputId}`, el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.click(); }); } catch (_) {}
+            ok = await _radioGroupSetTo(page, groupName, chosen);
+          }
+          // React commits the checked state asynchronously after the click, so an
+          // immediate read is a false negative. Poll briefly before concluding.
+          for (let i = 0; i < 4 && !ok; i++) { await J(250, 400); ok = await _radioGroupSetTo(page, groupName, chosen); }
         }
         if (ok) console.log(`  [ATS] Radio "${(legend || '').substring(0, 40)}" → "${chosen}"`);
         else    console.log(`  [ATS] ⚠ Radio NOT set: "${(legend || '').substring(0, 40)}" (wanted "${chosen}")`);
@@ -322,10 +421,13 @@ async function _fillStep(page, job) {
       if (!await ta.isVisible()) continue;
       if (await ta.inputValue().catch(() => '')) continue;
       const question = await ta.evaluate(el => {
-        const lab  = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
+        const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
+        const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
+        const fs   = el.closest('fieldset');
+        const alb  = (fs && fs.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
         const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="Question"]');
         const wl   = wrap?.querySelector('label, legend, [class*="label"]');
-        return (lab?.innerText || wl?.innerText || el.placeholder || el.getAttribute('aria-label') || '').trim();
+        return (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || wl?.innerText || el.placeholder || el.getAttribute('aria-label') || '').trim();
       }).catch(() => '');
       const answer = await _buildAnswer(question || 'cover letter', 'textarea', job);
       if (answer) {
@@ -334,18 +436,23 @@ async function _fillStep(page, job) {
     } catch (_) {}
   }
 
-  // Consent checkboxes
+  // Consent checkboxes. NOTE: no isVisible() guard — Workable's required consent
+  // box is opacity:0 with a styled proxy, so isVisible() is false and it would be
+  // silently skipped (leaving the form un-submittable). Gate on the label text.
   const checkboxes = await page.$$('input[type="checkbox"]');
   for (const cb of checkboxes) {
     try {
-      if (!await cb.isVisible()) continue;
-      const lbl = await cb.evaluate(el => {
+      if (await cb.isChecked().catch(() => false)) continue;
+      const info = await cb.evaluate(el => {
         const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label') || el.parentElement;
-        return (lab?.innerText || '').toLowerCase();
-      }).catch(() => '');
-      if (/agree|consent|terms|accept|gdpr|privacy|data protection/i.test(lbl) && !await cb.isChecked().catch(() => false)) {
-        await J(200, 500); await cb.click();
-      }
+        return { text: (lab?.innerText || '').toLowerCase(), id: el.id || '' };
+      }).catch(() => ({ text: '', id: '' }));
+      if (!/agree|consent|terms|accept|gdpr|privacy|data protection|i have read/i.test(info.text)) continue;
+      await J(200, 500);
+      let done = false;
+      try { await cb.check({ timeout: 2000 }); done = await cb.isChecked().catch(() => false); } catch (_) {}
+      if (!done && info.id) { try { await page.$eval(`#${info.id}`, el => { const l = el.closest('label') || el.parentElement; (l || el).click(); }); } catch (_) {} done = await cb.isChecked().catch(() => false); }
+      if (!done && info.id) { try { await page.$eval(`#${info.id}`, el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }); } catch (_) {} }
     } catch (_) {}
   }
 }
@@ -427,6 +534,16 @@ function _yesNoForQuestion(question) {
   if (/reloc/i.test(q)) return cfg.APPLICANT.willingToRelocate ? 'yes' : 'no';
   if (/driv(ing|er).?s? licen[cs]e|full (uk )?licen[cs]e/i.test(q)) return cfg.APPLICANT.drivingLicence ? 'yes' : 'no';
   if (/\bover 18\b|18 years old|at least 18|aged 18/i.test(q)) return 'yes'; // a job-seeker is an adult
+  // Application data-processing / AI-screening consents are required-to-proceed
+  // and benign; an applicant consents. (The LLM answers these inconsistently, so
+  // pin them to Yes rather than leave it to chance.)
+  if (/\b(do you |i )?consent\b|consent to|gdpr|process(ing)? (of )?(my|your) (personal )?data|data protection/i.test(q)) return 'yes';
+  // Willingness / capability / commitment questions from someone who is applying
+  // → affirmative. A "No" to "are you willing to work from our office 5 days?" or
+  // "are you comfortable with…" auto-rejects the candidate who wants the job.
+  // Placed AFTER the specific profile checks (RTW/sponsorship/relocation/driving)
+  // so those keep their exact answers; relocation is already resolved above.
+  if (/\bwilling to\b|\bare you able to\b|\bare you prepared to\b|\bare you comfortable\b|\bhappy to (work|commute|travel|attend|start)\b|\bcan you (commute|attend|travel|start|work)\b|\bcommit to\b|\bprepared to work\b/i.test(q)) return 'yes';
   return null;
 }
 
@@ -447,8 +564,10 @@ async function _buildAnswer(question, fieldType, job) {
   }
   if (/notice period|availability|when can you start|available to start/i.test(q))
     return AVAIL_MAP[availability || 'immediately'] || 'Immediately available';
-  if (/salary|compensation|expected pay|remuneration/i.test(q))
-    return salaryExpectation || '';
+  if (/salary|compensation|expected pay|remuneration|expected salary/i.test(q))
+    // Required salary fields block submit when the profile has no figure; a
+    // "Negotiable" is honest, widely accepted, and unblocks the application.
+    return salaryExpectation || 'Negotiable';
   if (/year.*experience|experience.*year|how many year/i.test(q))
     return String(yearsExperience ?? 0);
   // Sponsorship / right-to-work / relocation / driving licence — from profile
@@ -554,7 +673,7 @@ Question: "${question}"
 Options:
 ${optionTexts.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
-Reply with ONLY the exact text of the best option. No explanation.`;
+For a capability, willingness, availability, or commitment question the candidate can reasonably meet (e.g. willing to work on-site, comfortable with the environment, able to commute), choose the affirmative option so this strong candidate progresses. Reply with ONLY the exact text of the best option. No explanation.`;
     const reply = await llmChat(prompt);
     const cleaned = (reply || '').trim().replace(/^\d+\.\s*/, '');
     const lc = cleaned.toLowerCase();
