@@ -250,13 +250,20 @@ async function _fillStep(page, job) {
         const options = allR.map(r => {
           const lab = r.id ? document.querySelector(`label[for="${r.id}"]`) : r.closest('label');
           let text = (lab && lab.innerText || '').trim();
+          if (!text) { const alb = r.getAttribute('aria-labelledby'); if (alb) { const e = document.getElementById(alb.split(' ')[0]); if (e) text = (e.innerText || '').trim(); } }
+          if (!text && r.getAttribute('aria-label')) text = r.getAttribute('aria-label').trim();
           if (!text && r.parentElement) text = (r.parentElement.innerText || '').trim();
           return { val: r.value, text: (text || r.value || '').trim() };
         });
         const optSet = new Set(options.map(o => o.text.toLowerCase()));
-        // Question: nearest ancestor text that ISN'T one of the option labels.
+        // Question text: prefer ARIA (fieldset[aria-labelledby] -> the labelled
+        // element) — the standard, reliable way (Workable et al.). Then <legend>,
+        // then a nearest-ancestor text scan that skips the option labels.
         const fieldset = el.closest('fieldset');
-        let q = (fieldset && fieldset.querySelector('legend') ? fieldset.querySelector('legend').innerText : '').trim();
+        let q = '';
+        const lb = (fieldset && fieldset.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
+        if (lb) { const qe = document.getElementById(lb.split(' ')[0]); if (qe) q = (qe.innerText || '').trim(); }
+        if (!q && fieldset && fieldset.querySelector('legend')) q = (fieldset.querySelector('legend').innerText || '').trim();
         if (q && optSet.has(q.toLowerCase())) q = '';
         if (!q) {
           let node = el.parentElement;
@@ -298,6 +305,7 @@ async function _fillStep(page, job) {
             } catch (_) {}
           }
           await J(200, 400);
+          if (!ok) ok = await target.isChecked().catch(() => false); // re-check: React updates checked state async
         }
         if (ok) console.log(`  [ATS] Radio "${(legend || '').substring(0, 40)}" → "${chosen}"`);
         else    console.log(`  [ATS] ⚠ Radio NOT set: "${(legend || '').substring(0, 40)}" (wanted "${chosen}")`);
@@ -417,6 +425,7 @@ function _yesNoForQuestion(question) {
   }
   if (/reloc/i.test(q)) return cfg.APPLICANT.willingToRelocate ? 'yes' : 'no';
   if (/driv(ing|er).?s? licen[cs]e|full (uk )?licen[cs]e/i.test(q)) return cfg.APPLICANT.drivingLicence ? 'yes' : 'no';
+  if (/\bover 18\b|18 years old|at least 18|aged 18/i.test(q)) return 'yes'; // a job-seeker is an adult
   return null;
 }
 
