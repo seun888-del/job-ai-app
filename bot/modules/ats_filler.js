@@ -243,14 +243,33 @@ async function _fillStep(page, job) {
     try {
       if (!await radio.isVisible()) continue;
       const { groupName, legend, options } = await radio.evaluate(el => {
-        const name     = el.name || '';
+        const name = el.name || '';
+        const allR = name ? Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`)) : [el];
+        // Option text: label[for] / wrapping <label> / the radio's parent text
+        // (Workable renders "YES"/"NO" in the parent, not an associated label).
+        const options = allR.map(r => {
+          const lab = r.id ? document.querySelector(`label[for="${r.id}"]`) : r.closest('label');
+          let text = (lab && lab.innerText || '').trim();
+          if (!text && r.parentElement) text = (r.parentElement.innerText || '').trim();
+          return { val: r.value, text: (text || r.value || '').trim() };
+        });
+        const optSet = new Set(options.map(o => o.text.toLowerCase()));
+        // Question: nearest ancestor text that ISN'T one of the option labels.
         const fieldset = el.closest('fieldset');
-        const legend   = (fieldset?.querySelector('legend')?.innerText || '').trim();
-        const wrap     = el.closest('[class*="question"],[class*="Question"],[class*="field"],[class*="Field"]');
-        const wl       = (wrap?.querySelector('label, legend, [class*="label"]')?.innerText || '').trim();
-        const allR     = name ? Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`)) : [el];
-        const options  = allR.map(r => { const lab = r.id ? document.querySelector(`label[for="${r.id}"]`) : r.closest('label'); return { val: r.value, text: (lab?.innerText || r.value || '').trim() }; });
-        return { groupName: name, legend: legend || wl, options };
+        let q = (fieldset && fieldset.querySelector('legend') ? fieldset.querySelector('legend').innerText : '').trim();
+        if (q && optSet.has(q.toLowerCase())) q = '';
+        if (!q) {
+          let node = el.parentElement;
+          for (let i = 0; i < 7 && node && !q; i++) {
+            const cands = node.querySelectorAll('label, legend, h1, h2, h3, h4, p, [class*="label" i], [class*="question" i], [class*="title" i]');
+            for (const c of cands) {
+              const t = (c.innerText || '').trim();
+              if (t && t.length >= 3 && t.length < 250 && !optSet.has(t.toLowerCase())) { q = t; break; }
+            }
+            node = node.parentElement;
+          }
+        }
+        return { groupName: name, legend: q, options };
       }).catch(() => ({ groupName: '', legend: '', options: [] }));
 
       if (!groupName || groupsSeen.has(groupName) || !options.length) continue;
