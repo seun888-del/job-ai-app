@@ -412,16 +412,17 @@ function _yesNoForQuestion(question) {
     ? cfg.APPLICANT.requiresSponsorship
     : !hasRightToWork;
 
-  // Sponsorship FIRST — a sponsorship question usually also contains "work"
-  // (e.g. "require sponsorship to work in the UK"), so it must win over the
-  // right-to-work branch below.
+  // RIGHT-TO-WORK first when the question asks whether you HAVE the right / are
+  // eligible to work — even if it adds "without (requiring) sponsorship". Those
+  // are right-to-work questions (answer from hasRightToWork), NOT "do you require
+  // sponsorship" questions. (Fixes answering NO to "Do you have full right to
+  // work in the UK without requiring sponsorship?", which auto-rejects everyone.)
+  const asksRightToWork = /right to work|authori[sz]ed to work|authori[sz]ation to work|eligible to work|legally (allowed|entitled|able) to work|entitled to work|permit to work|work permit|able to work in the/i.test(q);
+  if (asksRightToWork) return hasRightToWork ? 'yes' : 'no';
+  // Otherwise a sponsorship question ("do you require sponsorship?").
   if (/sponsor/i.test(q)) {
     if (/without sponsor/i.test(q)) return requiresSponsorship ? 'no' : 'yes'; // inverted phrasing
     return requiresSponsorship ? 'yes' : 'no';
-  }
-  // Right to work / authorisation / eligibility
-  if (/right to work|authori[sz]ed to work|authori[sz]ation to work|eligible to work|legally (allowed|entitled|able) to work|entitled to work|permit to work|work permit/i.test(q)) {
-    return hasRightToWork ? 'yes' : 'no';
   }
   if (/reloc/i.test(q)) return cfg.APPLICANT.willingToRelocate ? 'yes' : 'no';
   if (/driv(ing|er).?s? licen[cs]e|full (uk )?licen[cs]e/i.test(q)) return cfg.APPLICANT.drivingLicence ? 'yes' : 'no';
