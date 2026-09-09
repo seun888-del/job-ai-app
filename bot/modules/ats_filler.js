@@ -381,7 +381,18 @@ async function _fillStep(page, job) {
       const alreadyChecked = await page.$eval(`input[type="radio"][name="${groupName}"]:checked`, () => true).catch(() => false);
       if (alreadyChecked) continue;
 
-      const chosen = _pickRadioOption(legend, options.map(o => o.text)) || await _aiPickOption(legend, options.map(o => o.text), job);
+      let chosen = _pickRadioOption(legend, options.map(o => o.text)) || await _aiPickOption(legend, options.map(o => o.text), job);
+      // Last resort for a REQUIRED yes/no radio the rules and AI both left blank:
+      // default to the affirmative. A blank required radio blocks the whole
+      // submission, and someone who chose to apply is asserting fitness for the
+      // role — an unanswered "Yes/No" would otherwise silently fail the apply.
+      if (!chosen) {
+        const isRequired = await page.$eval(`input[type="radio"][name="${groupName}"]`, el => {
+          const w = el.closest('[role="radio"],fieldset'); return el.required || el.getAttribute('aria-required') === 'true' || (w && w.getAttribute('aria-required') === 'true');
+        }).catch(() => false);
+        const yesOpt = options.map(o => o.text).find(t => /^\s*yes\b/i.test(t));
+        if (isRequired && yesOpt) { chosen = yesOpt; console.log(`  [ATS] Required radio unanswered → affirmative fallback: "${(legend || '').substring(0, 40)}"`); }
+      }
       if (chosen) {
         const opt = options.find(o => o.text === chosen);
         let ok = false;
@@ -457,8 +468,59 @@ async function _fillStep(page, job) {
   }
 }
 
+// Cloudflare Turnstile ("Verify you are human") gates submit on some ATS forms
+// (e.g. certain Workable employers). On the user's real Chrome + residential IP
+// it's the checkbox kind that passes with a click, not an image puzzle. Returns
+// true if solved or absent, false if present and could not be verified.
+// Detect an unsolved human-verification CAPTCHA (Cloudflare Turnstile, reCAPTCHA)
+// gating the submit. We deliberately do NOT try to defeat it: it is designed to
+// stop automation, auto-solving is unreliable and can flag the user's IP, and
+// captcha-gated forms are a small slice of the pool. When present, the caller
+// skips the form (never a false "applied"). Returns true if a captcha blocks.
+// A token already present (value set) means it was cleared (e.g. by the user) —
+// then it does not block.
+async function _captchaBlocks(page) {
+  const hasToken = await page.evaluate(() => {
+    const el = document.querySelector('input[name="cf-turnstile-response"], input[name*="turnstile" i], input[name="g-recaptcha-response"]');
+    return !!(el && el.value && el.value.length > 20);
+  }).catch(() => false);
+  if (hasToken) return false;
+  return await page.evaluate(() => {
+    return !!document.querySelector('#turnstile-script, [id^="turnstile-container"], .cf-turnstile, [data-sitekey], iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], iframe[src*="recaptcha"], .g-recaptcha')
+      || /verify you are human/i.test(document.body?.innerText || '');
+  }).catch(() => false);
+}
+
 // ── Submit detection ───────────────────────────────────────────────────────
 async function _trySubmit(page, ats) {
+  // GUARD: never click Submit while a required field is still empty. The ATS just
+  // shows "Please select one of these options" and stays on the form, but the
+  // click otherwise reports a false success → the job gets marked "applied" when
+  // nothing was sent. Report NOT submitted instead so the caller can retry/skip.
+  const empties = await page.evaluate(() => {
+    let fields = 0, radios = 0, boxes = 0;
+    for (const el of document.querySelectorAll('input[required], select[required], textarea[required]')) {
+      if (el.offsetParent === null) continue;
+      if (el.type === 'radio' || el.type === 'checkbox') continue;
+      if (!el.value) fields++;
+    }
+    const seen = new Set();
+    for (const r of document.querySelectorAll('input[type="radio"]')) {
+      if (seen.has(r.name)) continue; seen.add(r.name);
+      const w = r.closest('[role="radio"],fieldset');
+      const req = r.required || r.getAttribute('aria-required') === 'true' || (w && w.getAttribute('aria-required') === 'true');
+      if (req && !document.querySelector(`input[type="radio"][name="${r.name}"]:checked`)) radios++;
+    }
+    for (const c of document.querySelectorAll('input[type="checkbox"][required], input[type="checkbox"][aria-required="true"]')) {
+      if (!c.checked) boxes++;
+    }
+    return { fields, radios, boxes };
+  }).catch(() => ({ fields: 0, radios: 0, boxes: 0 }));
+  if (empties.fields + empties.radios + empties.boxes > 0) {
+    console.log(`  [ATS] ⚠ Not submitting — required still empty: ${empties.fields} field(s), ${empties.radios} radio group(s), ${empties.boxes} consent box(es). Application NOT sent.`);
+    return false;
+  }
+
   const sels = [
     'button[type="submit"]', 'input[type="submit"]',
     'button:has-text("Submit application")', 'button:has-text("Submit Application")',
@@ -472,15 +534,37 @@ async function _trySubmit(page, ats) {
     try {
       const btn = await page.$(sel);
       if (btn && await btn.isVisible() && await btn.isEnabled()) {
-        await J(500, 1000); await btn.click(); await J(3000, 5000);
-        const success = await page.evaluate(() => {
-          const t = (document.body?.innerText || '').toLowerCase();
-          return t.includes('application submitted') || t.includes('thank you for applying') ||
-                 t.includes('successfully applied')   || t.includes('application received') ||
-                 t.includes('application complete')   || t.includes('we received your');
-        }).catch(() => false);
-        console.log(`  [ATS] ${success ? '✓ Application submitted!' : 'Submit clicked (no confirmation found)'}`);
-        return true;
+        await J(500, 1000); await btn.click();
+        // Cloudflare Turnstile on Workable renders only AFTER the submit click
+        // (button flips to "Submitting…" and holds pending a human token). We do
+        // not defeat CAPTCHAs — if one appears, skip: report NOT submitted so the
+        // job isn't falsely marked applied, and the agent moves to the next one.
+        await J(2000, 3000);
+        if (await _captchaBlocks(page)) {
+          console.log('  [ATS] ⚠ Human-verification (CAPTCHA) on this form — skipping, application NOT sent.');
+          return false;
+        }
+        // Poll for a REAL outcome. Critically, "Submitting…" is NOT success — the
+        // button text merely flips while a Turnstile/validation block keeps the
+        // application un-sent; only an explicit confirmation OR the apply form
+        // actually disappearing counts. A stuck "Submitting…" → NOT submitted.
+        for (let i = 0; i < 14; i++) {
+          await J(1500, 2200);
+          const st = await page.evaluate(() => {
+            const t = (document.body?.innerText || '').toLowerCase();
+            const success = /application (received|submitted)|thank you for applying|thanks for applying|successfully applied|we('| ha)ve received your|application complete/.test(t);
+            const validationError = /please select|please (fill|complete)|this field is required|is required\b|please provide|please enter/.test(t);
+            const submitting = !!Array.from(document.querySelectorAll('button')).find(b => /submitting/i.test(b.innerText || ''));
+            const formGone = !document.querySelector('input[type="email"], input[name*="email" i]')
+              && !Array.from(document.querySelectorAll('button')).some(b => /submit application|submitting/i.test(b.innerText || ''));
+            const turnstile = /verify you are human/i.test(t);
+            return { success, validationError, submitting, formGone, turnstile };
+          }).catch(() => ({}));
+          if (st.success || st.formGone) { console.log('  [ATS] ✓ Application submitted!'); return true; }
+          if (st.validationError && !st.submitting) { console.log('  [ATS] ⚠ Submit blocked by a validation error — NOT submitted'); return false; }
+          // still submitting / turnstile pending → keep waiting
+        }
+        console.log('  [ATS] ⚠ Submit did not confirm (stuck on Submitting/verification) — NOT counting as applied'); return false;
       }
     } catch (_) {}
   }
@@ -674,13 +758,21 @@ Options:
 ${optionTexts.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
 For a capability, willingness, availability, or commitment question the candidate can reasonably meet (e.g. willing to work on-site, comfortable with the environment, able to commute), choose the affirmative option so this strong candidate progresses. Reply with ONLY the exact text of the best option. No explanation.`;
-    const reply = await llmChat(prompt);
-    const cleaned = (reply || '').trim().replace(/^\d+\.\s*/, '');
-    const lc = cleaned.toLowerCase();
-    return optionTexts.find(t => t.toLowerCase() === lc)
-      || optionTexts.find(t => t.toLowerCase().startsWith(lc) || lc.startsWith(t.toLowerCase()))
-      || optionTexts.find(t => t.toLowerCase().includes(lc) || lc.includes(t.toLowerCase()))
-      || null;
+    // The model occasionally returns an empty/garbled reply; a blank required
+    // radio blocks the whole submission, so retry a couple of times before giving
+    // up (each blank answer is a lost application otherwise).
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const reply = await llmChat(prompt);
+      const cleaned = (reply || '').trim().replace(/^\d+\.\s*/, '');
+      if (!cleaned) { await J(300, 600); continue; }
+      const lc = cleaned.toLowerCase();
+      const match = optionTexts.find(t => t.toLowerCase() === lc)
+        || optionTexts.find(t => t.toLowerCase().startsWith(lc) || lc.startsWith(t.toLowerCase()))
+        || optionTexts.find(t => t.toLowerCase().includes(lc) || lc.includes(t.toLowerCase()));
+      if (match) return match;
+      await J(300, 600);
+    }
+    return null;
   } catch (_) { return null; }
 }
 
