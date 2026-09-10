@@ -44,6 +44,10 @@ const MAX_IDLE      = 6;       // give up after ~60 s of no pending/ready jobs
 // the fallback until this is proven). Reed has no fill-only mode, so it can only
 // be exercised for real (SUBMIT), never in a dry run.
 const REED_ENABLED = process.env.JOBBOT_AUTOAPPLY_REED === '1';
+// Reed applies for real when the global ATS submit is on OR a Reed-specific
+// submit flag is set — so a supervised Reed test can go live WITHOUT forcing
+// real Recruitee/SmartRecruiters applies (those stay dry-run under SUBMIT).
+const REED_SUBMIT = process.env.JOBBOT_ATS_SUBMIT === '1' || process.env.JOBBOT_AUTOAPPLY_REED_SUBMIT === '1';
 const isReedJob = (job) => /(^|\.)reed\.co\.uk/i.test(String(job.url || ''));
 
 // Lazy browser-context pool keyed by profile: open a site's logged-in Chrome
@@ -225,7 +229,7 @@ async function phase2_applyReadyCVs(context, page) {
       // ── Reed strategy (browser board, own profile + result mapping) ─────────
       if (REED_ENABLED && isReedJob(job)) {
         queue.update(job.jobId, { status: 'applying' });
-        if (!SUBMIT) {
+        if (!REED_SUBMIT) {
           // Reed's applyToJob has no fill-only mode, so a dry run can't exercise
           // it without really applying — mark as dry-run without touching Reed.
           queue.update(job.jobId, { status: 'skipped', reason: 'Reed dry-run (no fill-only mode)' });

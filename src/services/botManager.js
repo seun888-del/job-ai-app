@@ -147,7 +147,18 @@ function start(botName, userDataPath, opts = {}) {
   // is no site to scrape), so it always uses the feed regardless of the toggle.
   // JOBBOT_ATS_SUBMIT is deliberately left unset → the agent runs in DRY RUN
   // (fills forms, never submits) until we flip it on after a supervised test.
-  if (botName === 'greenhouse') env.JOBBOT_USE_JOB_FEED = '1';
+  if (botName === 'greenhouse') {
+    env.JOBBOT_USE_JOB_FEED = '1';
+    // Supervised test: fold Reed into the router (sources + applies Reed). When
+    // on, Reed applies FOR REAL (no dry-run mode) — Recruitee/SmartRecruiters
+    // still respect JOBBOT_ATS_SUBMIT separately.
+    try {
+      if (db.getSearchPreferences().autoapply_reed) {
+        env.JOBBOT_AUTOAPPLY_REED = '1';
+        env.JOBBOT_AUTOAPPLY_REED_SUBMIT = '1';
+      }
+    } catch (_) {}
+  }
 
   // Backup proxy override: if the user has entered their own proxy in Search
   // Preferences (Connection card), pass it through so browser_launcher uses it

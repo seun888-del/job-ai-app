@@ -653,6 +653,16 @@ async function renderSearch() {
     </div>
 
     <div class="card">
+      <h3>Auto-Apply router · Reed test</h3>
+      <p class="card-hint">Apply to Reed through the new single Auto-Apply agent instead of the separate Reed agent. This is a supervised test: when on, Reed applications are sent <strong>for real</strong> (Reed has no dry-run mode). Untick the <strong>Reed</strong> agent on the dashboard first so it does not apply twice.</p>
+      <div class="checkbox-field">
+        <input id="autoapply_reed" type="checkbox" ${prefs.autoapply_reed ? 'checked' : ''}>
+        <label for="autoapply_reed">Route Reed through Auto-Apply (sends real applications)</label>
+      </div>
+      <div class="status-msg" id="status-autoapply-reed"></div>
+    </div>
+
+    <div class="card">
       <h3>Application Limits</h3>
       <div class="field">
         <label>Max applications per day</label>
@@ -824,6 +834,21 @@ async function renderSearch() {
     showStatus(document.getElementById('status-schedule'), 'Schedule saved');
     showToast('Schedule saved');
   });
+
+  // Reed-via-Auto-Apply test toggle — saves immediately on change.
+  const reedRouteToggle = document.getElementById('autoapply_reed');
+  if (reedRouteToggle) {
+    reedRouteToggle.addEventListener('change', async () => {
+      try {
+        await window.api.searchPrefs.save({ autoapply_reed: reedRouteToggle.checked ? 1 : 0 });
+        showStatus(document.getElementById('status-autoapply-reed'), reedRouteToggle.checked
+          ? 'On — Reed applies for REAL via Auto-Apply. Untick the Reed agent, then Start applying.' : 'Off');
+        showToast('Saved');
+      } catch (e) {
+        reedRouteToggle.checked = !reedRouteToggle.checked; // revert on failure
+      }
+    });
+  }
 
   // Job discovery toggle — saves immediately on change.
   const jobFeedToggle = document.getElementById('use_job_feed');

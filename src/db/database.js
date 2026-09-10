@@ -160,6 +160,12 @@ async function init(userDataPath) {
   if (!searchPrefsCols.includes('use_job_feed')) {
     db.exec('ALTER TABLE search_preferences ADD COLUMN use_job_feed INTEGER DEFAULT 0');
   }
+  // Supervised test: also apply to Reed via the new one-agent router (bot_greenhouse
+  // "Auto-Apply") instead of the standalone Reed agent. Off by default; when on,
+  // Reed applies FOR REAL (Reed has no dry-run mode). Untick the Reed agent first.
+  if (!searchPrefsCols.includes('autoapply_reed')) {
+    db.exec('ALTER TABLE search_preferences ADD COLUMN autoapply_reed INTEGER DEFAULT 0');
+  }
 
   // Seed singleton rows
   if (!db.prepare('SELECT id FROM profile WHERE id = 1').get()) {
