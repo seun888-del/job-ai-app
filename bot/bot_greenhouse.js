@@ -250,10 +250,12 @@ async function phase2_applyReadyCVs(context, page) {
 // ── browser + main ─────────────────────────────────────────────────────────
 async function launchBrowser() {
   const profileDir = path.join(process.env.JOBBOT_USERDATA, 'greenhouse_profile'); // matches botManager key 'greenhouse'
-  // Simple-form ATSes are public (no login, no hand-solved captcha), so run
-  // HEADLESS by default; JOBBOT_SHOW_BROWSER=1 forces a visible window.
-  const headless = process.env.JOBBOT_SHOW_BROWSER !== '1';
-  const context = await launchPersistentContext(profileDir, { headless });
+  // Recruitee submits over pure HTTP (no browser needed), but SmartRecruiters is
+  // DataDome-guarded and only passes with a REAL browser on the user's own IP —
+  // a headless Chrome gets flagged. So launch a real, MINIMISED (not headless)
+  // browser: no visible window intruding, but a genuine fingerprint DataDome
+  // accepts. JOBBOT_SHOW_BROWSER=1 keeps it visible for debugging.
+  const context = await launchPersistentContext(profileDir);
   await stealth.applyToContext(context);
   const page = await context.newPage();
   return { context, page };
