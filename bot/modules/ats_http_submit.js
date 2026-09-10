@@ -26,6 +26,28 @@ function attachCv(fd, field, cvPath) {
   return true;
 }
 
+// Answer one Recruitee required open question from the applicant profile.
+// Deterministic (no LLM — this module is shared app+web): covers the common
+// right-to-work / sponsorship / salary / eligibility questions; unknown booleans
+// default affirmative (the candidate is applying), unknown text is left blank.
+function answerRecruiteeQuestion(q, a = {}) {
+  const body = String(q.body || '').replace(/<[^>]+>/g, ' ').toLowerCase();
+  const rtw = a.rightToWorkCountries || [];
+  const hasUKRtW = Array.isArray(rtw) ? rtw.some((c) => /uk|united kingdom|britain/i.test(c)) : /uk|united kingdom/i.test(String(rtw));
+  const needsSponsor = typeof a.requiresSponsorship === 'boolean' ? a.requiresSponsorship : !hasUKRtW;
+  if (q.kind === 'boolean') {
+    let yes = true;
+    if (/sponsor/.test(body)) yes = needsSponsor;                                   // "require sponsorship?"
+    else if (/right to work|based in|located in|resid|eligible to work|authoris|legally.*work/.test(body)) yes = hasUKRtW;
+    // else willingness / capability / eligibility → affirmative (applicant wants the role)
+    return { id: q.id, kind: 'boolean', answer: yes };
+  }
+  if (q.kind === 'salary') return { id: q.id, kind: 'salary', answer: a.salaryExpectation || '30000' };
+  if (/notice period|availability|when can you start/.test(body)) return { id: q.id, kind: q.kind, answer: a.availability || 'Immediately available' };
+  if (/year.*experience|how many year/.test(body)) return { id: q.id, kind: q.kind, answer: String(a.yearsExperience ?? '') };
+  return { id: q.id, kind: q.kind, answer: '' };
+}
+
 // ── Recruitee — documented open POST (no auth) ──────────────────────────────
 // POST https://{company}.recruitee.com/api/offers/{slug}/candidates
 // careers_url shape: https://{company}.recruitee.com/o/{slug}
@@ -34,6 +56,20 @@ async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions,
   if (!m) return { ok: false, reason: 'unparseable_recruitee_url' };
   const [, company, slug] = m;
   const endpoint = `https://${company}.recruitee.com/api/offers/${encodeURIComponent(slug)}/candidates?async=true`;
+
+  // Fetch + auto-answer the offer's REQUIRED open questions when the caller didn't
+  // supply them (booleans need a flag, salary a value — an unanswered required
+  // question makes Recruitee reject the whole submission).
+  if (!Array.isArray(questions)) {
+    try {
+      const or = await fetch(`https://${company}.recruitee.com/api/offers/${encodeURIComponent(slug)}`, { headers: { Accept: 'application/json' } });
+      if (or.ok) {
+        const oj = await or.json();
+        const oqs = (oj.offer && oj.offer.open_questions) || [];
+        questions = oqs.filter((q) => q.required).map((q) => answerRecruiteeQuestion(q, applicant));
+      }
+    } catch (_) { /* fall through — submit without answers, may 422 (creates nothing) */ }
+  }
 
   const fd = new FormData();
   const name = `${applicant.firstName || ''} ${applicant.lastName || ''}`.trim();

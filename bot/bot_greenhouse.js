@@ -195,7 +195,12 @@ async function phase2_applyReadyCVs(context, page) {
         let result;
         if (httpFn) {
           const A = cfg.APPLICANT || {};
-          const r = await httpFn({ url: job.url, applicant: { firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone }, cvPath: job.cvPath, coverLetter: job.coverLetter || '', dryRun: !SUBMIT });
+          const r = await httpFn({ url: job.url, applicant: {
+            firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone,
+            // Needed to auto-answer Recruitee's required questions (RTW/sponsorship/salary).
+            rightToWorkCountries: A.rightToWorkCountries, requiresSponsorship: A.requiresSponsorship,
+            salaryExpectation: A.salaryExpectation, yearsExperience: A.yearsExperience, availability: A.availability,
+          }, cvPath: job.cvPath, coverLetter: job.coverLetter || '', dryRun: !SUBMIT });
           if (!r.ok && !r.dryRun) console.log(`  [Auto-Apply] HTTP submit not accepted (${r.reason}${r.status ? ' ' + r.status : ''})`);
           result = r.submitted ? true : (r.dryRun ? 'dry_run' : false);
         } else {
