@@ -2,7 +2,7 @@
 // Uses an LLM to extract required keywords from a JD, then deterministically
 // checks how many appear in the CV. No browser, no external service.
 
-const { llmAvailable, llmChat } = require('../../src/services/llm');
+const { llmChat } = require('../../src/services/llm');
 
 // Use the LLM to extract required keywords/skills from a job description.
 // Returns a flat array of short keyword strings.
@@ -52,12 +52,17 @@ function computeScore(cvText, keywords) {
 // One LLM call per CV; subsequent boost iterations use rescoreCV (instant, no LLM).
 // Falls back to score=85 / no missing keywords when the LLM is unavailable.
 async function scoreCV(cvText, jdText) {
-  if (!await llmAvailable()) {
-    console.log('  [Scorer] AI scoring unavailable — fallback score 85');
+  // Try the real LLM call and only fall back on an ACTUAL failure. Do NOT
+  // pre-gate on llmAvailable()'s /health ping — it flakes (e.g. during a backend
+  // redeploy) while the real /v1/chat call works fine, and pre-gating would then
+  // silently score EVERY job 85, defeating the relevance gate.
+  let keywords;
+  try {
+    keywords = await extractJDKeywords(jdText);
+  } catch (err) {
+    console.log(`  [Scorer] AI scoring unavailable (${err.message}) — fallback score 85`);
     return { score: 85, missingKeywords: [], allKeywords: [] };
   }
-
-  const keywords = await extractJDKeywords(jdText);
   if (!keywords.length) {
     console.log('  [Scorer] No keywords extracted — fallback score 85');
     return { score: 85, missingKeywords: [], allKeywords: [] };

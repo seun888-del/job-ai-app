@@ -359,7 +359,9 @@ async function main() {
   await cfg.init();
   await queue.init(process.env.JOBBOT_USERDATA);
 
-  const modeLabel = llmMode === 'claude' ? 'Claude API' : llmMode === 'hosted' ? 'hosted backend' : 'local Ollama';
+  const modeLabel = llmMode === 'claude' ? 'Claude API'
+    : (llmMode === 'hosted' || llmMode === 'groq') ? 'licensed backend (Groq)'
+    : 'local Ollama';
   console.log('═══════════════════════════════════════════════════════');
   console.log(`  Scorer Agent — Starting (${modeLabel}, no browser)`);
   console.log('  Watching queue.db for pending jobs...');
@@ -369,7 +371,10 @@ async function main() {
   if (await llmAvailable()) {
     console.log(`  AI backend ready (${modeLabel})`);
   } else {
-    console.log(`  WARNING: ${modeLabel} unavailable — will use fallback scoring (score=85 for all jobs)`);
+    // The /health ping can flake (e.g. mid-redeploy) while the real /v1/chat
+    // call still works, so this is a NOTE, not a hard fallback: scoring runs per
+    // job and only degrades to 85 if an actual scoring call fails.
+    console.log(`  NOTE: ${modeLabel} health-check didn't respond — scoring still runs per job; only falls back to 85 on a real call failure.`);
   }
 
   // Recover any jobs stuck in 'processing' from a previous crashed run
