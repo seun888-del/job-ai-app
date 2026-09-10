@@ -29,12 +29,40 @@ const jobFeed     = require('./modules/job_feed');
 const stealth     = require('./modules/stealth');
 const atsFiller   = require('./modules/ats_filler');
 const httpSubmit  = require('./modules/ats_http_submit');
+const reed        = require('./modules/reed');
 const { launchPersistentContext, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
 const path        = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
 const POLL_INTERVAL = 10000;   // 10 s between queue polls
 const MAX_IDLE      = 6;       // give up after ~60 s of no pending/ready jobs
+
+// ── Router consolidation: browser job boards folded in behind a flag ─────────
+// Step 2 of the one-agent plan. Reed is applied via reed.applyToJob on the Reed
+// logged-in profile. OFF by default so the working ATS agent is untouched; set
+// JOBBOT_AUTOAPPLY_REED=1 to also source + apply Reed here (bot_reed stays as
+// the fallback until this is proven). Reed has no fill-only mode, so it can only
+// be exercised for real (SUBMIT), never in a dry run.
+const REED_ENABLED = process.env.JOBBOT_AUTOAPPLY_REED === '1';
+const isReedJob = (job) => /(^|\.)reed\.co\.uk/i.test(String(job.url || ''));
+
+// Lazy browser-context pool keyed by profile: open a site's logged-in Chrome
+// only when a job needs it, reuse it across that site's batch, close all at the
+// end. Recruitee (HTTP) never enters this pool.
+const _ctxPool = {};
+async function getSiteContext(profile, loginFn) {
+  if (_ctxPool[profile]) return _ctxPool[profile];
+  const dir = path.join(process.env.JOBBOT_USERDATA, profile);
+  const context = await launchPersistentContext(dir);
+  await stealth.applyToContext(context);
+  const page = await context.newPage();
+  if (loginFn) await loginFn(page);
+  _ctxPool[profile] = { context, page };
+  return _ctxPool[profile];
+}
+async function closeSiteContexts() {
+  for (const k of Object.keys(_ctxPool)) { try { await _ctxPool[k].context.close(); } catch (_) {} delete _ctxPool[k]; }
+}
 const SUBMIT        = process.env.JOBBOT_ATS_SUBMIT === '1' || process.env.JOBBOT_GREENHOUSE_SUBMIT === '1'; // off = dry run
 const SOURCE        = 'ats';
 
@@ -145,6 +173,15 @@ async function phase1_sourceAndQueue(page) {
   for (const country of ['GB', 'US']) {
     try { jobs = jobs.concat(await jobFeed.fetchAtsJobs({ country, limit: 40 })); } catch (_) {}
   }
+  // Router step 2: also fold in Reed (browser board) when enabled. Reed stubs
+  // carry a reed.co.uk URL, so the Phase-2 router applies them via reed.applyToJob.
+  if (REED_ENABLED) {
+    try {
+      const reedStubs = await jobFeed.fetchReedStubs({ country: 'GB' });
+      console.log(`  [Auto-Apply] +${reedStubs.length} Reed job(s) from the feed`);
+      jobs = jobs.concat(reedStubs.map((s) => ({ ...s, url: s.url, apply_url: s.url, apply_kind: 'reed', auto_apply: false })));
+    } catch (e) { console.log(`  [Auto-Apply] Reed feed unavailable (${e.message})`); }
+  }
   // Cap the per-run candidate set: Phase 1 loads a page per non-Greenhouse job
   // for its JD, and the daily apply cap is 25, so ~50 candidates is plenty.
   jobs = jobs.slice(0, 50);
@@ -184,6 +221,42 @@ async function phase2_applyReadyCVs(context, page) {
         return;
       }
       if (!isRelevantTitle(job.title)) { queue.update(job.jobId, { status: 'skipped', reason: 'Title filter (post-queue)' }); continue; }
+
+      // ── Reed strategy (browser board, own profile + result mapping) ─────────
+      if (REED_ENABLED && isReedJob(job)) {
+        queue.update(job.jobId, { status: 'applying' });
+        if (!SUBMIT) {
+          // Reed's applyToJob has no fill-only mode, so a dry run can't exercise
+          // it without really applying — mark as dry-run without touching Reed.
+          queue.update(job.jobId, { status: 'skipped', reason: 'Reed dry-run (no fill-only mode)' });
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Reed dry-run — not exercised');
+          console.log(`  [Auto-Apply] Reed (dry run) — not exercised (reed has no fill-only mode): ${job.title}`);
+        } else {
+          console.log(`  [Auto-Apply] Applying [reed]: ${job.title} @ ${job.company}`);
+          try {
+            const { page: reedPage } = await getSiteContext('reed_profile', reed.ensureLoggedIn);
+            const applied = await reed.applyToJob(reedPage, job, job.cvPath);
+            if (applied === true) {
+              queue.update(job.jobId, { status: 'applied' }); queue.markApplied(job.jobId);
+              logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLIED', 'Reed');
+              console.log(`  [Auto-Apply] ✓ Applied [reed]: ${job.title}`);
+            } else if (applied === null || applied === 'external' || applied === 'cv_not_attached') {
+              queue.update(job.jobId, { status: 'skipped', reason: 'Reed: ' + applied });
+              logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Reed ' + applied);
+            } else {
+              queue.update(job.jobId, { status: 'apply_failed' });
+              logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLY_FAILED', 'Reed form could not be completed');
+              console.log(`  [Auto-Apply] ✗ Apply failed [reed]: ${job.title}`);
+            }
+          } catch (err) {
+            queue.update(job.jobId, { status: 'apply_failed', error: err.message });
+            logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
+            console.error(`  [Auto-Apply] Reed error on "${job.title}": ${err.message}`);
+          }
+        }
+        await DELAY(8000 + Math.random() * 7000);
+        continue;
+      }
 
       const ats = atsFiller.detectATS(job.url);
       // Prefer a pure-HTTP submitter (open ATSes like Recruitee): no browser,
@@ -291,6 +364,7 @@ async function main() {
     else console.error('  [Auto-Apply] Fatal: ' + err.message);
   } finally {
     if (guard) guard.intentional = true;
+    await closeSiteContexts(); // close any per-site (Reed) profiles opened by the router
     await context?.close().catch(() => {});
   }
   console.log('  [Auto-Apply] Done.');
