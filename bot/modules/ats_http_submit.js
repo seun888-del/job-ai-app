@@ -44,9 +44,17 @@ async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions,
   if (coverLetter) fd.append('candidate[cover_letter]', coverLetter);
   if (Array.isArray(questions)) {
     questions.forEach((q, i) => {
-      if (q && q.id != null) {
-        fd.append(`candidate[open_question_answers_attributes][${i}][open_question_id]`, String(q.id));
-        fd.append(`candidate[open_question_answers_attributes][${i}][content]`, String(q.answer || ''));
+      if (!q || q.id == null) return;
+      const base = `candidate[open_question_answers_attributes][${i}]`;
+      fd.append(`${base}[open_question_id]`, String(q.id));
+      // Recruitee validates by question KIND: boolean questions require a [flag]
+      // (true/false) and REJECT a [content] value ("flag can't be blank");
+      // salary/text/numeric questions use [content]. Verified live 2026-09-10.
+      if (q.kind === 'boolean') {
+        const yes = q.answer === true || /^(yes|true|1)$/i.test(String(q.answer));
+        fd.append(`${base}[flag]`, yes ? 'true' : 'false');
+      } else {
+        fd.append(`${base}[content]`, String(q.answer == null ? '' : q.answer));
       }
     });
   }
@@ -55,7 +63,7 @@ async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions,
   if (dryRun) return { ok: true, dryRun: true, endpoint, hasCv, name };
 
   try {
-    const res = await fetch(endpoint, { method: 'POST', body: fd, headers: { 'User-Agent': UA } });
+    const res = await fetch(endpoint, { method: 'POST', body: fd, headers: { 'User-Agent': UA, 'Accept': 'application/json' } });
     if (res.ok) return { ok: true, submitted: true, status: res.status };
     return { ok: false, reason: 'rejected', status: res.status };
   } catch (e) {
