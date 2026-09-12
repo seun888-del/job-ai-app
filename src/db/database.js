@@ -166,6 +166,13 @@ async function init(userDataPath) {
   if (!searchPrefsCols.includes('autoapply_reed')) {
     db.exec('ALTER TABLE search_preferences ADD COLUMN autoapply_reed INTEGER DEFAULT 0');
   }
+  // Review-before-apply: when on, the Scorer holds each tailored application at
+  // "awaiting_review" instead of "cv_ready", so the user can view the tailored CV
+  // and cover letter and approve (or skip) before any agent submits it. Off by
+  // default → existing hands-off behaviour is unchanged.
+  if (!searchPrefsCols.includes('review_before_apply')) {
+    db.exec('ALTER TABLE search_preferences ADD COLUMN review_before_apply INTEGER DEFAULT 0');
+  }
 
   // Seed singleton rows
   if (!db.prepare('SELECT id FROM profile WHERE id = 1').get()) {

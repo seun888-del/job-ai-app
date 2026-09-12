@@ -100,6 +100,59 @@ async function clearRecentActivity() {
   }
 }
 
+// Jobs the Scorer has tailored and parked for the user's approval (review-before-
+// apply mode). Newest first. Each carries the tailored CV path + cover letter so
+// the review card can show both before anything is submitted.
+function getReviewQueue(limit = 100) {
+  return withQueueDb(db => {
+    try {
+      const rows = all(db, `
+        SELECT job_id, title, company, url, source, cv_path, cv_score, cv_name, cover_letter, updated_at
+        FROM queue WHERE status = 'awaiting_review'
+        ORDER BY updated_at DESC LIMIT ?`, [limit]);
+      return rows.map(r => ({
+        jobId: r.job_id, title: r.title, company: r.company || '', url: r.url || '',
+        source: r.source || '', cvPath: r.cv_path || '', cvScore: r.cv_score,
+        cvName: r.cv_name || '', coverLetter: r.cover_letter || '', updatedAt: r.updated_at,
+      }));
+    } catch (_) { return []; }
+  }, []);
+}
+
+function getReviewCount() {
+  return withQueueDb(db => {
+    try {
+      const r = all(db, "SELECT COUNT(*) AS c FROM queue WHERE status = 'awaiting_review'");
+      return r[0]?.c || 0;
+    } catch (_) { return 0; }
+  }, 0);
+}
+
+// Resolve reviewed jobs: approve -> 'cv_ready' (the normal apply flow resumes and
+// an agent submits it); skip -> 'skipped'. Only rows still 'awaiting_review' are
+// touched, so a job already applied to can't be disturbed. User-initiated and
+// rare, so it uses the same whole-file read-modify-write the UC log write uses.
+async function resolveReview(jobIds, approve) {
+  if (!dbPath || !fs.existsSync(dbPath) || !Array.isArray(jobIds) || jobIds.length === 0) return 0;
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(fs.readFileSync(dbPath));
+  try {
+    let n = 0;
+    for (const id of jobIds) {
+      if (approve) {
+        db.run("UPDATE queue SET status = 'cv_ready', updated_at = datetime('now') WHERE job_id = ? AND status = 'awaiting_review'", [id]);
+      } else {
+        db.run("UPDATE queue SET status = 'skipped', reason = 'Skipped in review', updated_at = datetime('now') WHERE job_id = ? AND status = 'awaiting_review'", [id]);
+      }
+      n++;
+    }
+    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    return n;
+  } finally {
+    db.close();
+  }
+}
+
 function getQueueSummary() {
   return withQueueDb(db => {
     // A brand-new profile has a queue.db (meta table) but no `queue` table yet —
@@ -244,4 +297,4 @@ function getAnalytics() {
   }, null);
 }
 
-module.exports = { init, getQueueSummary, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics };
+module.exports = { init, getQueueSummary, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview };

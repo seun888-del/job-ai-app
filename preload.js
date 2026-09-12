@@ -55,6 +55,9 @@ contextBridge.exposeInMainWorld('api', {
     ucMarkLogged: (jobIds) => ipcRenderer.invoke('uc:markLogged', jobIds),
     recent: (limit) => ipcRenderer.invoke('queue:recent', limit),
     dailyApplications: (days) => ipcRenderer.invoke('queue:dailyApplications', days),
+    reviewList: (limit) => ipcRenderer.invoke('queue:reviewList', limit),
+    reviewCount: () => ipcRenderer.invoke('queue:reviewCount'),
+    reviewResolve: (jobIds, approve) => ipcRenderer.invoke('queue:reviewResolve', jobIds, approve),
   },
   bot: {
     start: (botName) => ipcRenderer.invoke('bot:start', botName),

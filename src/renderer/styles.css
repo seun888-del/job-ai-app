@@ -570,6 +570,14 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .cv-name-cell { max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .view-cv-btn { color: var(--text-muted); background: none; border: none; border-radius: 6px; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; transition: color var(--transition), background var(--transition); }
 .view-cv-btn:hover { color: var(--primary); background: var(--primary-soft); }
+.view-cl-btn { color: var(--text-muted); background: none; border: none; border-radius: 6px; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; transition: color var(--transition), background var(--transition); }
+.view-cl-btn:hover { color: var(--primary); background: var(--primary-soft); }
+.review-approve, .review-skip { font-family: inherit; font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); transition: background var(--transition), color var(--transition), border-color var(--transition); }
+.review-approve { background: var(--primary); color: #fff; border-color: var(--primary); }
+.review-approve:hover { filter: brightness(1.05); }
+.review-skip { background: none; color: var(--text-muted); margin-left: 6px; }
+.review-skip:hover { color: #ef4444; border-color: #ef4444; }
+#review-card .bot-card-header { align-items: center; }
 
 /* ── Help page ──────────────────────────────────────────────────────────────── */
 .nav-help { margin-top: auto; }

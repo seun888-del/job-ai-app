@@ -143,6 +143,14 @@ function start(botName, userDataPath, opts = {}) {
     if (db.getSearchPreferences().use_job_feed) env.JOBBOT_USE_JOB_FEED = '1';
   } catch (_) { /* prefs unavailable → feed off, live search used */ }
 
+  // Review before applying: when on, the Scorer marks tailored jobs
+  // "awaiting_review" (held for the user's approval) instead of "cv_ready", so no
+  // apply agent submits them until the user approves in the app. Read here and
+  // passed to every bot; only the Scorer acts on it. Off by default.
+  try {
+    if (db.getSearchPreferences().review_before_apply) env.JOBBOT_REVIEW_BEFORE_APPLY = '1';
+  } catch (_) { /* prefs unavailable → review off */ }
+
   // The ATS Auto-Apply agent's ONLY source is the backend candidate feed (there
   // is no site to scrape), so it always uses the feed regardless of the toggle.
   // JOBBOT_ATS_SUBMIT is deliberately left unset → the agent runs in DRY RUN

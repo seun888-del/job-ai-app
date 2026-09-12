@@ -580,6 +580,9 @@ ipcMain.handle('queue:ucPending', () => queueReader.getUcPendingCount());
 ipcMain.handle('queue:ucPendingList', () => queueReader.getUcPendingList(200));
 ipcMain.handle('uc:markLogged', (_e, jobIds) => queueReader.markUcLoggedManual(jobIds));
 ipcMain.handle('queue:recent', (event, limit) => queueReader.getRecentApplications(limit));
+ipcMain.handle('queue:reviewList', (event, limit) => queueReader.getReviewQueue(limit || 100));
+ipcMain.handle('queue:reviewCount', () => queueReader.getReviewCount());
+ipcMain.handle('queue:reviewResolve', (event, jobIds, approve) => queueReader.resolveReview(jobIds, !!approve));
 ipcMain.handle('queue:dailyApplications', (event, days) => queueReader.getDailyApplications(days || 14));
 // Daily application cap status for the "limit reached" prompt shown on Start.
 // Cap mirrors bot/config.js: paid → 25/day, trial → 10/day, further limited by

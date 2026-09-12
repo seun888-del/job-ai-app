@@ -663,6 +663,16 @@ async function renderSearch() {
     </div>
 
     <div class="card">
+      <h3>Review before applying</h3>
+      <p class="card-hint">When on, Job-AI tailors your CV and cover letter for each job and then <strong>holds it for your approval</strong> instead of applying straight away. You review the tailored CV and letter on the dashboard, then Approve to send or Skip. When off, applications are sent automatically (the default).</p>
+      <div class="checkbox-field">
+        <input id="review_before_apply" type="checkbox" ${prefs.review_before_apply ? 'checked' : ''}>
+        <label for="review_before_apply">Let me review each tailored CV and cover letter before it applies</label>
+      </div>
+      <div class="status-msg" id="status-review-before-apply"></div>
+    </div>
+
+    <div class="card">
       <h3>Application Limits</h3>
       <div class="field">
         <label>Max applications per day</label>
@@ -846,6 +856,22 @@ async function renderSearch() {
         showToast('Saved');
       } catch (e) {
         reedRouteToggle.checked = !reedRouteToggle.checked; // revert on failure
+      }
+    });
+  }
+
+  // Review-before-apply toggle — saves immediately on change.
+  const reviewToggle = document.getElementById('review_before_apply');
+  if (reviewToggle) {
+    reviewToggle.addEventListener('change', async () => {
+      try {
+        await window.api.searchPrefs.save({ review_before_apply: reviewToggle.checked ? 1 : 0 });
+        showStatus(document.getElementById('status-review-before-apply'), reviewToggle.checked
+          ? 'On. New tailored applications wait for your approval on the dashboard. Restart the Agents to apply the change.'
+          : 'Off. Applications are sent automatically.');
+        showToast('Saved');
+      } catch (e) {
+        reviewToggle.checked = !reviewToggle.checked; // revert on failure
       }
     });
   }
@@ -1364,6 +1390,100 @@ function bindViewCvButtons(root = content) {
   });
 }
 
+// ── Review before applying ───────────────────────────────────────────────────
+// When the user has "Review before applying" on, the Scorer parks each tailored
+// job at awaiting_review. This card lets them view the tailored CV + cover letter
+// and Approve (→ agent submits) or Skip. Reuses the same View-CV / View-letter
+// buttons as Recent Activity, so cover letters are stashed in _coverLetters too.
+function reviewRowsHtml(list) {
+  (list || []).forEach(j => {
+    if (j.coverLetter && j.jobId) {
+      _coverLetters[j.jobId] = { text: j.coverLetter, title: cleanTitle(j.title), company: j.company || '' };
+    }
+  });
+  return (list || []).map(j => `
+          <tr>
+            <td>${cleanTitle(j.title)}</td>
+            <td>${j.company || ''}</td>
+            <td>${j.cvScore != null ? j.cvScore + '%' : '—'}</td>
+            <td class="row-actions">
+              ${j.cvPath ? `<button class="view-cv-btn" data-path="${j.cvPath}" title="View tailored CV" aria-label="View tailored CV"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}
+              ${j.coverLetter ? `<button class="view-cl-btn" data-jobid="${j.jobId}" title="View cover letter" aria-label="View cover letter"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg></button>` : '<span style="color:#94a3b8;font-size:12px">letter…</span>'}
+            </td>
+            <td class="row-actions">
+              <button class="review-approve" data-jobid="${j.jobId}" title="Approve and apply">Approve</button>
+              <button class="review-skip" data-jobid="${j.jobId}" title="Skip this job">Skip</button>
+            </td>
+          </tr>`).join('');
+}
+
+async function renderReviewSection() {
+  const host = document.getElementById('review-section');
+  if (!host) return;
+  let list = [];
+  try { list = (await window.api.queue.reviewList(100)) || []; } catch (_) { return; }
+  if (!list.length) { host.innerHTML = ''; return; }
+
+  const n = list.length;
+  const html = `
+    <div class="card" id="review-card" style="border:1px solid var(--primary,#2563eb)">
+      <div class="bot-card-header">
+        <strong>🔎 Waiting for your review — ${n} application${n === 1 ? '' : 's'}</strong>
+        <div style="display:flex;gap:8px">
+          <button class="secondary" id="review-approve-all">Approve all</button>
+          <button class="secondary" id="review-skip-all">Skip all</button>
+        </div>
+      </div>
+      <p class="card-hint">These CVs and cover letters are tailored and ready. Click the eye to open the CV, the page icon to read the cover letter, then Approve to apply or Skip.</p>
+      <table class="data-table">
+        <thead><tr><th>Job</th><th>Company</th><th>Score</th><th>Tailored</th><th>Decision</th></tr></thead>
+        <tbody id="review-body">${reviewRowsHtml(list)}</tbody>
+      </table>
+    </div>`;
+  if (host._lastHtml === html) return; // avoid clobbering during the 5 s poll
+  host._lastHtml = html;
+  host.innerHTML = html;
+
+  const allIds = list.map(j => j.jobId);
+  bindReviewButtons(host, allIds);
+  bindViewCvButtons(host);
+}
+
+async function resolveReviewAndRefresh(jobIds, approve) {
+  try { await window.api.queue.reviewResolve(jobIds, approve); } catch (_) {}
+  const host = document.getElementById('review-section');
+  if (host) host._lastHtml = null; // force refresh
+  await renderReviewSection();
+}
+
+function bindReviewButtons(root, allIds) {
+  root.querySelectorAll('.review-approve').forEach(btn => {
+    if (btn._bound) return; btn._bound = true;
+    btn.addEventListener('click', () => resolveReviewAndRefresh([btn.dataset.jobid], true));
+  });
+  root.querySelectorAll('.review-skip').forEach(btn => {
+    if (btn._bound) return; btn._bound = true;
+    btn.addEventListener('click', () => resolveReviewAndRefresh([btn.dataset.jobid], false));
+  });
+  const approveAll = root.querySelector('#review-approve-all');
+  if (approveAll && !approveAll._bound) {
+    approveAll._bound = true;
+    approveAll.addEventListener('click', () => resolveReviewAndRefresh(allIds, true));
+  }
+  const skipAll = root.querySelector('#review-skip-all');
+  if (skipAll && !skipAll._bound) {
+    skipAll._bound = true;
+    skipAll.addEventListener('click', async () => {
+      const ok = await showConfirm({
+        title: `Skip all ${allIds.length} application${allIds.length === 1 ? '' : 's'}?`,
+        bodyHtml: '<p>These tailored applications will not be sent. This cannot be undone.</p>',
+        confirmText: 'Skip all', cancelText: 'Cancel',
+      });
+      if (ok) resolveReviewAndRefresh(allIds, false);
+    });
+  }
+}
+
 // Show a stored cover letter in a themed modal. Body is set via textContent, so
 // the letter text can never inject markup.
 function showCoverLetterModal(jobId) {
@@ -1518,6 +1638,8 @@ async function renderDashboard() {
       <div class="summary-card skipped"><div class="num" id="stat-skipped">${counts.skipped || 0}</div><div class="label">Skipped</div></div>
       <div class="summary-card apply_failed"><div class="num" id="stat-failed">${counts.apply_failed || 0}</div><div class="label">Failed</div></div>
     </div>
+
+    <div id="review-section"></div>
 
     <div class="dash-cols">
       <div class="dash-col-main">
@@ -1814,6 +1936,10 @@ async function renderDashboard() {
 
   ensureCredModal();
 
+  // Populate the "waiting for your review" card (empty unless review mode is on
+  // and the Scorer has parked tailored jobs).
+  renderReviewSection();
+
   // Re-subscribe to live log/status streams (drop the previous view's listeners)
   if (botLogUnsub) botLogUnsub();
   if (botStatusUnsub) botStatusUnsub();
@@ -1896,6 +2022,9 @@ async function renderDashboard() {
           bindViewCvButtons();
         }
       }
+      // Keep the review card live too — new tailored jobs appear here as the
+      // Scorer parks them, and resolved ones drop off.
+      renderReviewSection();
     } catch (_) {}
   }, 5000);
 }

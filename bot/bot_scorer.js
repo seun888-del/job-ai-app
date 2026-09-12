@@ -37,6 +37,12 @@ const QUICK_FAIL_THRESHOLD = 45;
 const BOOST_TARGET         = 85;
 const STUCK_TIMEOUT_MS     = 10 * 60 * 1000;
 
+// Review before applying: when the user has turned this on (Search Preferences),
+// botManager sets JOBBOT_REVIEW_BEFORE_APPLY=1. The Scorer then parks each tailored
+// job at "awaiting_review" instead of "cv_ready" — the apply agents only ever poll
+// "cv_ready", so nothing is submitted until the user approves it in the app.
+const REVIEW_MODE = process.env.JOBBOT_REVIEW_BEFORE_APPLY === '1';
+
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
 const POLL_INTERVAL = 10000;
 
@@ -326,6 +332,27 @@ async function processJob(job) {
 
     const flag = bestScore >= BOOST_TARGET ? '✓' : '~';
     console.log(`  [Scorer Agent] ${flag} ${bestCvName} → ${bestScore}% | PDF: ${paths.saved}`);
+
+    if (REVIEW_MODE) {
+      // Review before applying: generate the cover letter FIRST (best-effort) so
+      // the review card can show the CV and letter together, then park the job at
+      // "awaiting_review". No apply agent touches it until the user approves.
+      let coverLetter = null;
+      try {
+        coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, bestCvText);
+      } catch (err) {
+        console.warn(`  [Scorer Agent] Cover letter failed: ${err.message}`);
+      }
+      queue.update(job.jobId, {
+        status:  'awaiting_review',
+        cvPath:  paths.saved,
+        cvScore: bestScore,
+        cvName:  bestCvName,
+        ...(coverLetter ? { coverLetter } : {}),
+      });
+      console.log(`  [Scorer Agent] ⏸ Held for your review: ${job.title}`);
+      return;
+    }
 
     // Mark cv_ready immediately — don't block on cover letter generation
     queue.update(job.jobId, {
