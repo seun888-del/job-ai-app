@@ -3,6 +3,7 @@
 
 const { chromium } = require('playwright-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const fs = require('fs');
 const _stealth = StealthPlugin();
 // The 'chrome.app' evasion ships as a directory literally named "chrome.app",
 // which macOS codesign tries (and fails) to sign as an app bundle when signing
@@ -241,6 +242,89 @@ async function connectToRunningChrome(port) {
   return ctx;
 }
 
+// ── Spawn-then-attach launcher (the macOS-safe path) ─────────────────────────
+// On macOS, Playwright's own launch of Chrome trips the OS "control another app"
+// (TCC/Apple-Events) permission and gets blocked. This path avoids that entirely:
+// we SPAWN the user's real Chrome as an ordinary subprocess with a debug port,
+// then attach over CDP — a plain localhost WebSocket, NOT Apple Events, so it
+// isn't gated by that permission. It also drives the user's REAL Chrome with their
+// real (imported) profile, so no separate login. navigator.webdriver stays false
+// (Chrome isn't launched by an automation driver), so it's less detectable too.
+const CHROME_PATHS = {
+  darwin: [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  ],
+  win32: [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    (process.env.LOCALAPPDATA || '') + '\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+  ],
+  linux: ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium-browser', '/usr/bin/chromium'],
+};
+function findChromeExecutable() {
+  if (process.env.JOBBOT_CHROME_PATH && fs.existsSync(process.env.JOBBOT_CHROME_PATH)) return process.env.JOBBOT_CHROME_PATH;
+  for (const p of (CHROME_PATHS[process.platform] || [])) { try { if (p && fs.existsSync(p)) return p; } catch (_) {} }
+  return null;
+}
+async function waitForCdpReady(port, ms = 25000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    try { const r = await fetch(`http://127.0.0.1:${port}/json/version`); if (r.ok) return true; } catch (_) {}
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return false;
+}
+// Force-close any running Chrome so its profile unlocks (a profile can only be
+// open in one Chrome process). Needed before we relaunch the user's REAL profile
+// with a debug port — otherwise Chrome just hands off to the running instance and
+// never opens the port. Best-effort + brief settle.
+async function killRunningChrome() {
+  const { spawn } = require('child_process');
+  const cmd = process.platform === 'win32' ? ['taskkill', ['/IM', 'chrome.exe', '/F']]
+    : process.platform === 'darwin' ? ['pkill', ['-x', 'Google Chrome']]
+    : ['pkill', ['-x', 'chrome']];
+  try { await new Promise((res) => { const p = spawn(cmd[0], cmd[1], { stdio: 'ignore' }); p.on('close', res); p.on('error', res); }); } catch (_) {}
+  await new Promise((r) => setTimeout(r, 1500));
+}
+async function spawnChromeWithCdp(profileDir, opts = {}) {
+  const { spawn } = require('child_process');
+  const exe = findChromeExecutable();
+  if (!exe) throw new Error('Chrome/Edge executable not found (set JOBBOT_CHROME_PATH)');
+  // When opening the user's REAL Chrome profile, close their running Chrome first
+  // so the profile unlocks and the debug port actually opens (no silent hand-off).
+  if (opts.closeRunning || process.env.JOBBOT_CLOSE_CHROME === '1') {
+    console.log('  [Browser] Closing any running Chrome so the profile unlocks…');
+    await killRunningChrome();
+  }
+  const port = opts.port || (9300 + Math.floor(Math.random() * 600));
+  // Which Chrome profile to open. Default: the agent's own profile dir. Pass
+  // opts.userDataDir (or set JOBBOT_CHROME_USER_DATA) to open the user's REAL
+  // Chrome profile instead — then their existing Reed/LinkedIn/etc. logins are
+  // already present and NO sign-in is needed. Their normal Chrome must be closed
+  // first (Chrome locks a profile to one running instance).
+  const userDataDir = opts.userDataDir || process.env.JOBBOT_CHROME_USER_DATA || profileDir;
+  const args = [
+    `--remote-debugging-port=${port}`,
+    '--remote-allow-origins=*',          // Chrome 111+ rejects CDP attach without this
+    `--user-data-dir=${userDataDir}`,
+    '--no-first-run', '--no-default-browser-check', '--no-service-autorun',
+    '--disable-features=Translate,ChromeWhatsNewUI',
+    opts.startUrl || 'about:blank',
+  ];
+  console.log(`  [Browser] Spawning real Chrome (CDP :${port}) — ${exe}`);
+  const proc = spawn(exe, args, { detached: false, stdio: 'ignore' });
+  proc.on('error', (e) => console.error('  [Browser] Chrome spawn error: ' + e.message));
+  if (!(await waitForCdpReady(port))) { try { proc.kill(); } catch (_) {} throw new Error(`Chrome debug port ${port} never came up`); }
+  const context = await connectToRunningChrome(port);
+  const pages = context.pages();
+  const page = pages.length ? pages[0] : await context.newPage();
+  return { context, page, proc, port };
+}
+
 // Playwright throws these when the page / context / browser has gone away.
 const BROWSER_CLOSED_RE = /Target (page|frame|closed)|context was (destroyed|closed)|context.*closed|browser.*closed|page.*closed|has been closed|Target closed|Browser closed|websocket.*closed/i;
 
@@ -259,4 +343,4 @@ function watchForManualClose(context, label) {
   return guard;
 }
 
-module.exports = { launchPersistentContext, connectToRunningChrome, humanWarmup, waitForCloudflareSolve, BROWSER_CLOSED_RE, watchForManualClose };
+module.exports = { launchPersistentContext, connectToRunningChrome, spawnChromeWithCdp, findChromeExecutable, humanWarmup, waitForCloudflareSolve, BROWSER_CLOSED_RE, watchForManualClose };

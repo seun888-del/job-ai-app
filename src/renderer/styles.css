@@ -576,7 +576,9 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .review-approve { background: var(--primary); color: #fff; border-color: var(--primary); }
 .review-approve:hover { filter: brightness(1.05); }
 .review-skip { background: none; color: var(--text-muted); margin-left: 6px; }
-.review-skip:hover { color: #ef4444; border-color: #ef4444; }
+.review-skip:hover { color: var(--danger); border-color: var(--danger); }
+.review-regen { background: none; color: var(--text-muted); margin-right: 6px; }
+.review-regen:hover { color: var(--primary); border-color: var(--primary); }
 #review-card .bot-card-header { align-items: center; }
 
 /* ── Help page ──────────────────────────────────────────────────────────────── */
@@ -1124,7 +1126,7 @@ li.active .nav-icon-check::after, li.active .nav-icon-chart::after { color: #fff
 .dash-cta .scorer-pill{ margin-left:0; }
 .dash-cta button{ margin-top:0; }
 .dash-cols{ display:grid; grid-template-columns:1.5fr 1fr; gap:18px; align-items:stretch; margin-bottom:18px; }
-.dash-col-main .bot-controls{ grid-template-columns:1fr; }
+.dash-col-main .bot-controls{ grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 12px; }
 .dash-col-title{ font-family:var(--font-serif); font-size:16px; font-weight:700; color:var(--text); margin:0 0 8px; }
 .dash-col-side .card{ margin-bottom:0; }
 @media (max-width: 980px){ .dash-cols{ grid-template-columns:1fr; } }
@@ -1219,3 +1221,23 @@ li.active .nav-icon-check::after, li.active .nav-icon-chart::after { color: #fff
 }
 #asst-send:hover { background: var(--primary-hover); }
 #asst-send:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Dashboard "Set up your details" quick-access ──────────────────────────── */
+.setup-quick { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.setup-quick .preflight-link {
+  font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  padding: 10px 16px; border-radius: 9px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text);
+  transition: border-color var(--transition), background var(--transition), transform var(--transition);
+}
+.setup-quick .preflight-link:hover { border-color: var(--primary); background: var(--primary-soft); transform: translateY(-1px); }
+
+/* ── NHS / Trac details form ───────────────────────────────────────────────── */
+.tracd-row { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: var(--surface); }
+.tracd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin-bottom: 8px; }
+input.tracd, textarea.tracd { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; font-family: inherit; font-size: 13.5px; background: var(--surface); color: var(--text); }
+textarea.tracd { resize: vertical; }
+.tracd-del { margin-top: 2px; font-family: inherit; font-size: 12px; font-weight: 600; color: var(--text-muted); background: none; border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.tracd-del:hover { color: var(--danger); border-color: var(--danger); }
+.setup-quick .preflight-link.is-done { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+.setup-quick .preflight-link.is-done:hover { border-color: var(--primary-hover); }

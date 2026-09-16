@@ -148,6 +148,7 @@ async function render(view) {
     case 'license':    fn = renderLicense; break;
     case 'dashboard':  fn = renderDashboard; break;
     case 'tracker':    fn = renderTracker; break;
+    case 'trac-details': fn = renderTracDetails; break;
     case 'analytics':  fn = renderAnalytics; break;
     case 'help':       fn = renderHelp; break;
     default:           fn = renderPersonal;
@@ -653,11 +654,11 @@ async function renderSearch() {
     </div>
 
     <div class="card">
-      <h3>Auto-Apply router · Reed test</h3>
-      <p class="card-hint">Apply to Reed through the new single Auto-Apply agent instead of the separate Reed agent. This is a supervised test: when on, Reed applications are sent <strong>for real</strong> (Reed has no dry-run mode). Untick the <strong>Reed</strong> agent on the dashboard first so it does not apply twice.</p>
+      <h3>Company Sites router · Reed test</h3>
+      <p class="card-hint">Apply to Reed through the Company Sites agent instead of the separate Reed agent. This is a supervised test: when on, Reed applications are sent <strong>for real</strong> (Reed has no dry-run mode). Untick the <strong>Reed</strong> agent on the dashboard first so it does not apply twice.</p>
       <div class="checkbox-field">
         <input id="autoapply_reed" type="checkbox" ${prefs.autoapply_reed ? 'checked' : ''}>
-        <label for="autoapply_reed">Route Reed through Auto-Apply (sends real applications)</label>
+        <label for="autoapply_reed">Route Reed through Company Sites (sends real applications)</label>
       </div>
       <div class="status-msg" id="status-autoapply-reed"></div>
     </div>
@@ -852,7 +853,7 @@ async function renderSearch() {
       try {
         await window.api.searchPrefs.save({ autoapply_reed: reedRouteToggle.checked ? 1 : 0 });
         showStatus(document.getElementById('status-autoapply-reed'), reedRouteToggle.checked
-          ? 'On — Reed applies for REAL via Auto-Apply. Untick the Reed agent, then Start applying.' : 'Off');
+          ? 'On. Reed applies for REAL via Company Sites. Untick the Reed agent, then Start applying.' : 'Off');
         showToast('Saved');
       } catch (e) {
         reedRouteToggle.checked = !reedRouteToggle.checked; // revert on failure
@@ -1096,7 +1097,7 @@ async function renderLicense() {
 }
 
 // â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', greenhouse: 'Auto-Apply Agent' };
+const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent' };
 
 let botLogUnsub = null;
 let botStatusUnsub = null;
@@ -1262,12 +1263,16 @@ function statusBadgeClass(status) {
 // All job sites use persistent Chrome profiles - Connect opens Chrome so the user logs in once
 const CREDS_NEEDED = new Set();
 // Sites that benefit from importing the user's real Chrome session to bypass Cloudflare
+// "Use my Chrome" (session import) removed from the cards: modern Chrome's cookie
+// encryption makes the copy unreliable, and Connect account is the dependable path.
+// Emptying this set hides the button everywhere (the import IPC stays, just unused).
 const CHROME_SESSION_BOTS = new Set([]);
 const CONNECT_URLS = {
   reed:     'https://secure.reed.co.uk/login',
   linkedin: 'https://www.linkedin.com/login',
+  trac:     'https://apps.trac.jobs/',
 };
-const CRED_SITE_NAMES = { reed: 'Reed.co.uk', linkedin: 'LinkedIn' };
+const CRED_SITE_NAMES = { reed: 'Reed.co.uk', linkedin: 'LinkedIn', trac: 'NHS Trac' };
 
 // Some stored job titles contain the whole scraped card blob (title + company +
 // location + "Easy Apply" …). The real title is the first non-empty line — show
@@ -1408,9 +1413,10 @@ function reviewRowsHtml(list) {
             <td>${j.cvScore != null ? j.cvScore + '%' : '—'}</td>
             <td class="row-actions">
               ${j.cvPath ? `<button class="view-cv-btn" data-path="${j.cvPath}" title="View tailored CV" aria-label="View tailored CV"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}
-              ${j.coverLetter ? `<button class="view-cl-btn" data-jobid="${j.jobId}" title="View cover letter" aria-label="View cover letter"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg></button>` : '<span style="color:#94a3b8;font-size:12px">letter…</span>'}
+              ${j.coverLetter ? `<button class="view-cl-btn" data-jobid="${j.jobId}" title="View cover letter" aria-label="View cover letter"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg></button>` : '<span style="color:var(--text-faint);font-size:12px">letter…</span>'}
             </td>
             <td class="row-actions">
+              <button class="review-regen" data-jobid="${j.jobId}" title="Re-tailor the CV and cover letter for this job">Regenerate</button>
               <button class="review-approve" data-jobid="${j.jobId}" title="Approve and apply">Approve</button>
               <button class="review-skip" data-jobid="${j.jobId}" title="Skip this job">Skip</button>
             </td>
@@ -1456,6 +1462,22 @@ async function resolveReviewAndRefresh(jobIds, approve) {
   await renderReviewSection();
 }
 
+// Regenerate: re-queue the job so the Scorer re-tailors the CV + cover letter and
+// re-parks it here. It drops off the list briefly, then reappears freshly tailored.
+async function regenerateReviewAndRefresh(jobIds) {
+  try { await window.api.queue.reviewRegenerate(jobIds); } catch (_) {}
+  const host = document.getElementById('review-section');
+  if (host) host._lastHtml = null; // force refresh
+  await renderReviewSection();
+  showToast('Re-tailoring — it will reappear here when ready');
+  // The re-queued job only re-tailors while the Scorer is running — nudge if not.
+  try {
+    const st = await window.api.bot.status();
+    const anyRunning = st && Object.values(st).some(v => v === 'running');
+    if (!anyRunning) showToast('Press Start applying so the Scorer can re-tailor it');
+  } catch (_) {}
+}
+
 function bindReviewButtons(root, allIds) {
   root.querySelectorAll('.review-approve').forEach(btn => {
     if (btn._bound) return; btn._bound = true;
@@ -1464,6 +1486,10 @@ function bindReviewButtons(root, allIds) {
   root.querySelectorAll('.review-skip').forEach(btn => {
     if (btn._bound) return; btn._bound = true;
     btn.addEventListener('click', () => resolveReviewAndRefresh([btn.dataset.jobid], false));
+  });
+  root.querySelectorAll('.review-regen').forEach(btn => {
+    if (btn._bound) return; btn._bound = true;
+    btn.addEventListener('click', () => regenerateReviewAndRefresh([btn.dataset.jobid]));
   });
   const approveAll = root.querySelector('#review-approve-all');
   if (approveAll && !approveAll._bound) {
@@ -1531,7 +1557,7 @@ function licenseIsActive(lic) {
 }
 
 async function renderDashboard() {
-  const [summary, recent, status, license, profile, dailyApps, cvs, reedCred, liCred, gdCred, cvlibCred, tjCred, cwCred, connectedStatus, ucPending] = await Promise.all([
+  const [summary, recent, status, license, profile, dailyApps, cvs, reedCred, liCred, gdCred, cvlibCred, tjCred, cwCred, connectedStatus, ucPending, searchTerms] = await Promise.all([
     window.api.queue.summary(),
     window.api.queue.recent(20),
     window.api.bot.status(),
@@ -1547,7 +1573,15 @@ async function renderDashboard() {
     window.api.credentials.get('cwjobs'),
     window.api.site.connectedStatus().catch(() => ({})),
     window.api.queue.ucPending().catch(() => 0),
+    window.api.searchTerms.get().catch(() => []),
   ]);
+  // Completion flags for the "Set up your details" quick-access card.
+  const setupDone = {
+    personal: !!(profile && profile.first_name && profile.last_name && profile.email),
+    search:   Array.isArray(searchTerms) && searchTerms.length > 0,
+    cvs:      Array.isArray(cvs) && cvs.length > 0,
+    trac:     (() => { try { const t = JSON.parse(profile.trac_details || '{}'); return (t.employment && t.employment.length) || (t.references && t.references.length); } catch (_) { return false; } })(),
+  };
   const anyConnected = Object.values(connectedStatus || {}).some(Boolean);
   const isUS = (profile?.country || 'United Kingdom') === 'United States';
   _isUKUser = !isUS;  // gates the UK-only Universal Credit tour step
@@ -1557,7 +1591,7 @@ async function renderDashboard() {
   const dashCreds = { reed: reedCred, linkedin: liCred, glassdoor: gdCred, cvlibrary: cvlibCred, totaljobs: tjCred, cwjobs: cwCred };
   // Application agents shown on the dashboard (the Scorer is hidden — it auto-runs
   // alongside these and is surfaced only as the "AI tailoring" pill).
-  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !(isUS && k === 'reed'));
+  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !(isUS && (k === 'reed' || k === 'trac')));
   const scorerRunning = status.scorer === 'running';
   const allAppRunning = appAgentKeys.length > 0 && appAgentKeys.every(k => status[k] === 'running');
   const anyAppRunning = appAgentKeys.some(k => status[k] === 'running');
@@ -1630,6 +1664,17 @@ async function renderDashboard() {
     ${buildPreflightWarning(profile, cvs)}
 
     ${buildGetStartedCard(profile, cvs, anyConnected, anyAppRunning)}
+
+    <div class="card setup-card">
+      <h3>Set up your details</h3>
+      <p class="card-hint">Everything the agents use to apply. Fill these in once.</p>
+      <div class="setup-quick">
+        <button class="preflight-link${setupDone.personal ? ' is-done' : ''}" data-view="personal">${setupDone.personal ? '✓' : '👤'} Personal details</button>
+        <button class="preflight-link${setupDone.search ? ' is-done' : ''}" data-view="search">${setupDone.search ? '✓' : '⚙️'} Search preferences</button>
+        <button class="preflight-link${setupDone.cvs ? ' is-done' : ''}" data-view="cvs">${setupDone.cvs ? '✓' : '📄'} CVs</button>
+        ${!isUS ? `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>` : ''}
+      </div>
+    </div>
 
     <div class="summary-grid">
       <div class="summary-card applied"><div class="num" id="stat-applied">${counts.applied || 0}</div><div class="label">Applied</div></div>
@@ -1965,7 +2010,11 @@ async function renderDashboard() {
         document.getElementById('login-prompt-title').textContent = 'Glassdoor is waiting for you to log in';
         document.getElementById('login-prompt-body').textContent = 'A browser window has opened. Enter your Glassdoor password. The Agent will continue automatically once signed in.';
         loginPrompt.style.display = 'flex';
-      } else if ((text.includes('Logged in') || text.includes('Session restored') || text.includes('ERROR:') || text.includes('login timed out') || text.includes('Logged in successfully'))) {
+      } else if (bot === 'trac' && (text.includes('Opening login page') || text.includes('Waiting for you to complete login'))) {
+        document.getElementById('login-prompt-title').textContent = 'NHS Trac is waiting for you to log in';
+        document.getElementById('login-prompt-body').textContent = 'A browser window has opened on apps.trac.jobs. Sign in to your NHS/Trac account there. The Agent will continue automatically once you\'re signed in, and remembers it for next time.';
+        loginPrompt.style.display = 'flex';
+      } else if ((text.includes('Logged in') || text.includes('Session restored') || text.includes('ERROR:') || text.includes('login timed out') || text.includes('Login timed out') || text.includes('Logged in successfully'))) {
         loginPrompt.style.display = 'none';
       }
     }
@@ -2033,6 +2082,127 @@ async function renderDashboard() {
 const TRACKER_STAGES = ['applied', 'phone_screen', 'interview', 'offer', 'rejected', 'withdrawn'];
 const STAGE_LABELS = { applied: 'Applied', phone_screen: 'Phone Screen', interview: 'Interview', offer: 'Offer', rejected: 'Rejected', withdrawn: 'Withdrawn' };
 const STAGE_COLORS = { applied: '#2563eb', phone_screen: '#8b5cf6', interview: '#f59e0b', offer: '#10b981', rejected: '#ef4444', withdrawn: '#94a3b8' };
+
+// ── NHS / Trac application details ────────────────────────────────────────────
+// Extra data the long NHS Trac form needs beyond the basic profile: title, NI
+// number, employment history, references, education. Stored as JSON in
+// profile.trac_details so the Trac agent can fill the form.
+async function renderTracDetails() {
+  let profile = {}; try { profile = (await window.api.profile.get()) || {}; } catch (_) {}
+  let d = {};
+  try { d = profile.trac_details ? JSON.parse(profile.trac_details) : {}; } catch (_) { d = {}; }
+  d.employment = Array.isArray(d.employment) ? d.employment : [];
+  d.references = Array.isArray(d.references) ? d.references : [];
+  d.education  = Array.isArray(d.education)  ? d.education  : [];
+  // First-time completion: if this section was empty on open, jump back to the
+  // dashboard after the first save so the user sees the ✓. Re-edits stay put.
+  const wasEmpty = !(d.title || d.ni || d.employment.length || d.references.length || d.education.length);
+
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const inp = (name, val, ph = '', type = 'text') => `<input class="tracd" data-f="${name}" type="${type}" value="${esc(val)}" placeholder="${esc(ph)}">`;
+  const ta  = (name, val, ph = '') => `<textarea class="tracd" data-f="${name}" rows="2" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
+
+  const empRow = (e, i) => `<div class="tracd-row" data-group="employment" data-i="${i}">
+      <div class="tracd-grid">
+        ${inp(`employment.${i}.employer`, e.employer, 'Employer')}
+        ${inp(`employment.${i}.jobTitle`, e.jobTitle, 'Your job title')}
+        ${inp(`employment.${i}.start`, e.start, 'Start (e.g. Jan 2022)')}
+        ${inp(`employment.${i}.end`, e.end, 'End (or "present")')}
+        ${inp(`employment.${i}.reason`, e.reason, 'Reason for leaving')}
+      </div>
+      ${ta(`employment.${i}.duties`, e.duties, 'Brief description of duties & responsibilities')}
+      <button class="tracd-del" data-group="employment" data-i="${i}">Remove</button>
+    </div>`;
+  const refRow = (r, i) => `<div class="tracd-row" data-group="references" data-i="${i}">
+      <div class="tracd-grid">
+        ${inp(`references.${i}.name`, r.name, "Referee's name")}
+        ${inp(`references.${i}.org`, r.org, 'Organisation')}
+        ${inp(`references.${i}.jobTitle`, r.jobTitle, 'Their job title')}
+        ${inp(`references.${i}.email`, r.email, 'Work email', 'email')}
+        ${inp(`references.${i}.phone`, r.phone, 'Phone')}
+        ${inp(`references.${i}.relationship`, r.relationship, 'How they know you (e.g. Line manager)')}
+      </div>
+      <button class="tracd-del" data-group="references" data-i="${i}">Remove</button>
+    </div>`;
+  const eduRow = (e, i) => `<div class="tracd-row" data-group="education" data-i="${i}">
+      <div class="tracd-grid">
+        ${inp(`education.${i}.qualification`, e.qualification, 'Subject / qualification')}
+        ${inp(`education.${i}.place`, e.place, 'Place of study')}
+        ${inp(`education.${i}.grade`, e.grade, 'Grade / result')}
+        ${inp(`education.${i}.year`, e.year, 'Year obtained')}
+      </div>
+      <button class="tracd-del" data-group="education" data-i="${i}">Remove</button>
+    </div>`;
+
+  content.innerHTML = `
+    <div class="page-header"><h2>NHS / Trac application details</h2>
+      <p>The NHS Trac form asks for more than a CV. It needs your employment history, references and education. Fill this in once and the Trac agent uses it for every NHS application. Your criminal record, immigration, equality and disability answers are never stored here. The agent pauses so you enter those yourself.</p>
+    </div>
+    <div class="card">
+      <div class="field"><label>Title</label>
+        <select id="tracd-title" style="max-width:160px">
+          ${['', 'Mr', 'Mrs', 'Ms', 'Miss', 'Dr', 'Mx'].map((t) => `<option value="${t}" ${d.title === t ? 'selected' : ''}>${t || 'Select…'}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>National Insurance number</label>${inp('ni', d.ni, 'e.g. QQ 12 34 56 C')}</div>
+    </div>
+
+    <div class="card">
+      <h3>Employment history <span style="font-weight:400;color:var(--text-muted);font-size:13px">(most recent first)</span></h3>
+      <div id="emp-list">${d.employment.map(empRow).join('')}</div>
+      <button class="secondary" id="add-emp">+ Add employer</button>
+    </div>
+
+    <div class="card">
+      <h3>References <span style="font-weight:400;color:var(--text-muted);font-size:13px">(cover the last 3 years)</span></h3>
+      <div id="ref-list">${d.references.map(refRow).join('')}</div>
+      <button class="secondary" id="add-ref">+ Add reference</button>
+    </div>
+
+    <div class="card">
+      <h3>Education & qualifications</h3>
+      <div id="edu-list">${d.education.map(eduRow).join('')}</div>
+      <button class="secondary" id="add-edu">+ Add qualification</button>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
+      <button class="primary" id="tracd-save">Save details</button>
+      <span class="status-msg" id="tracd-status"></span>
+    </div>`;
+
+  const rowBuilders = { employment: empRow, references: refRow, education: eduRow };
+  const listIds = { employment: 'emp-list', references: 'ref-list', education: 'edu-list' };
+  const addRow = (group) => { const list = document.getElementById(listIds[group]); const i = list.children.length; list.insertAdjacentHTML('beforeend', rowBuilders[group]({}, i)); };
+  document.getElementById('add-emp').addEventListener('click', () => addRow('employment'));
+  document.getElementById('add-ref').addEventListener('click', () => addRow('references'));
+  document.getElementById('add-edu').addEventListener('click', () => addRow('education'));
+  content.addEventListener('click', (e) => {
+    const del = e.target.closest('.tracd-del');
+    if (del) del.closest('.tracd-row').remove();
+  });
+
+  document.getElementById('tracd-save').addEventListener('click', async () => {
+    const out = { title: document.getElementById('tracd-title').value, ni: '', employment: [], references: [], education: [] };
+    content.querySelectorAll('.tracd').forEach((el) => {
+      const f = el.dataset.f; const v = el.value;
+      if (f === 'ni') { out.ni = v; return; }
+      const m = f.match(/^(employment|references|education)\.(\d+)\.(.+)$/);
+      if (m) { const g = m[1], idx = m[2], key = m[3]; (out[g][idx] = out[g][idx] || {})[key] = v; }
+    });
+    out.employment = out.employment.filter((r) => r && Object.values(r).some(Boolean));
+    out.references = out.references.filter((r) => r && Object.values(r).some(Boolean));
+    out.education  = out.education.filter((r) => r && Object.values(r).some(Boolean));
+    try {
+      await window.api.profile.save({ trac_details: JSON.stringify(out) });
+      showToast('Trac details saved');
+      const hasContent = out.employment.length || out.references.length || out.title || out.ni;
+      if (wasEmpty && hasContent) { navigate('dashboard'); }
+      else { showStatus(document.getElementById('tracd-status'), 'Saved. The Trac agent will use these.'); }
+    } catch (err) {
+      showStatus(document.getElementById('tracd-status'), 'Could not save: ' + err.message, true);
+    }
+  });
+}
 
 async function renderTracker() {
   // Render a stable header once, then only swap the body (loading -> table) so

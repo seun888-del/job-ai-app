@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld('api', {
     reviewList: (limit) => ipcRenderer.invoke('queue:reviewList', limit),
     reviewCount: () => ipcRenderer.invoke('queue:reviewCount'),
     reviewResolve: (jobIds, approve) => ipcRenderer.invoke('queue:reviewResolve', jobIds, approve),
+    reviewRegenerate: (jobIds) => ipcRenderer.invoke('queue:reviewRegenerate', jobIds),
   },
   bot: {
     start: (botName) => ipcRenderer.invoke('bot:start', botName),

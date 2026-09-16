@@ -153,6 +153,30 @@ async function resolveReview(jobIds, approve) {
   }
 }
 
+// Regenerate: send an awaiting_review job back to 'pending' with its tailored
+// fields cleared, so the Scorer re-tailors the CV + cover letter from scratch
+// (LLM tailoring is stochastic, so a re-run gives a fresh result) and re-parks it
+// at awaiting_review. Only touches rows still awaiting_review. Needs the Scorer
+// running to pick it up — otherwise it re-tailors on the next agent run.
+async function requeueForReview(jobIds) {
+  if (!dbPath || !fs.existsSync(dbPath) || !Array.isArray(jobIds) || jobIds.length === 0) return 0;
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(fs.readFileSync(dbPath));
+  try {
+    let n = 0;
+    for (const id of jobIds) {
+      db.run(`UPDATE queue SET status = 'pending', cv_path = NULL, cv_score = NULL,
+                cv_name = NULL, cover_letter = NULL, error = NULL, updated_at = datetime('now')
+              WHERE job_id = ? AND status = 'awaiting_review'`, [id]);
+      n++;
+    }
+    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    return n;
+  } finally {
+    db.close();
+  }
+}
+
 function getQueueSummary() {
   return withQueueDb(db => {
     // A brand-new profile has a queue.db (meta table) but no `queue` table yet —
@@ -297,4 +321,4 @@ function getAnalytics() {
   }, null);
 }
 
-module.exports = { init, getQueueSummary, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview };
+module.exports = { init, getQueueSummary, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };

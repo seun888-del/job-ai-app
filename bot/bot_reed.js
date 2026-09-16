@@ -18,7 +18,10 @@ const sponsorship = require('./modules/sponsorship');
 const jobFeed   = require('./modules/job_feed');
 const stealth   = require('./modules/stealth');
 const atsFiller = require('./modules/ats_filler');
-const { launchPersistentContext, connectToRunningChrome, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
+const { launchPersistentContext, connectToRunningChrome, spawnChromeWithCdp, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
+// Holds the Chrome we spawned in CDP-spawn mode, so we can kill it on exit.
+let _spawnedChrome = null;
+for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { try { _spawnedChrome && _spawnedChrome.kill(); } catch (_) {} });
 const path      = require('path');
 
 
@@ -365,6 +368,14 @@ const CONTEXT_DEAD_RE = /Target page|context.*closed|browser.*closed|page.*close
 
 async function launchBrowser() {
   const profileDir = path.join(process.env.JOBBOT_USERDATA, 'reed_profile');
+  // CDP-spawn mode: spawn the user's real Chrome (their profile, their logins) with
+  // a debug port and attach — the macOS-safe, no-relogin path.
+  if (process.env.JOBBOT_CDP_SPAWN === '1') {
+    const { context, page, proc } = await spawnChromeWithCdp(profileDir);
+    _spawnedChrome = proc;
+    try { await stealth.applyToContext(context); } catch (_) {}
+    return { context, page };
+  }
   const cdpPort = process.env.JOBBOT_CDP_PORT;
   const context = cdpPort
     ? await connectToRunningChrome(parseInt(cdpPort)).catch(() => launchPersistentContext(profileDir))

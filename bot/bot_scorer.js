@@ -84,7 +84,13 @@ function passesPreFilter(job) {
     const wantsContract = employmentType.includes('contract');
     const wantsFullTime = employmentType.includes('full_time');
     const wantsPartTime = employmentType.includes('part_time');
-    const jobIsContract = /\b(contract|freelance|day rate|outside ir35|inside ir35)\b/i.test(title + ' ' + descStart.substring(0, 300));
+    // Bare "contract" is a false positive: permanent adverts constantly say
+    // "permanent contract" / "Contract Type: Permanent" / "employment contract"
+    // (NHS/Trac especially). Only flag a real fixed-term/contract role, and never
+    // when the advert explicitly says permanent.
+    const ctxt = (title + ' ' + descStart.substring(0, 500)).toLowerCase();
+    const saysPermanent = /\bpermanent\b/.test(ctxt);
+    const jobIsContract = !saysPermanent && /\b(fixed[- ]?term|\bftc\b|temporary|secondment|locum|day rate|freelance|outside ir35|inside ir35|\d{1,2}[- ]month(?:s)?(?:\s+(?:contract|fixed[- ]?term|ftc))|contract type:\s*(?:fixed|temporary|bank|locum|secondment))\b/i.test(ctxt);
     const jobIsPartTime = /\bpart.?time\b/i.test(title + ' ' + descStart.substring(0, 300));
 
     if (jobIsContract && !wantsContract && (wantsFullTime || wantsPartTime)) {

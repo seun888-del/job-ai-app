@@ -16,6 +16,7 @@ const BOT_SCRIPTS = {
   totaljobs:  'bot_totaljobs.js',
   cwjobs:     'bot_cwjobs.js',
   greenhouse: 'bot_greenhouse.js',
+  trac:       'bot_trac.js',
   uc:         'bot_uc.js',
 };
 
@@ -29,6 +30,7 @@ const bots = {
   totaljobs:  { proc: null, status: 'stopped', stopping: false },
   cwjobs:     { proc: null, status: 'stopped', stopping: false },
   greenhouse: { proc: null, status: 'stopped', stopping: false },
+  trac:       { proc: null, status: 'stopped', stopping: false },
   uc:         { proc: null, status: 'stopped', stopping: false },
 };
 
@@ -54,13 +56,14 @@ function getStatus() {
     totaljobs:  bots.totaljobs.status,
     cwjobs:     bots.cwjobs.status,
     greenhouse: bots.greenhouse.status,
+    trac:       bots.trac.status,
     uc:         bots.uc.status,
   };
 }
 
 // Bots that produce jobs the Scorer must tailor CVs for (so the Scorer is
 // auto-started alongside them and auto-stopped when the last one exits).
-const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse']);
+const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse', 'trac']);
 
 function anyJobSiteBotRunning() {
   return [...JOB_SITE_BOTS].some(name => bots[name].proc !== null);
@@ -157,6 +160,16 @@ function start(botName, userDataPath, opts = {}) {
   // (fills forms, never submits) until we flip it on after a supervised test.
   if (botName === 'greenhouse') {
     env.JOBBOT_USE_JOB_FEED = '1';
+    // Headless mode: no browser at all — apply only pure-HTTP ATSes (Recruitee),
+    // skip browser-required ones. Auto-on for macOS (where the Playwright browser
+    // gets blocked, breaking the browser path), and opt-in anywhere via the
+    // headless_only preference. This is what makes the agent work for Mac users.
+    try {
+      const headlessPref = db.getSearchPreferences().headless_only;
+      if (process.platform === 'darwin' || headlessPref) env.JOBBOT_HEADLESS_ONLY = '1';
+    } catch (_) {
+      if (process.platform === 'darwin') env.JOBBOT_HEADLESS_ONLY = '1';
+    }
     // Supervised test: fold Reed into the router (sources + applies Reed). When
     // on, Reed applies FOR REAL (no dry-run mode) — Recruitee/SmartRecruiters
     // still respect JOBBOT_ATS_SUBMIT separately.

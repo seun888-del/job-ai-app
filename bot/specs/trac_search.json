@@ -1,0 +1,29 @@
+{
+  "_note": "NHS/Trac job SEARCH via the HealthJobsUK board (trac.jobs). Verified working 2026-09-15: keyword search returns ~50 parseable NHS jobs per page. Lets the agent search Trac for ANY keyword the user wants. The homepage 403s to bots, but the job_list/ns endpoint returns 200 with a normal browser User-Agent — so send a real UA header.",
+  "platform": "trac",
+  "board": "healthjobsuk",
+  "search": {
+    "method": "GET",
+    "url": "https://www.healthjobsuk.com/job_list/ns",
+    "params": {
+      "JobSearch_q": "<keyword — the job title/terms the user searches>",
+      "_pg": "<page number, 1-based>"
+    },
+    "example": "https://www.healthjobsuk.com/job_list/ns?JobSearch_q=IT%20support&_pg=1",
+    "headers": { "User-Agent": "a real desktop-browser UA (required — homepage blocks bots)", "Accept-Language": "en-GB" },
+    "results_per_page": 50,
+    "optional_params": {
+      "JobSearch_re": "region filter (hierarchical: JobSearch_re_0/_1/_2) — location is also encoded in each job URL path so can be filtered client-side"
+    }
+  },
+  "result_parsing": {
+    "job_link_pattern": "<a href=\"/job/UK/{region}/{town}/{trust}/{title}/v{id}\">TITLE Band N Trust, Location</a>",
+    "extract": "the anchor text carries title + AfC band + NHS trust + location; the href path encodes region/town/trust/id",
+    "next": "the /job/... advert page carries the 'apply' entry point → the pre-application questions mapped in trac_form.json"
+  },
+  "verified_examples": [
+    "IT Support System Analyst Band 3 — Maidstone and Tunbridge Wells NHS Trust",
+    "IT Service Desk Engineer Band 4 — Queen Victoria Hospital NHS Foundation Trust",
+    "IT Service Desk Technician Band 4 — Sheffield Teaching Hospitals"
+  ]
+}

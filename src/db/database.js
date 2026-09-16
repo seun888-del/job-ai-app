@@ -133,6 +133,12 @@ async function init(userDataPath) {
   if (!profileCols.includes('eeo_veteran')) {
     db.exec('ALTER TABLE profile ADD COLUMN eeo_veteran TEXT');
   }
+  // NHS/Trac application details (title, NI number, employment history, references,
+  // education) that the standard profile doesn't hold. Stored as a JSON blob so the
+  // Trac agent can fill the long NHS form. saveProfile/getProfile handle it as a field.
+  if (!profileCols.includes('trac_details')) {
+    db.exec('ALTER TABLE profile ADD COLUMN trac_details TEXT');
+  }
 
   // Migration: add job_age + schedule columns to search_preferences
   const searchPrefsCols = db.prepare('PRAGMA table_info(search_preferences)').all().map(c => c.name);
@@ -173,6 +179,40 @@ async function init(userDataPath) {
   if (!searchPrefsCols.includes('review_before_apply')) {
     db.exec('ALTER TABLE search_preferences ADD COLUMN review_before_apply INTEGER DEFAULT 0');
   }
+  // Headless-only apply: the Auto-Apply agent launches no browser and applies only
+  // pure-HTTP ATSes (Recruitee). Auto-on for macOS regardless of this flag; this
+  // lets any platform opt in. Off by default.
+  if (!searchPrefsCols.includes('headless_only')) {
+    db.exec('ALTER TABLE search_preferences ADD COLUMN headless_only INTEGER DEFAULT 0');
+  }
+
+  // One-time backfill: tracker rows can be left without a URL (e.g. when the queue
+  // row that held it was lost), so the role-title link did nothing. Both Reed and
+  // LinkedIn resolve a job by its numeric id (the slug is cosmetic), so rebuild the
+  // URL from the id in job_id: "reed_57306377"/"reed_job57306377" -> reed.co.uk,
+  // a bare numeric id -> linkedin.com. Only touches rows still missing a URL, so
+  // it's a safe no-op once healed.
+  try {
+    const broken = db.prepare("SELECT id, job_id, title FROM tracker WHERE url IS NULL OR url = ''").all();
+    const updReed = db.prepare("UPDATE tracker SET url = ?, source = COALESCE(NULLIF(source, ''), 'reed') WHERE id = ?");
+    const updLi   = db.prepare("UPDATE tracker SET url = ?, source = COALESCE(NULLIF(source, ''), 'linkedin') WHERE id = ?");
+    let fixed = 0;
+    for (const r of broken) {
+      const jid = String(r.job_id || '');
+      if (/^reed/i.test(jid)) {
+        const m = jid.match(/(\d{5,})/);
+        if (!m) continue;
+        const slug = String(r.title || 'job').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'job';
+        updReed.run([`https://www.reed.co.uk/jobs/${slug}/${m[1]}`, r.id]);
+        fixed++;
+      } else if (/^\d{6,}$/.test(jid)) {
+        // Bare numeric id = LinkedIn job.
+        updLi.run([`https://www.linkedin.com/jobs/view/${jid}`, r.id]);
+        fixed++;
+      }
+    }
+    if (fixed) console.log(`[DB] Backfilled ${fixed} tracker URL(s) from job ids`);
+  } catch (_) { /* tracker table may not exist yet on a brand-new profile */ }
 
   // Seed singleton rows
   if (!db.prepare('SELECT id FROM profile WHERE id = 1').get()) {
@@ -372,11 +412,23 @@ function getTracker() {
 }
 
 function syncTrackerEntry({ job_id, title, company, url, source, cv_name, applied_at }) {
-  if (!db.prepare('SELECT id FROM tracker WHERE job_id = ?').get([job_id])) {
+  const existing = db.prepare('SELECT id, url, source, cv_name FROM tracker WHERE job_id = ?').get([job_id]);
+  if (!existing) {
     db.prepare(
       'INSERT INTO tracker (job_id, title, company, url, source, cv_name, applied_at) VALUES (?,?,?,?,?,?,?)'
     ).run([job_id, title || null, company || null, url || null, source || null, cv_name || null, applied_at || null]);
+    return;
   }
+  // Self-heal: backfill url/source/cv_name onto an existing row when it's missing
+  // them and this sync now has them (e.g. the queue row that holds the URL was
+  // absent at first sync — the "role title link does nothing" case). Never
+  // overwrites a value the row already has; the user's stage/notes are untouched.
+  const sets = [];
+  const vals = [];
+  if (url    && !existing.url)     { sets.push('url = ?');     vals.push(url); }
+  if (source && !existing.source)  { sets.push('source = ?');  vals.push(source); }
+  if (cv_name && !existing.cv_name){ sets.push('cv_name = ?'); vals.push(cv_name); }
+  if (sets.length) db.prepare(`UPDATE tracker SET ${sets.join(', ')} WHERE id = ?`).run([...vals, existing.id]);
 }
 
 function updateTrackerEntry(id, { stage, notes }) {

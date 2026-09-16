@@ -1,0 +1,149 @@
+{
+  "_note": "COMPLETE NHS Trac application form map, extracted from a real 8-page Trac application export (Norfolk & Suffolk NHS FT, Clinical Administrator, 2026-09-15). Trac is ONE system across NHS trusts, so this map is reusable everywhere Trac is used. 'fill' = how the Trac handler answers each field: 'profile' (from the user's saved details), 'ai' (generate/choose via question_ai / cv tailoring), 'user_confirm' (SENSITIVE — must be the user's own true answer, never auto-guessed), 'auto' (safe default). Repeater sections say max rows. The data controller is the trust; the ATS is Civica Trac.",
+  "platform": "trac",
+  "ats_vendor": "Civica Trac",
+  "sections": [
+    {
+      "section": "personal_details",
+      "fill": "profile",
+      "fields": ["Title", "Forename", "Middle name(s)", "Surname", "Address", "City / town", "County", "Country", "Postcode", "Email", "Work telephone", "Mobile telephone", "Home telephone", "UK National Insurance number", "Preferred employment type"]
+    },
+    {
+      "section": "relationships",
+      "fill": "auto",
+      "note": "If related to a director/employee of the appointing org, state relationship. Default: blank/none.",
+      "fields": ["Relationship to a director or employee (if any)"]
+    },
+    {
+      "section": "criminal_record_declaration",
+      "fill": "user_confirm",
+      "sensitive": true,
+      "note": "Rehabilitation of Offenders Act 1974. Must be the applicant's true answer; never auto-answer. Pause for the user.",
+      "fields": [
+        { "q": "Have you got any unspent convictions and/or unspent conditional cautions?", "type": "radio", "options": ["Yes", "No"] },
+        { "q": "Details of the unspent conviction/caution (date + sentence)", "type": "textarea" }
+      ]
+    },
+    {
+      "section": "pre_screening_internal_external",
+      "fill": "profile",
+      "fields": [
+        { "q": "Are you currently an employee of {this trust}?", "type": "select", "options": ["Yes", "No"], "default": "No" },
+        { "q": "Are you currently an employee of any other NHS organisation?", "type": "select", "options": ["Yes", "No"], "default": "No" }
+      ]
+    },
+    {
+      "section": "pre_screening_immigration",
+      "fill": "user_confirm",
+      "sensitive": true,
+      "fields": [
+        { "q": "Choose your immigration status", "type": "radio", "note": "12+ options incl. British citizen, Irish, EU Settled/Pre-Settled, ILR, Skilled Worker visa, Health & Care Worker visa, BN(O), etc." },
+        { "q": "Additional right-to-work / immigration info", "type": "textarea", "fill": "profile" }
+      ]
+    },
+    {
+      "section": "education_qualifications",
+      "fill": "profile",
+      "repeater_max": 11,
+      "row_fields": ["Subject/Qualification", "Place of study", "Grade/Result", "Year obtained"]
+    },
+    {
+      "section": "training_courses",
+      "fill": "profile",
+      "repeater_max": 7,
+      "row_fields": ["Course title", "Training provider", "Duration", "Year completed"]
+    },
+    {
+      "section": "professional_memberships",
+      "fill": "profile",
+      "fields": ["Professional registration status", "Professional body", "Details", "Membership / Registration number", "Expiry / renewal date"]
+    },
+    {
+      "section": "nhs_service",
+      "fill": "profile",
+      "fields": ["Start date of continuous NHS service (if applicable)", "Months since most recent employment ended (if applicable)"]
+    },
+    {
+      "section": "employment_history",
+      "fill": "profile",
+      "repeater_max": 10,
+      "note": "Most recent first. This is where the CV's work history maps in.",
+      "row_fields": ["Employer name", "Employer address", "Type of business", "Reporting to (job title)", "Telephone", "Your job title", "Start date", "End date", "Grade", "Salary", "Period of notice", "Reason for leaving", "Brief description of duties & responsibilities"]
+    },
+    {
+      "section": "gaps_in_employment",
+      "fill": "profile",
+      "fields": ["Reasons for any gaps in employment history"]
+    },
+    {
+      "section": "supporting_information",
+      "fill": "ai",
+      "mandatory": true,
+      "note": "THE KEY VALUE. A tailored personal statement showing how the applicant meets the essential/desirable criteria in the person spec — reasons for applying, strengths, what sets them apart. Generated from the JD/person-spec + the user's CV, same engine as cv tailoring / cover letter. Do NOT duplicate info from other sections."
+    },
+    {
+      "section": "pre_screening_and_further_questions",
+      "fill": "ai",
+      "note": "Mix of value/behaviour screeners and post-specific yes/no. Sensitive dismissal questions must be the user's true answer (user_confirm).",
+      "fields": [
+        { "q": "A team member's work needs improvement — what would you do?", "type": "select", "options": ["Recognise their effort and offer constructive feedback", "Highlight all the errors and email them", "Sit down and discuss with them", "Put it on your to-do list to do later", "Turn a blind eye"], "preferred": "Sit down and discuss with them" },
+        { "q": "Ever dismissed/practice restricted while working for {trust} via an agency?", "type": "radio", "options": ["Yes", "No"], "fill": "user_confirm", "sensitive": true },
+        { "q": "Ever dismissed from {trust} on grounds of misconduct?", "type": "radio", "options": ["Yes", "No"], "fill": "user_confirm", "sensitive": true },
+        { "q": "Ever dismissed from {trust} on grounds of capability (performance)?", "type": "radio", "options": ["Yes", "No"], "fill": "user_confirm", "sensitive": true },
+        { "q": "Ever received a compromise/settlement agreement from {trust}?", "type": "radio", "options": ["Yes", "No"], "fill": "user_confirm", "sensitive": true },
+        { "q": "Do you have a Smartcard? (long number if yes)", "type": "text", "fill": "profile" },
+        { "q": "Do you have the ability to travel independently?", "type": "radio", "options": ["Yes", "No"], "fill": "profile" },
+        { "q": "Are you looking for Full Time or Part Time?", "type": "select", "fill": "profile" },
+        { "q": "Do you have a valid Full UK driving licence?", "type": "radio", "options": ["Yes", "No"], "fill": "profile" }
+      ]
+    },
+    {
+      "section": "at_risk_status",
+      "fill": "auto",
+      "default": "I do not fall into one of the above categories",
+      "fields": ["Employment status (at-risk redeployment)"]
+    },
+    {
+      "section": "armed_forces",
+      "fill": "profile",
+      "fields": ["Are you a member of the UK Armed Forces community?"]
+    },
+    {
+      "section": "references",
+      "fill": "profile",
+      "repeater": true,
+      "note": "Must cover the past 3 years with no gaps. Needs work email where possible.",
+      "row_fields": ["Referee's title", "Referee's first name(s)", "Referee's surname", "Referee's organisation name", "Job title", "How do they know you?", "Address 1", "Address 2", "Address 3", "City / Town", "County / State", "Postcode", "Country", "Telephone no.", "Mobile no.", "Email address", "Can the referee be approached prior to interview?", "Period this reference covers from", "Period this reference covers to", "Name referee knows you by if different", "Why has your name changed?"]
+    },
+    {
+      "section": "equality_diversity_monitoring",
+      "fill": "user_confirm",
+      "sensitive": true,
+      "note": "Detached from the application, anonymised, not seen by the panel. Still must be the user's own answers, not guessed. Can usually be left as 'prefer not to say' if the user opts out.",
+      "fields": ["Date of birth", "Gender", "Marital status", "Ethnic origin", "How you think of yourself (gender identity)", "Religion or belief"]
+    },
+    {
+      "section": "disability",
+      "fill": "user_confirm",
+      "sensitive": true,
+      "fields": [
+        { "q": "Do you consider yourself to have a disability?", "type": "radio", "options": ["Yes", "No"] },
+        { "q": "Category of disability (if any)", "type": "checkbox" },
+        { "q": "Guaranteed Interview Scheme — wish to be considered if you meet minimum criteria?", "type": "radio", "options": ["Yes", "No"] }
+      ]
+    },
+    {
+      "section": "how_did_you_learn",
+      "fill": "auto",
+      "default": "Job website",
+      "fields": ["Where you first saw this post advertised"]
+    },
+    {
+      "section": "declaration",
+      "fill": "user_confirm",
+      "required_to_submit": true,
+      "note": "'The information in this application is true and complete...' Must be agreed (Yes) to submit. Confirm with the user before final submit.",
+      "fields": [{ "q": "I agree to the above declaration", "type": "radio", "options": ["Yes", "No"] }]
+    }
+  ]
+}

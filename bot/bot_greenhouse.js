@@ -30,7 +30,7 @@ const stealth     = require('./modules/stealth');
 const atsFiller   = require('./modules/ats_filler');
 const httpSubmit  = require('./modules/ats_http_submit');
 const reed        = require('./modules/reed');
-const { launchPersistentContext, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
+const { launchPersistentContext, connectToRunningChrome, spawnChromeWithCdp, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
 const path        = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
@@ -68,6 +68,17 @@ async function closeSiteContexts() {
   for (const k of Object.keys(_ctxPool)) { try { await _ctxPool[k].context.close(); } catch (_) {} delete _ctxPool[k]; }
 }
 const SUBMIT        = process.env.JOBBOT_ATS_SUBMIT === '1' || process.env.JOBBOT_GREENHOUSE_SUBMIT === '1'; // off = dry run
+// Headless mode: launch NO browser at all. Apply only to pure-HTTP ATSes
+// (Recruitee) and skip anything that needs a browser. This is what makes the agent
+// work on macOS, where the Playwright browser gets blocked — the HTTP apply path
+// isn't affected by that block. botManager sets this automatically on macOS.
+const HEADLESS_ONLY = process.env.JOBBOT_HEADLESS_ONLY === '1';
+// CDP-spawn mode: instead of letting Playwright launch Chrome (which macOS blocks
+// via the automation-permission prompt), SPAWN the user's real Chrome with a debug
+// port and attach over CDP. Uses the user's real (imported) profile — no separate
+// login — and slips past the macOS block because CDP is a localhost WebSocket, not
+// Apple Events. The macOS-safe way to run the browser sites (LinkedIn/Reed).
+const CDP_SPAWN     = process.env.JOBBOT_CDP_SPAWN === '1';
 const SOURCE        = 'ats';
 
 // ── filters (mirror the Reed agent) ────────────────────────────────────────
@@ -123,9 +134,26 @@ async function fetchGhJD(job) {
 }
 // Generic JD: Greenhouse via API, every other ATS by loading the posting and
 // reading its visible text (uniform, needs no per-ATS endpoint).
+// Fetch a job description over plain HTTP (no browser). ATS apply pages render the
+// JD server-side (Recruitee's does), so a GET + tag-strip is enough — this is how
+// the headless agent reads JDs without Playwright.
+async function fetchJdHttp(job) {
+  try {
+    const c = new AbortController(); const t = setTimeout(() => c.abort(), 20000);
+    const r = await fetch(job.url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, signal: c.signal }).finally(() => clearTimeout(t));
+    if (!r.ok) return '';
+    const html = await r.text();
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ').trim().slice(0, 8000);
+  } catch (_) { return ''; }
+}
+
 async function fetchJD(page, job) {
   const gh = await fetchGhJD(job);
   if (gh) return gh;
+  if (!page) return await fetchJdHttp(job); // headless mode: no browser to drive
   try {
     await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await DELAY(1500 + Math.random() * 1500);
@@ -225,6 +253,20 @@ async function phase2_applyReadyCVs(context, page) {
         return;
       }
       if (!isRelevantTitle(job.title)) { queue.update(job.jobId, { status: 'skipped', reason: 'Title filter (post-queue)' }); continue; }
+
+      // Headless mode: only jobs with a pure-HTTP submitter (Recruitee) can be
+      // applied without a browser. Skip everything else (SmartRecruiters, Reed…)
+      // rather than crash on a null page — this is what keeps macOS working.
+      if (HEADLESS_ONLY) {
+        const _ats = atsFiller.detectATS(job.url);
+        const _httpFn = httpSubmit.httpSubmitterFor(_ats) || httpSubmit.httpSubmitterFor(job.source);
+        if (!_httpFn) {
+          queue.update(job.jobId, { status: 'skipped', reason: 'Needs a browser — skipped in headless mode' });
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Headless: browser-required ATS');
+          console.log(`  [Auto-Apply] Headless — skipping browser-required job: ${job.title} @ ${job.company}`);
+          continue;
+        }
+      }
 
       // ── Reed strategy (browser board, own profile + result mapping) ─────────
       if (REED_ENABLED && isReedJob(job)) {
@@ -332,10 +374,28 @@ async function launchBrowser() {
   // a headless Chrome gets flagged. So launch a real, MINIMISED (not headless)
   // browser: no visible window intruding, but a genuine fingerprint DataDome
   // accepts. JOBBOT_SHOW_BROWSER=1 keeps it visible for debugging.
+  if (CDP_SPAWN) {
+    // Spawn the user's real Chrome + attach over CDP (macOS-safe, no login).
+    const { context, page, proc } = await spawnChromeWithCdp(profileDir);
+    try { await stealth.applyToContext(context); } catch (_) {}
+    return { context, page, proc };
+  }
+  // If "Connect account" left Chrome open on this profile, attach to it via CDP
+  // instead of trying to launch a second instance on the (locked) profile — which
+  // otherwise errors when the user forgets to close the connect window.
+  const cdpPort = process.env.JOBBOT_CDP_PORT;
+  if (cdpPort) {
+    const attached = await connectToRunningChrome(parseInt(cdpPort, 10)).catch(() => null);
+    if (attached) {
+      try { await stealth.applyToContext(attached); } catch (_) {}
+      const page = attached.pages()[0] || await attached.newPage();
+      return { context: attached, page, proc: null };
+    }
+  }
   const context = await launchPersistentContext(profileDir);
   await stealth.applyToContext(context);
   const page = await context.newPage();
-  return { context, page };
+  return { context, page, proc: null };
 }
 
 async function main() {
@@ -343,21 +403,27 @@ async function main() {
   await queue.init(process.env.JOBBOT_USERDATA);
 
   console.log('═══════════════════════════════════════════════════════');
-  console.log(`  ATS Auto-Apply Agent — Starting${SUBMIT ? '' : '  (DRY RUN — submissions disabled)'}`);
+  console.log(`  ATS Auto-Apply Agent — Starting${SUBMIT ? '' : '  (DRY RUN — submissions disabled)'}${HEADLESS_ONLY ? '  [HEADLESS — HTTP-only, no browser]' : ''}`);
   console.log('═══════════════════════════════════════════════════════');
 
   // Recover jobs left in 'applying' from a previous interrupted run
   const stuck = queue.getByStatus('applying').filter(j => j.source === SOURCE);
   for (const j of stuck) queue.update(j.jobId, { status: 'cv_ready' });
 
-  let context, page, guard;
-  try {
-    ({ context, page } = await launchBrowser());
-    guard = watchForManualClose(context, 'Auto-Apply');
-  } catch (err) {
-    if (BROWSER_CLOSED_RE.test(err.message || '')) { console.log('  [Auto-Apply] Browser closed — agent stopped.'); process.exit(0); }
-    console.error('  [Auto-Apply] Failed to launch browser: ' + err.message);
-    process.exit(1);
+  let context = null, page = null, guard = null, chromeProc = null;
+  if (HEADLESS_ONLY) {
+    // No browser at all: source + apply over pure HTTP (Recruitee). Browser-only
+    // ATSes (SmartRecruiters etc.) are skipped in phase 2. This is the macOS path.
+    console.log('  [Auto-Apply] Headless mode — no browser. Applies HTTP-only ATSes (e.g. Recruitee); browser-required jobs are skipped.');
+  } else {
+    try {
+      ({ context, page, proc: chromeProc } = await launchBrowser());
+      guard = watchForManualClose(context, 'Auto-Apply');
+    } catch (err) {
+      if (BROWSER_CLOSED_RE.test(err.message || '')) { console.log('  [Auto-Apply] Browser closed — agent stopped.'); process.exit(0); }
+      console.error('  [Auto-Apply] Failed to launch browser: ' + err.message);
+      process.exit(1);
+    }
   }
 
   try {
@@ -370,6 +436,8 @@ async function main() {
     if (guard) guard.intentional = true;
     await closeSiteContexts(); // close any per-site (Reed) profiles opened by the router
     await context?.close().catch(() => {});
+    // A CDP-spawned Chrome keeps running after we disconnect — kill it explicitly.
+    if (chromeProc) { try { chromeProc.kill(); } catch (_) {} }
   }
   console.log('  [Auto-Apply] Done.');
   process.exit(0);

@@ -17,7 +17,9 @@ const logger   = require('./modules/logger');
 const salary   = require('./modules/salary_filter');
 const sponsorship = require('./modules/sponsorship');
 const stealth  = require('./modules/stealth');
-const { launchPersistentContext, connectToRunningChrome, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
+const { launchPersistentContext, connectToRunningChrome, spawnChromeWithCdp, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
+let _spawnedChrome = null;
+for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { try { _spawnedChrome && _spawnedChrome.kill(); } catch (_) {} });
 const path     = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
@@ -322,15 +324,23 @@ async function main() {
   }
 
   const profileDir = path.join(process.env.JOBBOT_USERDATA, 'linkedin_profile');
-  const cdpPort = process.env.JOBBOT_CDP_PORT;
-  const context = cdpPort
-    ? await connectToRunningChrome(parseInt(cdpPort)).catch(() => launchPersistentContext(profileDir))
-    : await launchPersistentContext(profileDir);
-  await stealth.applyToContext(context);
+  let context, liPage;
+  if (process.env.JOBBOT_CDP_SPAWN === '1') {
+    // Spawn the user's real Chrome (their profile + logins) with a debug port and
+    // attach — the macOS-safe, no-relogin path.
+    const s = await spawnChromeWithCdp(profileDir);
+    context = s.context; liPage = s.page; _spawnedChrome = s.proc;
+    try { await stealth.applyToContext(context); } catch (_) {}
+  } else {
+    const cdpPort = process.env.JOBBOT_CDP_PORT;
+    context = cdpPort
+      ? await connectToRunningChrome(parseInt(cdpPort)).catch(() => launchPersistentContext(profileDir))
+      : await launchPersistentContext(profileDir);
+    await stealth.applyToContext(context);
+    liPage = await context.newPage();
+  }
   // User closing the Chromium window → clean stop, not an error
   const closeGuard = watchForManualClose(context, 'LinkedIn Agent');
-
-  const liPage = await context.newPage();
   try {
     await linkedin.ensureLoggedIn(liPage);
   } catch (err) {

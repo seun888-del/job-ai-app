@@ -97,6 +97,27 @@ async function init(userDataPath) {
   ajStmt.free();
   if (!ajCols.includes('uc_logged_at')) db.run('ALTER TABLE applied_jobs ADD COLUMN uc_logged_at TEXT');
 
+  // Migration: widen the status CHECK constraint to allow 'awaiting_review'
+  // (review-before-apply feature). SQLite can't ALTER a CHECK constraint, so
+  // rebuild the table when an existing queue.db predates it. Runs after the
+  // column migrations above, so cover_letter/retry_count already exist to copy.
+  const qDdlStmt = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='queue'");
+  const qDdl = qDdlStmt.step() ? (qDdlStmt.getAsObject().sql || '') : '';
+  qDdlStmt.free();
+  if (qDdl && !qDdl.includes('awaiting_review')) {
+    db.run('ALTER TABLE queue RENAME TO queue_old');
+    db.run(`CREATE TABLE queue (
+      job_id TEXT PRIMARY KEY, title TEXT, company TEXT, url TEXT, source TEXT, description TEXT,
+      status TEXT CHECK(status IN ('pending','processing','cv_ready','awaiting_review','applying','applied','apply_failed','skipped','failed')) DEFAULT 'pending',
+      reason TEXT, work_type TEXT, cv_name TEXT, cv_score INTEGER, cv_path TEXT, cover_letter TEXT,
+      error TEXT, retry_count INTEGER DEFAULT 0, added_at TEXT DEFAULT (datetime('now')), updated_at TEXT
+    )`);
+    db.run(`INSERT INTO queue (job_id,title,company,url,source,description,status,reason,work_type,cv_name,cv_score,cv_path,cover_letter,error,retry_count,added_at,updated_at)
+            SELECT job_id,title,company,url,source,description,status,reason,work_type,cv_name,cv_score,cv_path,cover_letter,error,COALESCE(retry_count,0),added_at,updated_at FROM queue_old`);
+    db.run('DROP TABLE queue_old');
+    console.log('  [Queue] Migrated queue table: status now allows awaiting_review');
+  }
+
   // ── Auto-reconcile the queue when the user changes their inputs ─────────────
   // Two triggers, both detected by fingerprinting the active inputs and running
   // on the first bot to start after a change (inside the queue-owning process,
