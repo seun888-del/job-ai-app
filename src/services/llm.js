@@ -228,7 +228,18 @@ async function llmChat(prompt, timeoutMs = 300000) {
   // bypassing the gate with a local model.
   if (licenseKey()) {
     console.log('[LLM] Using licensed backend (Groq)');
-    return hostedChat(prompt, timeoutMs);
+    // The AI account has a per-minute limit shared by all users. When it's hit (backend 429/502)
+    // or a call times out, wait for the minute to roll over and try again instead of failing.
+    const waits = [20000, 40000];
+    for (let attempt = 0; ; attempt++) {
+      try { return await hostedChat(prompt, timeoutMs); }
+      catch (err) {
+        const retryable = /HTTP (429|500|502|503|504)|timeout|aborted|fetch failed|ECONNRESET/i.test(String(err && err.message));
+        if (!retryable || attempt >= waits.length) throw err;
+        console.log(`[LLM] AI busy (${err.message}), retrying in ${waits[attempt] / 1000}s`);
+        await new Promise((r) => setTimeout(r, waits[attempt]));
+      }
+    }
   }
 
   // ── Local providers — DEV ONLY (JOBBOT_ALLOW_LOCAL_LLM=1), never in builds ──

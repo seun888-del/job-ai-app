@@ -186,4 +186,55 @@ Respond with ONLY the answer text — no preamble, no quotes, no labels.`;
   }
 }
 
-module.exports = { aiPickOption, aiTextAnswer, isSensitiveQuestion, aiEnabled, _matchOption };
+// Answer MANY form fields in ONE call, using a full data "payload" about the candidate
+// (their saved NHS/Trac details + profile) rather than one question at a time with little
+// context. Each field: { id, label, kind, options?[] }. Returns { id: value } for the fields
+// the model could answer from the payload; missing/unknown → omitted (never invented).
+// Sensitive questions (legal / equality) are filtered out here as a second safety net;
+// the caller answers those from the user's own stored values.
+async function aiFillFields({ fields, payload, job }) {
+  if (!aiEnabled() || !Array.isArray(fields) || !fields.length) return {};
+  // Reuse answers already given this session: the same question ("working with people",
+  // "an example of flexibility") comes up on form after form, so ask the AI only once.
+  const out = {};
+  const keyOf = (f) => 'ff:' + String(f.label).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 200) + '|' + (f.options || []).join('/').toLowerCase();
+  const safe = fields.filter((f) => f && f.label && !isSensitiveQuestion(f.label)).filter((f) => {
+    const hit = _cache.get(keyOf(f));
+    if (hit) { out[f.id] = hit; return false; }
+    return true;
+  });
+  if (!safe.length) return out;
+  const list = safe.map((f) => ({ id: f.id, question: String(f.label).slice(0, 300), type: f.kind, ...(f.options && f.options.length ? { options: f.options.slice(0, 40) } : {}) }));
+  const prompt = `You are completing an NHS job application form (Trac) on behalf of the candidate below. Answer each form field using ONLY the candidate's data.
+
+CANDIDATE DATA (JSON):
+${JSON.stringify(payload || {}).slice(0, 7000)}
+
+JOB: ${(job && job.title) || ''}${job && job.company ? ' at ' + job.company : ''}
+
+FORM FIELDS (JSON):
+${JSON.stringify(list)}
+
+RULES:
+- For a field with "options", the value MUST be the exact text of one option.
+- For a text field, give just the value (no labels, no quotes around it).
+- For a free-text question about the candidate's experience or suitability, write 2 to 4 first-person sentences grounded in their employment history. British English. No em or en dashes.
+- If the data does not contain the answer and it cannot be clearly derived from it (addresses, dates, phone numbers, registration numbers you do not have), use null. NEVER invent facts.
+- Yes/No questions about standard declarations or confirmations (e.g. "I confirm the information is true") are answered "Yes".
+
+Return ONLY JSON: {"answers":[{"id":<id>,"value":<string or null>}]}`;
+  try {
+    const raw = await llm.llmChat(prompt, Number(process.env.JOBBOT_AIFILL_MS || 60000)); if (process.env.JOBBOT_AIFILL_DEBUG) console.log('RAW', String(raw).slice(0, 800));
+    const j = _extractJson(raw);
+    const byId = new Map(safe.map((f) => [String(f.id), f]));
+    for (const a of (j && Array.isArray(j.answers) ? j.answers : [])) {
+      if (a && a.id != null && a.value != null && String(a.value).trim() && !/^null$/i.test(String(a.value).trim())) {
+        out[a.id] = String(a.value).replace(/\s*[—–]\s*/g, ', ').trim();
+        const f = byId.get(String(a.id)); if (f) _cache.set(keyOf(f), out[a.id]);
+      }
+    }
+    return out;
+  } catch (e) { console.log('  [AI] Form answers failed: ' + (e && e.message ? e.message : e)); return out; }
+}
+
+module.exports = { aiPickOption, aiTextAnswer, aiFillFields, isSensitiveQuestion, aiEnabled, _matchOption };

@@ -701,7 +701,7 @@ async function renderSearch() {
 
     <div class="card">
       <h3>Connection (Advanced)</h3>
-      <p class="card-hint">By default the Agents run on this computer's own internet connection, which keeps your job-site logins stable (LinkedIn especially). You only need this if a job site starts blocking you — enter your own proxy and the Agents will route through it. Leave it blank to use your normal connection.</p>
+      <p class="card-hint">By default the Agents run on this computer's own internet connection, which keeps your job-site logins stable (LinkedIn especially). You only need this if a job site starts blocking you. Enter your own proxy and the Agents will route through it. Leave it blank to use your normal connection.</p>
       <div class="field">
         <label>Backup proxy URL</label>
         <input id="proxy_url" placeholder="http://username:password@host:port" autocomplete="off" spellcheck="false">
@@ -1260,6 +1260,47 @@ function statusBadgeClass(status) {
   }
 }
 
+// Friendly text for queue statuses shown in Recent Activity.
+function statusLabel(status, reason) {
+  if (/Needs you:/.test(reason || '')) return 'needs your input';
+  return ({ ready_to_submit: 'ready to submit', apply_failed: 'failed' })[status] || status;
+}
+
+// Dashboard headline numbers, built from the queue summary. Skipped jobs are left out on
+// purpose (routine filtering reads as failure; the breakdown lives in Analytics), and
+// "CVs tailored" is folded into "In queue" because NHS/Trac jobs never use a CV.
+const SOURCE_LABELS = { linkedin: 'LinkedIn', reed: 'Reed', trac: 'NHS', indeed: 'Indeed', glassdoor: 'Glassdoor', cvlibrary: 'CV-Library', totaljobs: 'Totaljobs', cwjobs: 'CWJobs', ats: 'Company Sites' };
+function dashboardStats(summary) {
+  const c = {}, by = {};
+  (summary || []).forEach((r) => {
+    const s = String(r.status || '');
+    if (s.startsWith('applied_by:')) { const lbl = SOURCE_LABELS[s.slice(11)] || s.slice(11); by[lbl] = (by[lbl] || 0) + (r.count || 0); }
+    else c[s] = r.count || 0;
+  });
+  return {
+    applied: c.applied || 0,
+    queued: (c.pending || 0) + (c.processing || 0) + (c.cv_ready || 0) + (c.applying || 0) + (c.awaiting_review || 0),
+    ready: c.ready_to_submit || 0,
+    attention: (c.apply_failed || 0) + (c.attention_skips || 0),
+    breakdown: Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · '),
+  };
+}
+function statCardsHtml(summary) {
+  const s = dashboardStats(summary);
+  return `
+      <div class="summary-card applied"><div class="num" id="stat-applied">${s.applied}</div><div class="label">Applied</div><div class="sub" id="stat-applied-by">${s.breakdown.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div></div>
+      <div class="summary-card pending" title="Jobs found and being prepared or waiting for an agent to apply"><div class="num" id="stat-queued">${s.queued}</div><div class="label">In queue</div></div>
+      <div class="summary-card ready" id="card-ready" title="NHS applications fully filled in and saved as drafts. Open Trac and press Submit." style="${s.ready ? '' : 'display:none'}"><div class="num" id="stat-ready">${s.ready}</div><div class="label">Ready to submit</div></div>
+      <div class="summary-card apply_failed" title="Failed applications, or an account that needs reconnecting"><div class="num" id="stat-attention">${s.attention}</div><div class="label">Needs attention</div></div>`;
+}
+function updateStatCards(summary) {
+  const s = dashboardStats(summary);
+  const set = (id, v) => { const el = document.getElementById(id); if (el && el.textContent !== String(v)) el.textContent = v; };
+  set('stat-applied', s.applied); set('stat-applied-by', s.breakdown); set('stat-queued', s.queued);
+  set('stat-ready', s.ready); set('stat-attention', s.attention);
+  const card = document.getElementById('card-ready'); if (card) card.style.display = s.ready ? '' : 'none';
+}
+
 // All job sites use persistent Chrome profiles - Connect opens Chrome so the user logs in once
 const CREDS_NEEDED = new Set();
 // Sites that benefit from importing the user's real Chrome session to bypass Cloudflare
@@ -1365,6 +1406,54 @@ const _coverLetters = {};
 
 // Recent Activity rows — shared by the initial render and the 5 s poll so the
 // table stays in sync in real time, not just on page load.
+// ── NHS applications: open a draft on Trac without touching the agent ─────────
+// Lists NHS applications that are ready to submit or need the user, each with a link that
+// opens the application in the user's own browser (never the agent's Chrome, so the agent
+// keeps working). Also shows the supporting statement the agent wrote, for checking.
+const TRAC_APPS_URL = 'https://apps.trac.jobs/applicationlist';
+function nhsAppsHtml(apps) {
+  if (!apps || !apps.length) return '';
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const rows = apps.map((a, i) => {
+    const ready = a.status === 'ready_to_submit';
+    const missing = ready ? '' : String(a.reason || '').replace(/^Draft saved on Trac\.?\s*Needs you:\s*/i, '').replace(/\.$/, '');
+    const link = /^https:\/\/apps\.trac\.jobs\//.test(a.draft_url || '') ? a.draft_url : TRAC_APPS_URL;
+    return `<div class="nhs-app">
+      <div class="nhs-app-main">
+        <div class="nhs-app-title">${e(String(a.title || '').split(' Band ')[0])}</div>
+        <div class="nhs-app-meta">${e(a.company || 'NHS')}</div>
+        ${missing ? `<div class="nhs-app-missing">Needs you: ${e(missing)}</div>` : ''}
+      </div>
+      <span class="badge ${ready ? 'badge-success' : 'badge-warning'}">${ready ? 'Ready to submit' : 'Needs you'}</span>
+      <div class="nhs-app-actions">
+        <button class="primary nhs-open" data-url="${e(link)}">Open on Trac</button>
+        ${a.cover_letter ? `<button class="secondary nhs-statement" data-i="${i}">Supporting statement</button>` : ''}
+      </div>
+      ${a.cover_letter ? `<pre class="nhs-app-statement" id="nhs-st-${i}" hidden>${e(a.cover_letter)}</pre>` : ''}
+    </div>`;
+  }).join('');
+  return `<div class="card card-wide nhs-apps-card">
+    <h3 style="margin:0 0 4px">NHS applications</h3>
+    <p class="nhs-apps-hint">Opens in your own browser, so the agent keeps working. Sign in to Trac there if asked.</p>
+    ${rows}
+  </div>`;
+}
+async function renderNhsApps() {
+  const box = document.getElementById('nhs-apps-section');
+  if (!box || !window.api.queue.tracApps) return;
+  let apps = [];
+  try { apps = (await window.api.queue.tracApps()) || []; } catch (_) { return; }
+  const html = nhsAppsHtml(apps);
+  if (box._lastHtml === html) return; // keep open statements and scroll as they are
+  box._lastHtml = html;
+  box.innerHTML = html;
+  box.querySelectorAll('.nhs-open').forEach((b) => b.addEventListener('click', () => window.api.shell.openExternal(b.dataset.url)));
+  box.querySelectorAll('.nhs-statement').forEach((b) => b.addEventListener('click', () => {
+    const pre = document.getElementById('nhs-st-' + b.dataset.i);
+    if (pre) { pre.hidden = !pre.hidden; b.textContent = pre.hidden ? 'Supporting statement' : 'Hide supporting statement'; }
+  }));
+}
+
 function recentRowsHtml(recent) {
   (recent || []).forEach(r => {
     if (r.cover_letter && r.job_id) {
@@ -1375,8 +1464,8 @@ function recentRowsHtml(recent) {
             <tr>
               <td>${cleanTitle(r.title)}</td>
               <td>${r.company || ''}</td>
-              <td><span class="badge ${statusBadgeClass(r.status)}">${r.status}</span></td>
-              <td class="cv-name-cell">${r.cv_name || '—'}</td>
+              <td><span class="badge ${/Needs you:/.test(r.reason || '') ? 'badge-warning' : statusBadgeClass(r.status)}" title="${String(r.reason || '').replace(/"/g, '&quot;').replace(/</g, '&lt;')}">${statusLabel(r.status, r.reason)}</span></td>
+              <td class="cv-name-cell">${r.cv_name || '-'}</td>
               <td>${r.updated_at ? r.updated_at.slice(0, 10) : ''}</td>
               <td class="row-actions">${r.cv_path ? `<button class="view-cv-btn" data-path="${r.cv_path}" title="View CV" aria-label="View CV"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}${r.cover_letter ? `<button class="view-cl-btn" data-jobid="${r.job_id}" title="View cover letter" aria-label="View cover letter"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg></button>` : ''}</td>
             </tr>`).join('') || '<tr><td colspan="6"><div class="empty-state">No activity yet</div></td></tr>';
@@ -1410,7 +1499,7 @@ function reviewRowsHtml(list) {
           <tr>
             <td>${cleanTitle(j.title)}</td>
             <td>${j.company || ''}</td>
-            <td>${j.cvScore != null ? j.cvScore + '%' : '—'}</td>
+            <td>${j.cvScore != null ? j.cvScore + '%' : '-'}</td>
             <td class="row-actions">
               ${j.cvPath ? `<button class="view-cv-btn" data-path="${j.cvPath}" title="View tailored CV" aria-label="View tailored CV"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}
               ${j.coverLetter ? `<button class="view-cl-btn" data-jobid="${j.jobId}" title="View cover letter" aria-label="View cover letter"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg></button>` : '<span style="color:var(--text-faint);font-size:12px">letter…</span>'}
@@ -1434,7 +1523,7 @@ async function renderReviewSection() {
   const html = `
     <div class="card" id="review-card" style="border:1px solid var(--primary,#2563eb)">
       <div class="bot-card-header">
-        <strong>🔎 Waiting for your review — ${n} application${n === 1 ? '' : 's'}</strong>
+        <strong>🔎 Waiting for your review: ${n} application${n === 1 ? '' : 's'}</strong>
         <div style="display:flex;gap:8px">
           <button class="secondary" id="review-approve-all">Approve all</button>
           <button class="secondary" id="review-skip-all">Skip all</button>
@@ -1469,7 +1558,7 @@ async function regenerateReviewAndRefresh(jobIds) {
   const host = document.getElementById('review-section');
   if (host) host._lastHtml = null; // force refresh
   await renderReviewSection();
-  showToast('Re-tailoring — it will reappear here when ready');
+  showToast('Re-tailoring. It will reappear here when ready.');
   // The re-queued job only re-tailors while the Scorer is running — nudge if not.
   try {
     const st = await window.api.bot.status();
@@ -1595,8 +1684,16 @@ async function renderDashboard() {
   const scorerRunning = status.scorer === 'running';
   const allAppRunning = appAgentKeys.length > 0 && appAgentKeys.every(k => status[k] === 'running');
   const anyAppRunning = appAgentKeys.some(k => status[k] === 'running');
-  const counts = {};
-  summary.forEach(row => { counts[row.status] = row.count; });
+
+  // NHS only: "Submit for me". Off by default: the agent fills each application and you press
+  // Submit on Trac. On: it submits complete applications itself (never ones asking about AI use).
+  const tracAuto = (() => { try { return JSON.parse(profile.trac_details || '{}').autoSubmit === true; } catch (_) { return false; } })();
+  function tracSubmitToggleHtml() {
+    return `<label class="agent-submit-toggle">
+      <input type="checkbox" id="trac-auto-submit" ${tracAuto ? 'checked' : ''}>
+      <span><strong>Submit for me</strong><br><small id="trac-auto-submit-note">${tracAuto ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.'}</small></span>
+    </label>`;
+  }
 
   function buildBotCard(key, label) {
     const needsCreds = CREDS_NEEDED.has(key);
@@ -1628,6 +1725,7 @@ async function renderDashboard() {
           <span class="bot-status bot-status-${status[key]}" id="status-${key}">${status[key]}</span>
         </div>
         <div class="agent-run-state ${isEnabled ? 'on' : 'off'}" id="run-state-${key}">${isEnabled ? '✓ Included, runs when you press Start applying' : '○ Unticked, this site will be skipped'}</div>
+        ${key === 'trac' ? tracSubmitToggleHtml() : ''}
         <div class="bot-card-actions">
           ${needsCreds ? `<button class="btn-connect" data-bot="${key}" data-action="connect">Connect account</button>` : ''}
           ${!needsCreds && CONNECT_URLS[key] ? `<button class="btn-connect" data-bot="${key}" data-action="connect-session">Connect account</button>` : ''}
@@ -1677,14 +1775,11 @@ async function renderDashboard() {
     </div>
 
     <div class="summary-grid">
-      <div class="summary-card applied"><div class="num" id="stat-applied">${counts.applied || 0}</div><div class="label">Applied</div></div>
-      <div class="summary-card pending"><div class="num" id="stat-pending">${counts.pending || 0}</div><div class="label">Pending</div></div>
-      <div class="summary-card cv_ready"><div class="num" id="stat-tailored">${counts.tailored || 0}</div><div class="label">CVs Tailored</div></div>
-      <div class="summary-card skipped"><div class="num" id="stat-skipped">${counts.skipped || 0}</div><div class="label">Skipped</div></div>
-      <div class="summary-card apply_failed"><div class="num" id="stat-failed">${counts.apply_failed || 0}</div><div class="label">Failed</div></div>
+${statCardsHtml(summary)}
     </div>
 
     <div id="review-section"></div>
+    <div id="nhs-apps-section"></div>
 
     <div class="dash-cols">
       <div class="dash-col-main">
@@ -1758,6 +1853,20 @@ async function renderDashboard() {
     </div>
   `;
 
+  renderNhsApps();
+  const tracAutoBox = document.getElementById('trac-auto-submit');
+  if (tracAutoBox) tracAutoBox.addEventListener('change', async () => {
+    const on = tracAutoBox.checked;
+    if (on && !confirm('Let the NHS agent submit applications for you?\n\nIt only submits when every section on Trac is complete. Applications that ask about AI use are left for you to submit. Changes apply the next time the agent starts.')) { tracAutoBox.checked = false; return; }
+    try {
+      const cur = (await window.api.profile.get()) || {};
+      let t = {}; try { t = JSON.parse(cur.trac_details || '{}'); } catch (_) {}
+      t.autoSubmit = on;
+      await window.api.profile.save({ trac_details: JSON.stringify(t) });
+      const note = document.getElementById('trac-auto-submit-note');
+      if (note) note.textContent = on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.';
+    } catch (_) { tracAutoBox.checked = !on; }
+  });
   const noLicenseCta = content.querySelector('.no-license-cta');
   if (noLicenseCta) noLicenseCta.addEventListener('click', () => navigate('license'));
 
@@ -1799,10 +1908,7 @@ async function renderDashboard() {
     if (body) { body.innerHTML = recentRowsHtml([]); body._lastHtml = body.innerHTML; }
     // Refresh the stat cards immediately (the 5s poll would catch up anyway)
     try {
-      const summary = await window.api.queue.summary();
-      const c = {}; summary.forEach(r => { c[r.status] = r.count; });
-      const map = { 'stat-applied': c.applied || 0, 'stat-pending': c.pending || 0, 'stat-tailored': c.tailored || 0, 'stat-skipped': c.skipped || 0, 'stat-failed': c.apply_failed || 0 };
-      for (const [id, val] of Object.entries(map)) { const el = document.getElementById(id); if (el) el.textContent = val; }
+      updateStatCards(await window.api.queue.summary());
     } catch (_) {}
   });
 
@@ -2053,13 +2159,8 @@ async function renderDashboard() {
         const ucRunning = ucStatusEl && ucStatusEl.textContent.trim() === 'running';
         if (ucStart && !ucRunning) ucStart.disabled = !dashboardHasLicense || Number(ucPendingLive) === 0;
       }
-      const c = {};
-      summary.forEach(r => { c[r.status] = r.count; });
-      const map = { 'stat-applied': c.applied || 0, 'stat-pending': c.pending || 0, 'stat-tailored': c.tailored || 0, 'stat-skipped': c.skipped || 0, 'stat-failed': c.apply_failed || 0 };
-      for (const [id, val] of Object.entries(map)) {
-        const el = document.getElementById(id);
-        if (el && el.textContent !== String(val)) el.textContent = val;
-      }
+      updateStatCards(summary);
+      renderNhsApps();
       // Refresh Recent Activity only when it actually changed (avoids clobbering
       // the table — and its scroll — on every tick)
       const body = document.getElementById('recent-activity-body');
@@ -2083,6 +2184,39 @@ const TRACKER_STAGES = ['applied', 'phone_screen', 'interview', 'offer', 'reject
 const STAGE_LABELS = { applied: 'Applied', phone_screen: 'Phone Screen', interview: 'Interview', offer: 'Offer', rejected: 'Rejected', withdrawn: 'Withdrawn' };
 const STAGE_COLORS = { applied: '#2563eb', phone_screen: '#8b5cf6', interview: '#f59e0b', offer: '#10b981', rejected: '#ef4444', withdrawn: '#94a3b8' };
 
+// Gaps of over 3 months between jobs (and from the last job to today if not current).
+// Dates are UK style DD/MM/YYYY; MM/YYYY and YYYY-MM-DD also work.
+function tracParseDate(s) {
+  const t = String(s || '').trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/); if (m) return new Date(+m[1], +m[2] - 1, +(m[3] || 1));
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+  m = t.match(/^(\d{1,2})\/(\d{4})$/); if (m) return new Date(+m[2], +m[1] - 1, 1);
+  return null;
+}
+function tracEmploymentGaps(employment) {
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const jobs = (employment || []).map((e) => ({ s: tracParseDate(e.start), e: /present|current/i.test(e.end || '') || !String(e.end || '').trim() ? new Date() : tracParseDate(e.end) }))
+    .filter((j) => j.s && j.e).sort((a, b) => a.s - b.s);
+  const gaps = [];
+  let covered = null;
+  for (const j of jobs) {
+    if (covered && j.s - covered > 92 * 86400000) gaps.push({ from: covered, to: j.s });
+    if (!covered || j.e > covered) covered = j.e;
+  }
+  if (covered && Date.now() - covered > 92 * 86400000) gaps.push({ from: covered, to: new Date() });
+  return gaps.map((g) => ({ ...g, text: `${MON[g.from.getMonth()]} ${g.from.getFullYear()} to ${MON[g.to.getMonth()]} ${g.to.getFullYear()}` }));
+}
+// Referees missing a usable email or phone (NHS pre-employment checks stall without them).
+function tracRefereeProblems(refs) {
+  const out = [];
+  (refs || []).forEach((r, i) => {
+    const who = (r && r.name) || `Referee ${i + 1}`;
+    if (!r || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(r.email || '').trim())) out.push(`${who} needs a valid email`);
+    if (!r || String(r.phone || '').replace(/\D/g, '').length < 10) out.push(`${who} needs a phone number`);
+  });
+  return out;
+}
+
 // ── NHS / Trac application details ────────────────────────────────────────────
 // Extra data the long NHS Trac form needs beyond the basic profile: title, NI
 // number, employment history, references, education. Stored as JSON in
@@ -2094,6 +2228,19 @@ async function renderTracDetails() {
   d.employment = Array.isArray(d.employment) ? d.employment : [];
   d.references = Array.isArray(d.references) ? d.references : [];
   d.education  = Array.isArray(d.education)  ? d.education  : [];
+  d.sectors    = Array.isArray(d.sectors)    ? d.sectors    : [];
+  d.searchTerms = Array.isArray(d.searchTerms) ? d.searchTerms : [];
+  let mainTerms = [];
+  try { mainTerms = ((await window.api.searchTerms.get()) || []).map((t) => t.term).filter(Boolean); } catch (_) {}
+  // NHS job families on HealthJobsUK. Ticking one or more sends the agent straight to
+  // that sector's job list (…/job_list/s{code}) instead of every vacancy. Leave all
+  // unticked and the agent picks the right sector(s) automatically from your search terms.
+  const TRAC_SECTORS = [
+    ['s7', 'Administrative Services'], ['s6', 'Support Services'], ['s5', 'Health Science Services'],
+    ['s1', 'Nursing & Midwifery'], ['s2', 'Medical & Dental'], ['s4', 'Allied Health Professions'],
+    ['s3', 'Emergency Services'], ['s119', 'Personal Social Services'], ['s8', 'Directors'],
+    ['s10', 'Apprenticeships'], ['s9', 'Volunteers'],
+  ];
   // First-time completion: if this section was empty on open, jump back to the
   // dashboard after the first save so the user sees the ✓. Re-edits stay put.
   const wasEmpty = !(d.title || d.ni || d.employment.length || d.references.length || d.education.length);
@@ -2101,6 +2248,17 @@ async function renderTracDetails() {
   const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const inp = (name, val, ph = '', type = 'text') => `<input class="tracd" data-f="${name}" type="${type}" value="${esc(val)}" placeholder="${esc(ph)}">`;
   const ta  = (name, val, ph = '') => `<textarea class="tracd" data-f="${name}" rows="2" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
+  // Labelled monitoring dropdown; stored on trac_details by its `key` (id tracd-q-<key>).
+  // If an imported value isn't one of the preset options (e.g. "Black Nigerian" from an
+  // uploaded form), keep it as a selected option so nothing is lost.
+  const qSel = (key, label, options, current) => {
+    const cur = String(current || '');
+    const opts = (cur && !options.includes(cur)) ? [cur, ...options] : options;
+    return `<div class="field"><label>${esc(label)}</label>
+    <select id="tracd-q-${key}" class="tracd-q" data-q="${key}">
+      ${opts.map((o) => `<option value="${esc(o)}" ${cur === o ? 'selected' : ''}>${o || 'Select…'}</option>`).join('')}
+    </select></div>`;
+  };
 
   const empRow = (e, i) => `<div class="tracd-row" data-group="employment" data-i="${i}">
       <div class="tracd-grid">
@@ -2121,6 +2279,11 @@ async function renderTracDetails() {
         ${inp(`references.${i}.email`, r.email, 'Work email', 'email')}
         ${inp(`references.${i}.phone`, r.phone, 'Phone')}
         ${inp(`references.${i}.relationship`, r.relationship, 'How they know you (e.g. Line manager)')}
+        ${inp(`references.${i}.address`, r.address, 'Address line 1')}
+        ${inp(`references.${i}.city`, r.city, 'City / Town')}
+        ${inp(`references.${i}.postcode`, r.postcode, 'Postcode')}
+        ${inp(`references.${i}.from`, r.from, 'Known since (e.g. Jan 2020)')}
+        ${inp(`references.${i}.to`, r.to, 'Known until (or "present")')}
       </div>
       <button class="tracd-del" data-group="references" data-i="${i}">Remove</button>
     </div>`;
@@ -2136,15 +2299,72 @@ async function renderTracDetails() {
 
   content.innerHTML = `
     <div class="page-header"><h2>NHS / Trac application details</h2>
-      <p>The NHS Trac form asks for more than a CV. It needs your employment history, references and education. Fill this in once and the Trac agent uses it for every NHS application. Your criminal record, immigration, equality and disability answers are never stored here. The agent pauses so you enter those yourself.</p>
+      <p>The NHS Trac form asks for more than a CV. Fill it in once here: your employment history, references, education, and the standard monitoring questions. After that the agent completes every NHS application for you. No guessing, no re-typing.</p>
+    </div>
+    <div class="card" style="border:1px dashed var(--primary);background:var(--primary-soft)">
+      <h3 style="margin-top:0">Already have a completed Trac form? Upload it</h3>
+      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">Have a Trac application PDF you already filled in? Upload it here. We read every answer and fill this page for you, so there is no typing.</p>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="primary" id="tracd-import">Upload completed Trac PDF</button>
+        <span class="status-msg" id="tracd-import-status"></span>
+      </div>
     </div>
     <div class="card">
-      <div class="field"><label>Title</label>
-        <select id="tracd-title" style="max-width:160px">
-          ${['', 'Mr', 'Mrs', 'Ms', 'Miss', 'Dr', 'Mx'].map((t) => `<option value="${t}" ${d.title === t ? 'selected' : ''}>${t || 'Select…'}</option>`).join('')}
+      <h3>Personal details</h3>
+      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">These are used only for your NHS/Trac applications, separate from your main profile.</p>
+      <div class="tracd-grid">
+        <div class="field"><label>Title</label>
+          <select id="tracd-title">
+            ${['', 'Mr', 'Mrs', 'Ms', 'Miss', 'Dr', 'Mx'].map((t) => `<option value="${t}" ${(d.title || '') === t ? 'selected' : ''}>${t || 'Select…'}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Forename</label><input id="tracd-forename" type="text" value="${esc(d.firstName || profile.first_name || '')}"></div>
+        <div class="field"><label>Middle name(s)</label><input id="tracd-middlename" type="text" value="${esc(d.middleName || profile.middle_name || '')}"></div>
+        <div class="field"><label>Surname</label><input id="tracd-surname" type="text" value="${esc(d.lastName || profile.last_name || '')}"></div>
+        <div class="field"><label>Email</label><input id="tracd-email" type="email" value="${esc(d.email || profile.email || '')}"></div>
+        <div class="field"><label>Mobile telephone</label><input id="tracd-mobile" type="text" value="${esc(d.mobile || profile.phone || '')}"></div>
+        <div class="field"><label>Address</label><input id="tracd-address" type="text" value="${esc(d.address || '')}"></div>
+        <div class="field"><label>City / town</label><input id="tracd-city" type="text" value="${esc(d.city || profile.location || '')}"></div>
+        <div class="field"><label>County</label><input id="tracd-county" type="text" value="${esc(d.county || '')}"></div>
+        <div class="field"><label>Postcode</label><input id="tracd-postcode" type="text" value="${esc(d.postcode || '')}"></div>
+        <div class="field"><label>Country</label><input id="tracd-country" type="text" value="${esc(d.country || profile.country || 'United Kingdom')}"></div>
+        <div class="field"><label>National Insurance number</label><input id="tracd-ni" type="text" value="${esc(d.ni || '')}" placeholder="e.g. QQ 12 34 56 C"></div>
+        <div class="field"><label>Date of birth</label><input id="tracd-dob" type="date" value="${esc(d.dob || '')}"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Right to work &amp; declarations</h3>
+      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">Set these once. The agent uses them on every NHS application so it never has to stop and ask.</p>
+      <div class="field"><label>Right to work in the UK</label>
+        <select id="tracd-rtw" style="max-width:380px">
+          ${['', 'British citizen', 'Irish citizen', 'Settled status (EU Settlement Scheme)', 'Pre-settled status', 'Visa holder / work permit', 'I require sponsorship'].map((o) => `<option value="${esc(o)}" ${d.rightToWork === o ? 'selected' : ''}>${o || 'Select…'}</option>`).join('')}
         </select>
       </div>
-      <div class="field"><label>National Insurance number</label>${inp('ni', d.ni, 'e.g. QQ 12 34 56 C')}</div>
+      <div class="field"><label>Do you have any unspent criminal convictions?</label>
+        <select id="tracd-convictions" style="max-width:160px">
+          <option value="no" ${d.convictions !== 'yes' ? 'selected' : ''}>No</option>
+          <option value="yes" ${d.convictions === 'yes' ? 'selected' : ''}>Yes</option>
+        </select>
+      </div>
+      <div class="field" id="tracd-conv-wrap" style="${d.convictions === 'yes' ? '' : 'display:none'}"><label>Conviction details</label>
+        <textarea id="tracd-conv-details" rows="2" placeholder="Only needed if you answered Yes">${esc(d.convictionDetails || '')}</textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Select sector <span style="color:var(--danger)">*</span></h3>
+      <div class="tracd-sectors">
+        ${TRAC_SECTORS.map(([code, name]) => `<label class="sector-chip"><input type="checkbox" class="tracd-sector" value="${code}" ${d.sectors.includes(code) ? 'checked' : ''}><span>${name}</span></label>`).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>NHS search terms</h3>
+      <p class="muted" style="margin:0 0 10px">One job title per line, or tap a suggestion.</p>
+      <textarea id="tracd-searchterms" rows="5" placeholder="${esc(mainTerms.join('\n'))}">${esc(d.searchTerms.join('\n'))}</textarea>
+      <div class="tracd-suggest-head muted" id="tracd-suggest-head"></div>
+      <div class="tracd-suggest" id="tracd-suggest"></div>
     </div>
 
     <div class="card">
@@ -2154,7 +2374,17 @@ async function renderTracDetails() {
     </div>
 
     <div class="card">
+      <h3>Gaps in employment</h3>
+      ${(() => { const g = tracEmploymentGaps(d.employment); return g.length
+        ? `<p class="muted" style="margin:0 0 8px">We found ${g.length === 1 ? 'a gap' : g.length + ' gaps'} of over 3 months in your dates: <strong>${g.map((x) => esc(x.text)).join('; ')}</strong>. NHS forms ask you to explain these. Write it once here and the agent uses it on every form.</p>`
+        : '<p class="muted" style="margin:0 0 8px">No gaps of over 3 months found in your dates. The agent answers "No gaps" for you.</p>'; })()}
+      <textarea id="tracd-gaps" rows="3" placeholder="e.g. Jan to Jun 2023: career break to care for a family member. Jul 2024 to Oct 2025: job seeking and completing IT training.">${esc(d.employmentGaps || '')}</textarea>
+    </div>
+
+    <div class="card">
       <h3>References <span style="font-weight:400;color:var(--text-muted);font-size:13px">(cover the last 3 years)</span></h3>
+      <p class="muted" style="margin:0 0 10px">NHS Trac requires each referee's address (line 1, city and postcode), so please add it. Without it the References section cannot be completed automatically.</p>
+      ${(() => { const bad = tracRefereeProblems(d.references); return bad.length ? `<p class="tracd-warn">Check your referees: ${bad.map(esc).join('; ')}.</p>` : ''; })()}
       <div id="ref-list">${d.references.map(refRow).join('')}</div>
       <button class="secondary" id="add-ref">+ Add reference</button>
     </div>
@@ -2165,6 +2395,45 @@ async function renderTracDetails() {
       <button class="secondary" id="add-edu">+ Add qualification</button>
     </div>
 
+    <div class="card">
+      <h3>Equality &amp; diversity monitoring</h3>
+      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">NHS forms always ask these questions. Your answers are anonymised and the hiring panel never sees them. Set them once and the agent fills them in for you.</p>
+      <div class="tracd-grid">
+        ${qSel('gender', 'Gender', ['', 'Male', 'Female', 'Non-binary', 'Prefer not to say'], d.gender)}
+        ${qSel('genderSameAsBirth', 'Gender same as at birth?', ['', 'Yes', 'No', 'Prefer not to say'], d.genderSameAsBirth)}
+        ${qSel('trans', 'Ever identified as trans or transgender?', ['', 'No', 'Yes', 'Prefer not to say'], d.trans)}
+        ${qSel('ethnicity', 'Ethnic origin', ['', 'White - British', 'White - Irish', 'White - Other', 'Mixed', 'Asian - Indian', 'Asian - Pakistani', 'Asian - Bangladeshi', 'Asian - Chinese', 'Asian - Other', 'Black - African', 'Black - Caribbean', 'Black - Other', 'Arab', 'Other', 'Prefer not to say'], d.ethnicity)}
+        ${qSel('sexualOrientation', 'Sexual orientation', ['', 'Heterosexual / Straight', 'Gay / Lesbian', 'Bisexual', 'Other', 'Prefer not to say'], d.sexualOrientation)}
+        ${qSel('religion', 'Religion or belief', ['', 'None', 'Christian', 'Buddhist', 'Hindu', 'Jewish', 'Muslim', 'Sikh', 'Other', 'Prefer not to say'], d.religion)}
+        ${qSel('maritalStatus', 'Marital status', ['', 'Single', 'Married', 'Civil partnership', 'Divorced', 'Widowed', 'Prefer not to say'], d.maritalStatus)}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Disability</h3>
+      <div class="tracd-grid">
+        ${qSel('disability', 'Do you consider yourself to have a disability?', ['', 'No', 'Yes', 'Prefer not to say'], d.disability)}
+        ${qSel('guaranteedInterview', 'Apply under the Disability Confident / guaranteed interview scheme?', ['', 'No', 'Yes'], d.guaranteedInterview)}
+      </div>
+      <div class="field" style="margin-top:8px"><label>Reasonable adjustments needed (if any)</label>
+        <textarea id="tracd-adjustments" rows="2" placeholder="Leave blank if none">${esc(d.adjustments || '')}</textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Background &amp; other</h3>
+      <div class="tracd-grid">
+        ${qSel('armedForces', 'Armed forces community?', ['', 'No', 'Currently serving', 'Veteran / ex-forces', 'Reservist', 'Spouse / partner of a member'], d.armedForces)}
+        ${qSel('schoolType', 'Main school type (age 11-16)', ['', 'State-run or state-funded', 'Independent / fee-paying (with bursary)', 'Independent / fee-paying (no bursary)', 'Attended school outside the UK', 'Prefer not to say'], d.schoolType)}
+        ${qSel('freeSchoolMeals', 'Eligible for free school meals?', ['', 'No', 'Yes', 'Do not know', 'Prefer not to say'], d.freeSchoolMeals)}
+        ${qSel('socioOccupation', 'Main earner occupation when you were 14', ['', 'Modern professional / traditional professional', 'Senior/junior manager or administrator', 'Clerical / intermediate occupation', 'Technical / craft occupation', 'Semi-routine manual / service', 'Routine manual / service', 'Long-term unemployed', 'Other / prefer not to say'], d.socioOccupation)}
+        ${qSel('howHeard', 'How did you hear of vacancies?', ['', 'NHS Jobs website', 'Trac.jobs', 'Indeed', 'LinkedIn', 'Word of mouth', 'Other'], d.howHeard)}
+        ${qSel('gcseMathsEnglish', 'GCSE Maths and English at grade C / 4 or above (or equivalent)?', ['', 'Yes', 'No'], d.gcseMathsEnglish)}
+        ${qSel('welsh', 'Can you speak, read or write Welsh?', ['', 'No', 'Yes'], d.welsh)}
+        ${qSel('careLeaver', 'Have you ever been in care (care leaver)?', ['', 'No', 'Yes', 'Prefer not to say'], d.careLeaver)}
+      </div>
+    </div>
+
     <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
       <button class="primary" id="tracd-save">Save details</button>
       <span class="status-msg" id="tracd-status"></span>
@@ -2173,16 +2442,108 @@ async function renderTracDetails() {
   const rowBuilders = { employment: empRow, references: refRow, education: eduRow };
   const listIds = { employment: 'emp-list', references: 'ref-list', education: 'edu-list' };
   const addRow = (group) => { const list = document.getElementById(listIds[group]); const i = list.children.length; list.insertAdjacentHTML('beforeend', rowBuilders[group]({}, i)); };
+  document.getElementById('tracd-convictions')?.addEventListener('change', (e) => {
+    const wrap = document.getElementById('tracd-conv-wrap');
+    if (wrap) wrap.style.display = e.target.value === 'yes' ? '' : 'none';
+  });
   document.getElementById('add-emp').addEventListener('click', () => addRow('employment'));
   document.getElementById('add-ref').addEventListener('click', () => addRow('references'));
+
+  // NHS search-term suggestions, driven by the sectors the user has ticked, so a nurse,
+  // porter, admin worker or IT analyst each sees titles from their own field. Tapping one
+  // adds it to the box. No sector ticked → a mix across sectors.
+  const NHS_TITLE_EXAMPLES = {
+    s7: ['Administrator', 'Medical Secretary', 'Ward Clerk', 'Receptionist', 'Patient Services Coordinator', 'Medical Records Officer', 'HR Administrator', 'Finance Officer', 'IT Service Desk Analyst', 'Digital Support Officer'],
+    s6: ['Porter', 'Domestic Assistant', 'Catering Assistant', 'Estates Officer', 'Maintenance Technician', 'Security Officer', 'ICT Technician', 'Driver'],
+    s5: ['Biomedical Scientist', 'Healthcare Science Practitioner', 'Pharmacy Technician', 'Medical Laboratory Assistant', 'Phlebotomist', 'Clinical Physiologist', 'Data Analyst'],
+    s1: ['Staff Nurse', 'Registered Nurse', 'Healthcare Assistant', 'Nursing Associate', 'Midwife', 'Community Nurse', 'Clinical Support Worker'],
+    s2: ['Specialty Doctor', 'Clinical Fellow', 'Foundation Doctor', 'Consultant', 'Dental Nurse', 'Salaried GP'],
+    s4: ['Physiotherapist', 'Occupational Therapist', 'Radiographer', 'Speech and Language Therapist', 'Dietitian', 'Therapy Assistant'],
+    s3: ['Emergency Care Assistant', 'Emergency Medical Technician', 'Paramedic', 'Call Handler', 'Health Advisor', 'Ambulance Care Assistant'],
+    s119: ['Support Worker', 'Mental Health Support Worker', 'Social Worker', 'Care Assistant', 'Peer Support Worker', 'Family Support Worker'],
+    s8: ['Service Manager', 'Head of Service', 'Associate Director', 'Director of Operations'],
+    s10: ['Apprentice Healthcare Assistant', 'Business Administration Apprentice', 'IT Apprentice', 'Apprentice Nursing Associate'],
+    s9: ['Volunteer', 'Ward Volunteer', 'Volunteer Driver'],
+  };
+  const termsBox = document.getElementById('tracd-searchterms');
+  const renderSuggestions = () => {
+    const box = document.getElementById('tracd-suggest'), head = document.getElementById('tracd-suggest-head');
+    if (!box || !termsBox) return;
+    const ticked = Array.from(content.querySelectorAll('.tracd-sector:checked')).map((el) => el.value);
+    const codes = ticked.length ? ticked : ['s7', 's1', 's6', 's4', 's119'];
+    const have = new Set(termsBox.value.split('\n').map((s) => s.trim().toLowerCase()).filter(Boolean));
+    const seen = new Set();
+    const list = [];
+    const add = (t) => { const k = t.toLowerCase(); if (!have.has(k) && !seen.has(k)) { seen.add(k); list.push(t); } };
+    mainTerms.forEach(add); // the user's own search terms first
+    for (const c of codes) for (const t of (NHS_TITLE_EXAMPLES[c] || []).slice(0, ticked.length ? 10 : 3)) add(t);
+    head.textContent = list.length ? 'Suggestions:' : '';
+    box.innerHTML = list.map((t) => `<button type="button" class="suggest-chip" data-term="${esc(t)}">+ ${esc(t)}</button>`).join('');
+  };
+  document.getElementById('tracd-suggest')?.addEventListener('click', (e) => {
+    const b = e.target.closest('.suggest-chip'); if (!b || !termsBox) return;
+    const cur = termsBox.value.replace(/\s+$/, '');
+    termsBox.value = (cur ? cur + '\n' : '') + b.dataset.term;
+    renderSuggestions();
+  });
+  content.querySelectorAll('.tracd-sector').forEach((el) => el.addEventListener('change', renderSuggestions));
+  if (termsBox) termsBox.addEventListener('input', renderSuggestions);
+  renderSuggestions();
   document.getElementById('add-edu').addEventListener('click', () => addRow('education'));
   content.addEventListener('click', (e) => {
     const del = e.target.closest('.tracd-del');
     if (del) del.closest('.tracd-row').remove();
   });
 
+  document.getElementById('tracd-import')?.addEventListener('click', async () => {
+    const st = document.getElementById('tracd-import-status');
+    const btn = document.getElementById('tracd-import');
+    showStatus(st, 'Reading your form with AI…');
+    btn.disabled = true;
+    try {
+      const res = await window.api.tracImport.pick();
+      if (!res || res.canceled) { showStatus(st, ''); btn.disabled = false; return; }
+      if (!res.ok) { showStatus(st, res.error || 'Could not read that form.', true); btn.disabled = false; return; }
+      // Merge extracted details onto what's already stored (imported form wins, but never
+      // wipe existing employment/education/references/sectors if the import found none).
+      const merged = Object.assign({}, d, res.trac);
+      for (const k of ['employment', 'education', 'references']) {
+        if (!Array.isArray(res.trac[k]) || !res.trac[k].length) merged[k] = d[k] || [];
+      }
+      merged.sectors = d.sectors || [];
+      await window.api.profile.save(Object.assign({}, res.profile || {}, { trac_details: JSON.stringify(merged) }));
+      showToast(`Imported ${res.counts.employment} job(s), ${res.counts.education} qualification(s), ${res.counts.references} reference(s). Review and save.`);
+      navigate('trac-details'); // re-render with the imported data filled in
+    } catch (err) {
+      showStatus(st, 'Import failed: ' + err.message, true);
+      btn.disabled = false;
+    }
+  });
+
   document.getElementById('tracd-save').addEventListener('click', async () => {
-    const out = { title: document.getElementById('tracd-title').value, ni: '', employment: [], references: [], education: [] };
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    const out = { title: val('tracd-title'), employment: [], references: [], education: [], sectors: [] };
+    out.sectors = Array.from(content.querySelectorAll('.tracd-sector:checked')).map((el) => el.value);
+    // Keep the dashboard's "Submit for me" choice (set on the NHS agent card).
+    try { const cur = (await window.api.profile.get()) || {}; out.autoSubmit = JSON.parse(cur.trac_details || '{}').autoSubmit === true; } catch (_) {}
+    out.searchTerms = (document.getElementById('tracd-searchterms')?.value || '').split('\n').map((s) => s.trim()).filter(Boolean);
+    // Self-contained personal details (Trac only, separate from the main profile).
+    out.firstName = val('tracd-forename'); out.middleName = val('tracd-middlename'); out.lastName = val('tracd-surname');
+    out.email = val('tracd-email'); out.mobile = val('tracd-mobile'); out.address = val('tracd-address');
+    out.city = val('tracd-city'); out.county = val('tracd-county'); out.postcode = val('tracd-postcode'); out.country = val('tracd-country');
+    out.ni = val('tracd-ni');
+    out.dob = val('tracd-dob');
+    out.rightToWork = document.getElementById('tracd-rtw')?.value || '';
+    out.convictions = document.getElementById('tracd-convictions')?.value || 'no';
+    out.convictionDetails = document.getElementById('tracd-conv-details')?.value || '';
+    out.adjustments = document.getElementById('tracd-adjustments')?.value || '';
+    // Equality / diversity / background monitoring answers (one <select> each).
+    content.querySelectorAll('.tracd-q').forEach((el) => { out[el.dataset.q] = el.value || ''; });
+    if (!out.sectors.length) {
+      showStatus(document.getElementById('tracd-status'), 'Pick at least one job area to search before saving.', true);
+      document.querySelector('.tracd-sectors')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     content.querySelectorAll('.tracd').forEach((el) => {
       const f = el.dataset.f; const v = el.value;
       if (f === 'ni') { out.ni = v; return; }
@@ -2192,9 +2553,12 @@ async function renderTracDetails() {
     out.employment = out.employment.filter((r) => r && Object.values(r).some(Boolean));
     out.references = out.references.filter((r) => r && Object.values(r).some(Boolean));
     out.education  = out.education.filter((r) => r && Object.values(r).some(Boolean));
+    out.employmentGaps = (document.getElementById('tracd-gaps')?.value || '').trim();
+    const refProblems = tracRefereeProblems(out.references);
     try {
       await window.api.profile.save({ trac_details: JSON.stringify(out) });
       showToast('Trac details saved');
+      if (refProblems.length) { showStatus(document.getElementById('tracd-status'), 'Saved, but check your referees: ' + refProblems.join('; ') + '.', true); return; }
       const hasContent = out.employment.length || out.references.length || out.title || out.ni;
       if (wasEmpty && hasContent) { navigate('dashboard'); }
       else { showStatus(document.getElementById('tracd-status'), 'Saved. The Trac agent will use these.'); }
@@ -2243,10 +2607,10 @@ async function renderTracker() {
         <tbody>
           ${entries.map(e => `
             <tr data-id="${e.id}">
-              <td class="tracker-title">${e.title ? `<a href="${e.url || '#'}" class="tracker-link" data-url="${e.url || ''}">${cleanTitle(e.title)}</a>` : '—'}</td>
-              <td>${e.company || '—'}</td>
-              <td>${e.source ? `<span class="tracker-source-badge" style="background:${SOURCE_BADGE[e.source] || '#2563eb'}">${e.source}</span>` : '—'}</td>
-              <td>${e.applied_at ? e.applied_at.slice(0, 10) : '—'}</td>
+              <td class="tracker-title">${e.title ? `<a href="${e.url || '#'}" class="tracker-link" data-url="${e.url || ''}">${cleanTitle(e.title)}</a>` : '-'}</td>
+              <td>${e.company || '-'}</td>
+              <td>${e.source ? `<span class="tracker-source-badge" style="background:${SOURCE_BADGE[e.source] || '#2563eb'}">${e.source}</span>` : '-'}</td>
+              <td>${e.applied_at ? e.applied_at.slice(0, 10) : '-'}</td>
               <td>${stageHtml(e.id, e.stage || 'applied')}</td>
               <td><textarea class="tracker-notes-input" data-id="${e.id}" rows="1" placeholder="Add notes...">${(e.notes || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea></td>
               <td><button class="tracker-delete-btn" data-id="${e.id}">×</button></td>
@@ -2345,7 +2709,7 @@ async function renderAnalytics() {
   const skipRate = totalApplied + totalSkipped > 0 ? Math.round((totalSkipped / (totalApplied + totalSkipped)) * 100) : 0;
   const totalDaysActive = daily30.filter(d => d.count > 0).length || 1;
   const avgPerDay = totalDaysActive > 0 ? (totalApplied / totalDaysActive).toFixed(1) : '0';
-  const topSource = bySource[0]?.source || '—';
+  const topSource = bySource[0]?.source || '-';
 
   const barRow = (label, count, max, color) => {
     const pct = max > 0 ? Math.round((count / max) * 100) : 0;
@@ -2618,6 +2982,13 @@ const TOUR_STEPS = [
     title: 'All set: start applying',
     tip: 'When you click Start applying, only the ticked sites launch. Each opens a Chrome window and works inside it automatically, searching, tailoring your CV, and applying to matching roles on its own.',
     action: 'Click "Start applying" (the checklist flags anything still missing). Important: the Chrome windows that open are the Agent working, not your own browser. Please leave them alone. Do not click, type in, or close them. Simply minimise them and carry on with your day. Closing a window stops that Agent.',
+  },
+  {
+    view: 'trac-details',
+    ukOnly: true,
+    title: 'NHS jobs: the Trac Agent',
+    tip: 'NHS jobs use a separate system called Trac, and its application forms are far longer and more detailed than a normal job site. Because of that, the Trac Agent is its own agent with its own form, kept separate from your main profile and CV that the other Agents use. It collects your full personal details, employment history, references, education, and the standard equality and monitoring questions, so it can complete an entire NHS application on its own with no guessing.',
+    action: 'Open "NHS / Trac details" and fill it in once. If you already have a completed Trac application saved as a PDF, click "Upload completed Trac PDF" and it fills the whole page for you. When you run the NHS / Trac Agent, log in to your NHS jobs account once in the browser window it opens.',
   },
   {
     view: 'dashboard',

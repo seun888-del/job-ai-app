@@ -5,6 +5,7 @@ const fs = require('fs');
 const db = require('./src/db/database');
 const queueReader = require('./src/db/queueReader');
 const cvAnalyzer = require('./src/services/cvAnalyzer');
+const tracImporter = require('./src/services/tracImporter');
 const botManager = require('./src/services/botManager');
 const assistantState = require('./src/services/assistantState');
 const https = require('https');
@@ -175,6 +176,7 @@ app.whenReady().then(async () => {
   syncLicenseEnv(); // route main-process AI (CV analysis) through the licensed backend
   queueReader.init(app.getPath('userData'));
   createWindow();
+  autostartAgents();
   refreshLicense('startup'); // recover a reinstated/renewed licence on relaunch, no re-paste
 
   const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent', greenhouse: 'Auto-Apply Agent', uc: 'Universal Credit Agent' };
@@ -485,6 +487,21 @@ async function sendInstallBeacon() {
 ipcMain.handle('profile:get', () => db.getProfile());
 ipcMain.handle('profile:save', (event, fields) => db.saveProfile(fields));
 
+// Upload a completed Trac PDF → AI extracts every answer into profile + trac_details.
+ipcMain.handle('tracImport:pick', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'Completed Trac application (PDF)', extensions: ['pdf'] }],
+  });
+  if (result.canceled || !result.filePaths.length) return { canceled: true };
+  try {
+    const data = await tracImporter.importTracPdf(result.filePaths[0]);
+    return { ok: true, ...data };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || 'Could not read that form.' };
+  }
+});
+
 // ── Search preferences / terms / exclude keywords ─────────────────────────
 ipcMain.handle('searchPrefs:get', () => db.getSearchPreferences());
 ipcMain.handle('searchPrefs:save', (event, fields) => db.saveSearchPreferences(fields));
@@ -579,6 +596,7 @@ ipcMain.handle('queue:clearRecent', () => queueReader.clearRecentActivity());
 ipcMain.handle('queue:ucPending', () => queueReader.getUcPendingCount());
 ipcMain.handle('queue:ucPendingList', () => queueReader.getUcPendingList(200));
 ipcMain.handle('uc:markLogged', (_e, jobIds) => queueReader.markUcLoggedManual(jobIds));
+ipcMain.handle('queue:tracApps', () => queueReader.getTracApplications());
 ipcMain.handle('queue:recent', (event, limit) => queueReader.getRecentApplications(limit));
 ipcMain.handle('queue:reviewList', (event, limit) => queueReader.getReviewQueue(limit || 100));
 ipcMain.handle('queue:reviewCount', () => queueReader.getReviewCount());
@@ -647,7 +665,11 @@ async function agentAccessAllowed() {
 }
 
 // ── Bot manager ──────────────────────────────────────────────────────────
-ipcMain.handle('bot:start', async (event, botName) => {
+ipcMain.handle('bot:start', async (event, botName) => startBotGated(botName));
+
+// Start an agent exactly as the "Start applying" button does (licence gate included).
+// Shared by the button and by JOBBOT_AUTOSTART (unattended runs).
+async function startBotGated(botName) {
   // Gate: no agent may run without a currently-valid trial or subscription.
   const access = await agentAccessAllowed();
   if (!access.ok) {
@@ -672,8 +694,21 @@ ipcMain.handle('bot:start', async (event, botName) => {
     try { fs.unlinkSync(path.join(profileDir, f)); } catch (_) {}
   }
   return botManager.start(botName, userData, {});
-});
+}
 ipcMain.handle('bot:stop', (event, botName) => botManager.stop(botName));
+
+// Unattended mode: JOBBOT_AUTOSTART=trac,scorer starts those agents shortly after launch,
+// as if "Start applying" had been pressed (same licence gate). Unset = normal behaviour.
+function autostartAgents() {
+  const names = String(process.env.JOBBOT_AUTOSTART || '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (!names.length) return;
+  setTimeout(async () => {
+    for (const n of names) {
+      try { await startBotGated(n); console.log(`[autostart] started ${n}`); }
+      catch (e) { console.log(`[autostart] could not start ${n}: ${e.message}`); }
+    }
+  }, 8000);
+}
 ipcMain.handle('bot:status', () => botManager.getStatus());
 
 // ── License ─────────────────────────────────────────────────────────────

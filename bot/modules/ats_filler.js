@@ -228,6 +228,11 @@ async function _radioGroupSetTo(page, groupName, chosenText) {
 }
 
 // ── Fill all visible fields on the current step ───────────────────────────
+// Real text boxes only: not custom-dropdown inputs, and not the hidden "required" shadow input
+// react-select renders next to each dropdown (aria-hidden, tabindex -1), which must never be typed in.
+const TEXT_INPUTS = ['input[type="text"]', 'input[type="number"]', 'input:not([type])']
+  .map(s => s + ':not([role="combobox"]):not([aria-hidden="true"]):not([tabindex="-1"])').join(', ');
+
 async function _fillStep(page, job) {
   const { firstName, lastName, email, phone, linkedin, location,
           yearsExperience, salaryExpectation, availability,
@@ -249,6 +254,8 @@ async function _fillStep(page, job) {
       try {
         const el = await page.$(sel);
         if (el && await el.isVisible()) {
+          // Custom dropdowns (role=combobox) need an option picked, not typed text: _answerComboboxes.
+          if ((await el.getAttribute('role').catch(() => '')) === 'combobox') break;
           if (await el.inputValue().catch(() => '')) break;
           await _setValue(el, val);
           await J(80, 150);
@@ -259,7 +266,7 @@ async function _fillStep(page, job) {
   }
 
   // Unknown text inputs — label-matched with rules + AI fallback
-  const allInputs = await page.$$('input[type="text"], input[type="number"], input:not([type])');
+  const allInputs = await page.$$(TEXT_INPUTS);
   for (const inp of allInputs) {
     try {
       if (!await inp.isVisible()) continue;
@@ -323,6 +330,9 @@ async function _fillStep(page, job) {
       }
     } catch (_) {}
   }
+
+  // Custom dropdowns (react-select style, e.g. Greenhouse's newer forms)
+  await _answerComboboxes(page, job);
 
   // Radio groups
   const radios = await page.$$('input[type="radio"]');
@@ -701,6 +711,92 @@ Write a short, professional answer (1-3 sentences). Sound natural and human. No 
     console.log(`  [ATS] AI answer failed: ${e.message}`);
   }
   return '';
+}
+
+// ── Custom dropdowns ───────────────────────────────────────────────────────
+// Greenhouse (and others) render questions as react-select comboboxes: an <input role=combobox>
+// whose options only exist while the menu is open. Open it, read the options, pick one with the
+// same rules/AI as native selects, then click it. Mouse events are dispatched in the page so this
+// works the same in Playwright and in the Chrome extension.
+const DEMOGRAPHIC_RE = /gender|ethnic|race|sexual|orientation|disab|neurodiver|veteran|pronoun|religio|age range|transgender|identity/i;
+async function _answerComboboxes(page, job) {
+  // Re-find the dropdowns before each one: picking an answer re-renders the form, which can
+  // replace later inputs and leave stale handles behind.
+  const total = (await page.$$('input[role="combobox"]')).length;
+  for (let i = 0; i < total; i++) {
+    const box = (await page.$$('input[role="combobox"]'))[i];
+    if (!box) break;
+    try {
+      if (!await box.isVisible()) continue;
+      const info = await box.evaluate(el => {
+        const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
+        const lab = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
+        const alb = el.getAttribute('aria-labelledby') || '';
+        const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="select"]');
+        const wl = wrap && wrap.parentElement && wrap.parentElement.querySelector('label, legend');
+        const question = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || wl?.innerText || '').trim();
+        const control = el.closest('[class*="control"]') || el.parentElement;
+        const chosen = control && control.querySelector('[class*="single-value"],[class*="singleValue"],[class*="multi-value"],[class*="multiValue"]');
+        return { question, has: !!(chosen && chosen.textContent.trim()) };
+      }).catch(() => ({ question: '', has: true }));
+      if (info.has) continue;
+      if (!info.question) { console.log('  [ATS] ⚠ Dropdown with no question text, skipped'); continue; }
+      const q = info.question.replace(/\s*\*\s*$/, '');
+
+      const readOptions = () => box.evaluate(el => {
+        const id = el.getAttribute('aria-controls');
+        const menu = id && document.getElementById(id);
+        const opts = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent);
+        return opts.map(o => (o.innerText || o.textContent || '').trim());
+      }).catch(() => []);
+      const open = () => box.evaluate(el => {
+        el.focus();
+        // react-select only opens on the full pointer + mouse sequence (a lone mousedown is ignored).
+        const ctl = el.closest('[class*="control"]') || el.parentElement;
+        for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          const E = t.startsWith('pointer') && typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+          ctl.dispatchEvent(new E(t, { bubbles: true, cancelable: true, button: 0, view: window, pointerType: 'mouse' }));
+        }
+      }).catch(() => {});
+
+      await open(); await J(400, 700);
+      let options = await readOptions();
+      if (!options.length) { await box.press('Escape').catch(() => {}); await J(300, 500); await open(); await J(900, 1300); options = await readOptions(); }
+      // A short "Location / City" search box, not a question that merely mentions the location.
+      const isLocation = q.length <= 45 && /\b(location|city|town)\b|where.*(live|based)/i.test(q) && !/right to work|visa|sponsor|relocat|willing/i.test(q);
+      if (!options.length || isLocation) {
+        // Search-as-you-type dropdowns (e.g. Location): type the answer, then read the matches.
+        const typed = isLocation ? (cfg.APPLICANT.location || '') : '';
+        if (!typed) { console.log(`  [ATS] ⚠ Dropdown would not open: "${q.substring(0, 50)}"`); await box.press('Escape').catch(() => {}); continue; }
+        await box.fill(typed).catch(() => {});
+        await J(1500, 2200);
+        options = await readOptions();
+      }
+      if (!options.length) { console.log(`  [ATS] ⚠ No options for dropdown: "${q.substring(0, 50)}"`); await box.press('Escape').catch(() => {}); continue; }
+
+      let chosen = null;
+      if (isLocation) chosen = options[0];
+      else if (DEMOGRAPHIC_RE.test(q)) chosen = options.find(t => /prefer not|decline|don.?t wish|do not wish|rather not|not to (say|answer|disclose)/i.test(t)) || null;
+      if (!chosen) chosen = _pickDropdownOption(q, options.map(t => ({ val: t, text: t })));
+      if (!chosen && !DEMOGRAPHIC_RE.test(q)) chosen = await _aiPickOption(q, options, job);
+      if (!chosen) { console.log(`  [ATS] ⚠ No answer for dropdown: "${q.substring(0, 50)}" [${options.slice(0, 4).join(' / ').substring(0, 80)}]`); await box.press('Escape').catch(() => {}); continue; }
+
+      const clicked = await box.evaluate((el, want) => {
+        const id = el.getAttribute('aria-controls');
+        const menu = id && document.getElementById(id);
+        const opt = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent)
+          .find(o => (o.innerText || o.textContent || '').trim() === want);
+        if (!opt) return false;
+        for (const t of ['pointermove', 'mousemove', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          const E = t.startsWith('pointer') && typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+          opt.dispatchEvent(new E(t, { bubbles: true, cancelable: true, button: 0, view: window, pointerType: 'mouse' }));
+        }
+        return true;
+      }, chosen).catch(() => false);
+      await J(250, 450);
+      console.log(`  [ATS] ${clicked ? 'Dropdown' : '⚠ Dropdown click failed'} "${q.substring(0, 40)}" → "${String(chosen).substring(0, 40)}"`);
+    } catch (e) { console.log(`  [ATS] ⚠ Dropdown error: ${e.message}`); }
+  }
 }
 
 // ── Rule-based dropdown picker ─────────────────────────────────────────────

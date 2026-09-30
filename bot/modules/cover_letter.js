@@ -78,6 +78,67 @@ HARD RULES:
   }
 }
 
+// NHS "Supporting information" statement for a Trac application. NHS shortlisting scores
+// candidates line by line against the PERSON SPECIFICATION (essential, then desirable
+// criteria), so this is written to evidence those criteria, not as a sales-style letter.
+async function generateSupportingStatement(jobTitle, employer, jobDescription, cvText) {
+  if (!await llmAvailable()) return null;
+  // Person-spec driven statement (vacancy map -> evidence map -> draft -> audit). Falls back
+  // to the simple one-shot format below if the advert can't be mapped.
+  try {
+    const s = await require('./nhs_statement').generateNhsStatement(jobTitle, employer, jobDescription, cvText);
+    if (s) return s;
+  } catch (e) { console.log('  [Statement] structured draft failed: ' + e.message); }
+
+  const { firstName, lastName } = cfg.APPLICANT;
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || 'The applicant';
+  // The person specification usually sits near the END of an NHS advert, so give the
+  // model more of the advert than a normal cover letter gets.
+  const jd = String(jobDescription || '');
+  const specAt = jd.search(/person specification|essential criteria|essential\s*[:\n]/i);
+  const jdExcerpt = specAt > 1500 ? (jd.slice(0, 1500) + '\n...\n' + jd.slice(specAt, specAt + 4500)) : jd.slice(0, 6000);
+  const cvExcerpt = String(cvText || '').slice(0, 4000);
+
+  const prompt = `Write the "Supporting information" section of an NHS job application on Trac.
+
+CANDIDATE: ${fullName}
+ROLE: ${jobTitle}
+EMPLOYER: ${employer || 'the Trust'}
+
+JOB ADVERT (includes the person specification):
+${jdExcerpt}
+
+CANDIDATE CV:
+${cvExcerpt}
+
+─────────────────────────────────────────────
+HOW NHS SHORTLISTING WORKS: the panel ticks each person specification criterion (essential first, then desirable) against what the candidate wrote. Anything not clearly evidenced scores zero.
+
+SILENT PRE-WORK (do not output): list the essential and desirable criteria from the person specification. For each, find the specific CV experience that proves it. Skip criteria the CV cannot support rather than inventing anything.
+
+OUTPUT:
+- Open with 2 sentences: why this role at this employer, and the candidate's most relevant strength.
+- Then work through the criteria IN THE ORDER the person specification lists them, essential first. Give each one a short paragraph that names the requirement in plain words and proves it with a concrete example from the CV (what the candidate did, the scale, the result).
+- Include one sentence linking the candidate's way of working to the NHS values (working together for patients, respect and dignity, commitment to quality of care, compassion, improving lives, everyone counts), grounded in something real from the CV.
+- Close with 1 sentence on availability and enthusiasm for the role.
+
+HARD RULES:
+- 350 to 550 words, plain paragraphs, no headings, no bullet points, no sign-off
+- Never use em dashes (—) or en dashes (–); use commas or full stops, and "to" for ranges
+- Do NOT invent qualifications, registrations or experience that are not in the CV
+- BANNED words: "passionate", "team player", "results-driven", "hard-working", "leveraging", "spearheading", "seamlessly", "dynamic", "self-motivated"
+- Write in the first person, British English
+- Return ONLY the statement text`;
+
+  try {
+    const text = await llmChat(prompt);
+    const clean = sanitizeDashes((text || '').trim());
+    return clean || null;
+  } catch {
+    return null;
+  }
+}
+
 // Safety net for the prompt's no-dash rule: strip any em/en dashes the model
 // still emits. A dash between digits becomes "to" (a range); anywhere else it
 // becomes a comma, then we tidy the spacing/doubles it leaves behind.
@@ -91,4 +152,4 @@ function sanitizeDashes(text) {
     .trim();
 }
 
-module.exports = { generateCoverLetter };
+module.exports = { generateCoverLetter, generateSupportingStatement };

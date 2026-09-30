@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('api', {
     get: () => ipcRenderer.invoke('profile:get'),
     save: (fields) => ipcRenderer.invoke('profile:save', fields),
   },
+  tracImport: {
+    pick: () => ipcRenderer.invoke('tracImport:pick'),
+  },
   searchPrefs: {
     get: () => ipcRenderer.invoke('searchPrefs:get'),
     save: (fields) => ipcRenderer.invoke('searchPrefs:save', fields),
@@ -54,6 +57,7 @@ contextBridge.exposeInMainWorld('api', {
     ucPendingList: () => ipcRenderer.invoke('queue:ucPendingList'),
     ucMarkLogged: (jobIds) => ipcRenderer.invoke('uc:markLogged', jobIds),
     recent: (limit) => ipcRenderer.invoke('queue:recent', limit),
+    tracApps: () => ipcRenderer.invoke('queue:tracApps'),
     dailyApplications: (days) => ipcRenderer.invoke('queue:dailyApplications', days),
     reviewList: (limit) => ipcRenderer.invoke('queue:reviewList', limit),
     reviewCount: () => ipcRenderer.invoke('queue:reviewCount'),

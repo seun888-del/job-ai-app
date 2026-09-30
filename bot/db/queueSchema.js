@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS queue (
   url TEXT,
   source TEXT,
   description TEXT,
-  status TEXT CHECK(status IN ('pending','processing','cv_ready','awaiting_review','applying','applied','apply_failed','skipped','failed')) DEFAULT 'pending',
+  status TEXT CHECK(status IN ('pending','processing','cv_ready','awaiting_review','applying','applied','apply_failed','skipped','failed','ready_to_submit')) DEFAULT 'pending',
   reason TEXT,
   work_type TEXT,
   cv_name TEXT,

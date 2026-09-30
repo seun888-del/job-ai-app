@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "Job-AI: Auto-apply for jobs",
+  "short_name": "Job-AI",
+  "version": "0.2.0",
+  "description": "Finds jobs that match your CV, writes tailored applications and fills in the forms for you. Your data stays on your device.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Open Job-AI",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://api.tryjobai.com/*",
+    "https://www.healthjobsuk.com/*",
+    "https://apps.trac.jobs/*",
+    "https://www.trac.jobs/*",
+    "https://www.reed.co.uk/*",
+    "https://secure.reed.co.uk/*",
+    "https://www.linkedin.com/*",
+    "https://*.greenhouse.io/*",
+    "https://jobs.lever.co/*",
+    "https://api.lever.co/*",
+    "https://*.recruitee.com/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.workable.com/*",
+    "https://*.breezy.hr/*",
+    "https://*.teamtailor.com/*",
+    "https://*.pinpointhq.com/*",
+    "https://*.bamboohr.com/*",
+    "https://*.jobvite.com/*",
+    "https://*.applytojob.com/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "minimum_chrome_version": "116"
+}

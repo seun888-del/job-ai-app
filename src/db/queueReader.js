@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
+const { readDbFile, writeDbFile } = require('../../bot/db/safeFile');
 
 let dbPath;
 
@@ -15,7 +16,7 @@ function init(userDataPath) {
 async function withQueueDb(fn, fallback) {
   if (!dbPath || !fs.existsSync(dbPath)) return fallback;
   const SQL = await initSqlJs();
-  const buffer = fs.readFileSync(dbPath);
+  const buffer = readDbFile(dbPath);
   const db = new SQL.Database(buffer);
   try {
     return fn(db);
@@ -68,13 +69,13 @@ function getUcPendingList(limit = 200) {
 async function markUcLoggedManual(jobIds) {
   if (!dbPath || !fs.existsSync(dbPath) || !Array.isArray(jobIds) || jobIds.length === 0) return 0;
   const SQL = await initSqlJs();
-  const db = new SQL.Database(fs.readFileSync(dbPath));
+  const db = new SQL.Database(readDbFile(dbPath));
   try {
     try { db.run("ALTER TABLE applied_jobs ADD COLUMN uc_logged_at TEXT"); } catch (_) {}
     for (const id of jobIds) {
       db.run("UPDATE applied_jobs SET uc_logged_at = datetime('now') WHERE job_id = ? AND uc_logged_at IS NULL", [id]);
     }
-    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    writeDbFile(dbPath, Buffer.from(db.export()));
     return jobIds.length;
   } finally {
     db.close();
@@ -88,12 +89,12 @@ async function markUcLoggedManual(jobIds) {
 async function clearRecentActivity() {
   if (!dbPath || !fs.existsSync(dbPath)) return 0;
   const SQL = await initSqlJs();
-  const db = new SQL.Database(fs.readFileSync(dbPath));
+  const db = new SQL.Database(readDbFile(dbPath));
   try {
     const res = db.exec("SELECT COUNT(*) AS c FROM queue WHERE status IN ('applied','apply_failed','skipped')");
     const n = res.length ? (res[0].values[0][0] || 0) : 0;
     db.run("DELETE FROM queue WHERE status IN ('applied','apply_failed','skipped')");
-    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    writeDbFile(dbPath, Buffer.from(db.export()));
     return n;
   } finally {
     db.close();
@@ -135,7 +136,7 @@ function getReviewCount() {
 async function resolveReview(jobIds, approve) {
   if (!dbPath || !fs.existsSync(dbPath) || !Array.isArray(jobIds) || jobIds.length === 0) return 0;
   const SQL = await initSqlJs();
-  const db = new SQL.Database(fs.readFileSync(dbPath));
+  const db = new SQL.Database(readDbFile(dbPath));
   try {
     let n = 0;
     for (const id of jobIds) {
@@ -146,7 +147,7 @@ async function resolveReview(jobIds, approve) {
       }
       n++;
     }
-    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    writeDbFile(dbPath, Buffer.from(db.export()));
     return n;
   } finally {
     db.close();
@@ -161,7 +162,7 @@ async function resolveReview(jobIds, approve) {
 async function requeueForReview(jobIds) {
   if (!dbPath || !fs.existsSync(dbPath) || !Array.isArray(jobIds) || jobIds.length === 0) return 0;
   const SQL = await initSqlJs();
-  const db = new SQL.Database(fs.readFileSync(dbPath));
+  const db = new SQL.Database(readDbFile(dbPath));
   try {
     let n = 0;
     for (const id of jobIds) {
@@ -170,7 +171,7 @@ async function requeueForReview(jobIds) {
               WHERE job_id = ? AND status = 'awaiting_review'`, [id]);
       n++;
     }
-    fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    writeDbFile(dbPath, Buffer.from(db.export()));
     return n;
   } finally {
     db.close();
@@ -189,6 +190,15 @@ function getQueueSummary() {
       // doesn't get consumed the way the momentary cv_ready status does.
       const tailored = all(db, "SELECT COUNT(*) AS count FROM queue WHERE cv_path IS NOT NULL AND cv_path != ''");
       rows.push({ status: 'tailored', count: tailored[0]?.count || 0 });
+      // Applied, split by agent (LinkedIn 12 · Reed 8 · NHS 3) for the Applied card.
+      for (const r of all(db, "SELECT source, COUNT(*) AS count FROM queue WHERE status = 'applied' GROUP BY source")) {
+        rows.push({ status: 'applied_by:' + (r.source || 'other'), count: r.count });
+      }
+      // Skips the USER must act on (reconnect an account, sign in, a CV that could not be
+      // attached). Routine skips (filters, closed vacancies) are not counted here.
+      const attention = all(db, `SELECT COUNT(*) AS count FROM queue WHERE status = 'skipped' AND (
+        reason LIKE '%not attached%' OR reason LIKE '%reconnect%' OR reason LIKE '%session%' OR reason LIKE '%login needed%' OR reason LIKE '%sign in%' OR reason LIKE '%Needs you:%')`);
+      rows.push({ status: 'attention_skips', count: attention[0]?.count || 0 });
       return rows;
     } catch (_) { return []; }
   }, []);
@@ -205,9 +215,10 @@ function getRecentApplications(limit = 50) {
     try {
       return all(db, `
         SELECT * FROM queue
-        WHERE status IN ('applied','apply_failed')
+        WHERE status IN ('applied','apply_failed','ready_to_submit')
            OR (status = 'skipped' AND (
                  reason LIKE '%not attached%'
+                 OR reason LIKE '%Needs you:%'
                  OR reason LIKE '%reconnect%'
                  OR reason LIKE '%session%'
            ))
@@ -321,4 +332,18 @@ function getAnalytics() {
   }, null);
 }
 
-module.exports = { init, getQueueSummary, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };
+// NHS/Trac applications the user may want to open: ready to submit, or saved as a draft that
+// needs them. Each carries its Trac link (draft_url) when the agent has recorded it.
+function getTracApplications() {
+  return withQueueDb(db => {
+    try {
+      const cols = all(db, 'PRAGMA table_info(queue)').map(c => c.name);
+      const du = cols.includes('draft_url') ? 'draft_url' : "'' AS draft_url";
+      return all(db, `SELECT job_id, title, company, url, status, reason, cover_letter, ${du}, updated_at FROM queue
+        WHERE source = 'trac' AND (status = 'ready_to_submit' OR (status = 'skipped' AND reason LIKE 'Draft saved on Trac%'))
+        ORDER BY (status = 'ready_to_submit') ASC, updated_at DESC LIMIT 100`);
+    } catch (_) { return []; }
+  });
+}
+
+module.exports = { init, getQueueSummary, getTracApplications, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };

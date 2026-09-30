@@ -1,0 +1,52 @@
+/* Extension-only additions. Everything else comes from the desktop app's stylesheet (app.css),
+   so the extension looks exactly like the app. */
+.tn-chip#tn-status { display: inline-flex; }
+.ext-log { font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; max-height: 68vh; overflow: auto; margin: 0; }
+.ext-checklist { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ext-checklist li { display: flex; align-items: center; gap: 10px; }
+.ext-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-strong); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex: none; }
+.ext-dot.ok { background: var(--check-green); border-color: var(--check-green); color: #fff; }
+.ext-inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ext-inline input[type=text], .ext-inline input:not([type]) { max-width: 420px; }
+.setup-label.active { color: var(--logo-blue); }
+#nav-setup .setup-item.active { color: var(--logo-blue); font-weight: 700; }
+/* Tick-box chips inside a .field: undo the full-width text-input styling so the box sits beside its label. */
+.field .sector-chip { display: inline-flex; align-items: center; gap: 7px; margin: 0; min-height: 0; }
+.field .sector-chip input { width: 15px; height: 15px; min-height: 0; padding: 0; margin: 0; border: 0; box-shadow: none; flex: none; align-self: center; }
+.field .tracd-sectors { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ── Adapts to the window size (a browser tab can be any width) ─────────────── */
+body { min-width: 0; }
+main { min-width: 0; }
+.dash-col-main .bot-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bot-card-actions { flex-wrap: wrap; }
+.summary-card { flex: 1 1 150px; min-width: 0; }
+.nhs-app-title, .nhs-app-meta { overflow-wrap: anywhere; }
+
+@media (max-width: 900px) {
+  main { padding: 24px 20px; }
+  .topnav { padding: 0 14px; gap: 14px; }
+  .topnav-tabs li { padding: 0 10px; }
+  .tn-chip#tn-status { display: none; }
+  .dash-head { flex-direction: column; align-items: stretch; }
+  .dash-cta { justify-content: flex-start; flex-wrap: wrap; }
+}
+
+@media (max-width: 640px) {
+  main { padding: 18px 12px; }
+  .topnav { height: auto; flex-wrap: wrap; row-gap: 0; padding: 8px 12px 0; }
+  .topnav-tabs { order: 3; width: 100%; height: 42px; overflow-x: auto; }
+  .topnav-right { gap: 10px; }
+  .tn-name { font-size: 17px; }
+  .dash-col-main .bot-controls { grid-template-columns: 1fr; }
+  .summary-card { flex-basis: calc(50% - 8px); padding: 14px 16px; }
+  .tracd-grid { grid-template-columns: 1fr; }
+  .nhs-app { grid-template-columns: 1fr; }
+  .nhs-app-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .welcome-features { grid-template-columns: 1fr; }
+  .welcome-modal { width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow-y: auto; padding: 22px; box-sizing: border-box; }
+  .tour-panel { left: 12px; right: 12px; bottom: 12px; width: auto; }
+  #asst-panel { right: 8px; left: 8px; width: auto; max-width: none; bottom: 8px; height: calc(100vh - 16px); max-height: none; }
+  #asst-fab span { display: none; }
+  .setup-pop { right: -8px; }
+}

@@ -216,6 +216,11 @@ async function phase1_sourceAndQueue(page) {
   }
   // Cap the per-run candidate set: Phase 1 loads a page per non-Greenhouse job
   // for its JD, and the daily apply cap is 25, so ~50 candidates is plenty.
+  // Keep only titles that fit the user's search terms (the feed matches loosely).
+  const matchers = require('./modules/title_match').compile(cfg.JOB_SEARCHES);
+  const fed = jobs.length;
+  jobs = jobs.filter((j) => require('./modules/title_match').titleMatches(j.title, matchers));
+  if (fed !== jobs.length) console.log(`  [Auto-Apply] Title filter: ${jobs.length} of ${fed} feed job(s) match your search terms`);
   jobs = jobs.slice(0, 50);
   if (!jobs.length) {
     console.log('  [Auto-Apply] No auto-appliable jobs in the feed right now (feed off, no licence, or none matched your terms).');

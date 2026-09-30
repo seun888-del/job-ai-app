@@ -13,6 +13,7 @@ const path = require('path');
 const crypto = require('crypto');
 const initSqlJs = require('sql.js');
 const schema = require('../db/queueSchema');
+const { readDbFile, writeDbFile } = require('../db/safeFile');
 
 let SQL;
 let dbPath;
@@ -75,7 +76,7 @@ async function init(userDataPath) {
   SQL = await initSqlJs();
   dbPath = path.join(userDataPath, 'queue.db');
 
-  const buffer = fs.existsSync(dbPath) ? fs.readFileSync(dbPath) : undefined;
+  const buffer = readDbFile(dbPath);
   const db = new SQL.Database(buffer);
   db.run(schema); // idempotent — creates tables if missing
   // Key/value store for cross-process bot state (e.g. the reconnect circuit-breaker).
@@ -88,6 +89,8 @@ async function init(userDataPath) {
   colStmt.free();
   if (!cols.includes('cover_letter')) db.run('ALTER TABLE queue ADD COLUMN cover_letter TEXT');
   if (!cols.includes('retry_count'))  db.run('ALTER TABLE queue ADD COLUMN retry_count INTEGER DEFAULT 0');
+  // NHS/Trac: the application's own Trac link, so the user can open a draft from the app.
+  if (!cols.includes('draft_url'))    db.run('ALTER TABLE queue ADD COLUMN draft_url TEXT');
 
   // Track which applied jobs have been logged to the user's Universal Credit
   // work-search journal, so the UC agent never double-logs one.
@@ -98,24 +101,25 @@ async function init(userDataPath) {
   if (!ajCols.includes('uc_logged_at')) db.run('ALTER TABLE applied_jobs ADD COLUMN uc_logged_at TEXT');
 
   // Migration: widen the status CHECK constraint to allow 'awaiting_review'
-  // (review-before-apply feature). SQLite can't ALTER a CHECK constraint, so
-  // rebuild the table when an existing queue.db predates it. Runs after the
-  // column migrations above, so cover_letter/retry_count already exist to copy.
+  // (review-before-apply) and 'ready_to_submit' (NHS/Trac draft filled in dry run).
+  // SQLite can't ALTER a CHECK constraint, so rebuild the table when an existing
+  // queue.db predates either. Runs after the column migrations above, so
+  // cover_letter/retry_count already exist to copy.
   const qDdlStmt = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='queue'");
   const qDdl = qDdlStmt.step() ? (qDdlStmt.getAsObject().sql || '') : '';
   qDdlStmt.free();
-  if (qDdl && !qDdl.includes('awaiting_review')) {
+  if (qDdl && (!qDdl.includes('awaiting_review') || !qDdl.includes('ready_to_submit'))) {
     db.run('ALTER TABLE queue RENAME TO queue_old');
     db.run(`CREATE TABLE queue (
       job_id TEXT PRIMARY KEY, title TEXT, company TEXT, url TEXT, source TEXT, description TEXT,
-      status TEXT CHECK(status IN ('pending','processing','cv_ready','awaiting_review','applying','applied','apply_failed','skipped','failed')) DEFAULT 'pending',
+      status TEXT CHECK(status IN ('pending','processing','cv_ready','awaiting_review','applying','applied','apply_failed','skipped','failed','ready_to_submit')) DEFAULT 'pending',
       reason TEXT, work_type TEXT, cv_name TEXT, cv_score INTEGER, cv_path TEXT, cover_letter TEXT,
       error TEXT, retry_count INTEGER DEFAULT 0, added_at TEXT DEFAULT (datetime('now')), updated_at TEXT
     )`);
     db.run(`INSERT INTO queue (job_id,title,company,url,source,description,status,reason,work_type,cv_name,cv_score,cv_path,cover_letter,error,retry_count,added_at,updated_at)
             SELECT job_id,title,company,url,source,description,status,reason,work_type,cv_name,cv_score,cv_path,cover_letter,error,COALESCE(retry_count,0),added_at,updated_at FROM queue_old`);
     db.run('DROP TABLE queue_old');
-    console.log('  [Queue] Migrated queue table: status now allows awaiting_review');
+    console.log('  [Queue] Migrated queue table: status now allows awaiting_review and ready_to_submit');
   }
 
   // ── Auto-reconcile the queue when the user changes their inputs ─────────────
@@ -142,9 +146,12 @@ async function init(userDataPath) {
     const prevCvs   = getMetaVal('cvs_fp');
 
     if (termsFp !== null && prevTerms && prevTerms !== termsFp) {
-      const c = db.prepare("SELECT COUNT(*) AS n FROM queue WHERE status != 'applied'");
+      // Keep finished work: applied jobs, NHS drafts that are Ready to submit, and NHS drafts
+      // waiting on the user. Those already exist on Trac; deleting them lost the record.
+      const KEEP = "status = 'applied' OR status = 'ready_to_submit' OR reason LIKE 'Draft saved on Trac%'";
+      const c = db.prepare(`SELECT COUNT(*) AS n FROM queue WHERE NOT (${KEEP})`);
       const n = c.step() ? c.getAsObject().n : 0; c.free();
-      db.run("DELETE FROM queue WHERE status != 'applied'");
+      db.run(`DELETE FROM queue WHERE NOT (${KEEP})`);
       console.log(`  [Queue] Search terms changed — cleared ${n} stale un-applied job(s) from the previous terms`);
     } else if (cvsFp !== null && prevCvs && prevCvs !== cvsFp) {
       const c = db.prepare("SELECT COUNT(*) AS n FROM queue WHERE status IN ('cv_ready','apply_failed')");
@@ -159,18 +166,18 @@ async function init(userDataPath) {
     console.warn('  [Queue] input reconcile skipped:', e.message);
   }
 
-  fs.writeFileSync(dbPath, Buffer.from(db.export()));
+  writeDbFile(dbPath, Buffer.from(db.export()));
   db.close();
 }
 
 function withDb(fn) {
-  const buffer = fs.readFileSync(dbPath);
+  const buffer = readDbFile(dbPath);
   const db = new SQL.Database(buffer);
   let mutated = false;
   try {
     return fn(db, () => { mutated = true; });
   } finally {
-    if (mutated) fs.writeFileSync(dbPath, Buffer.from(db.export()));
+    if (mutated) writeDbFile(dbPath, Buffer.from(db.export()));
     db.close();
   }
 }
@@ -192,6 +199,7 @@ function rowToJob(row) {
     coverLetter: row.cover_letter,
     error: row.error,
     retryCount: row.retry_count || 0,
+    draftUrl: row.draft_url || '',
     addedAt: row.added_at,
     updatedAt: row.updated_at,
   };
@@ -243,6 +251,7 @@ const FIELD_MAP = {
   workType: 'work_type', cvName: 'cv_name', cvScore: 'cv_score',
   cvPath: 'cv_path', coverLetter: 'cover_letter', error: 'error',
   retryCount: 'retry_count',
+  draftUrl: 'draft_url',
 };
 
 // Update fields on a job entry

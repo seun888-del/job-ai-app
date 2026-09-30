@@ -54,6 +54,8 @@ const cfg = {
   // ── Populated by init() from profile.db ──
   APPLICANT: {},
   JOB_SEARCHES: [],
+  TRAC_SECTORS: [],
+  TRAC_DETAILS: {},
   CVS: [],
   TITLE_BLOCKLIST: [],
   COMPANY_BLOCKLIST: [],
@@ -125,6 +127,12 @@ const cfg = {
       const blacklist = all('SELECT company FROM company_blacklist WHERE is_active = 1');
 
       cfg.JOB_SEARCHES = terms.map(t => t.term);
+      // NHS/Trac: the whole details blob the user fills once (title, NI, DOB, right-to-work
+      // status, criminal-record answer, employment history, references, education, sectors).
+      // The Trac agent fills ALL of this into every NHS application — the user never re-enters.
+      try { cfg.TRAC_DETAILS = profile.trac_details ? JSON.parse(profile.trac_details) : {}; }
+      catch (_) { cfg.TRAC_DETAILS = {}; }
+      cfg.TRAC_SECTORS = Array.isArray(cfg.TRAC_DETAILS.sectors) ? cfg.TRAC_DETAILS.sectors : [];
       cfg.TITLE_BLOCKLIST = excludes.map(e => e.keyword.toLowerCase());
       cfg.COMPANY_BLOCKLIST = blacklist.map(b => b.company.toLowerCase());
 

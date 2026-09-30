@@ -25,7 +25,7 @@ const { tailorCV, weaveKeywords }     = require('./modules/cv_tailor');
 const { lightTailorDocx }             = require('./modules/cv_light_tailor');
 const { parseCV }                     = require('./modules/cv_parser');
 const { tailorStructured }            = require('./modules/cv_tailor_structured');
-const { generateCoverLetter }         = require('./modules/cover_letter');
+const { generateCoverLetter, generateSupportingStatement } = require('./modules/cover_letter');
 const { isRelevantRole }              = require('./modules/relevance_gate');
 const { llmAvailable, mode: llmMode } = require('../src/services/llm');
 
@@ -188,11 +188,14 @@ async function processJob(job) {
   // IT-support CV). Ask the licensed LLM whether the job is in the SAME field as
   // the candidate's OWN search terms — domain-agnostic, fail-open — and hard-skip
   // if not, BEFORE we spend AI tokens tailoring a CV we'd never want submitted.
-  try {
+  // NHS jobs skip this: the essential-criteria evidence check below is the real (and more
+  // accurate) filter, and this gate judged admin jobs against an IT profile.
+  if (job.source !== 'trac') try {
     const rel = await isRelevantRole({
       jobTitle: job.title.split('\n')[0].trim(),
       jdText: job.description,
-      targetRoles: cfg.JOB_SEARCHES,
+      // NHS jobs are found with the NHS search terms, so judge them against those too.
+      targetRoles: job.source === 'trac' ? [...new Set([...((cfg.TRAC_DETAILS && cfg.TRAC_DETAILS.searchTerms) || []), ...(cfg.JOB_SEARCHES || [])])] : cfg.JOB_SEARCHES,
     });
     if (!rel.relevant) {
       console.log(`  [Scorer Agent] Off-target role (${rel.reason}) — skipping before tailoring`);
@@ -206,7 +209,11 @@ async function processJob(job) {
   const bestCV   = cvSelector.selectBestCV(job.description, cfg.CVS);
   const jobTitle = job.title.split('\n')[0].trim();
 
-  let { score, cvText: boostedText, rawCvText, missingKeywords } = await scoreWithBoost(bestCV, job.description);
+  // NHS jobs are judged on essential-criteria evidence (below), so skip the keyword score's AI
+  // call: the AI account has a per-minute limit shared by every user.
+  let { score, cvText: boostedText, rawCvText, missingKeywords } = job.source === 'trac'
+    ? await (async () => { const t = cleanText(await cvSelector.extractCVText(bestCV.path)); return { score: 0, cvText: t, rawCvText: t, missingKeywords: [] }; })()
+    : await scoreWithBoost(bestCV, job.description);
   let bestScore        = score;
   let bestCvText       = boostedText;
   let bestRawCvText    = rawCvText;
@@ -214,7 +221,7 @@ async function processJob(job) {
   let bestCvName       = bestCV.name;
 
   // If the primary CV didn't reach target, try the others in keyword-score order
-  if (score < BOOST_TARGET) {
+  if (score < BOOST_TARGET && job.source !== 'trac') {
     const others = cfg.CVS
       .filter(c => c.id !== bestCV.id)
       .map(c => ({ cv: c, kwScore: cvSelector.scoreCV(c, job.description) }))
@@ -235,6 +242,53 @@ async function processJob(job) {
 
       if (result.score >= BOOST_TARGET) break;
     }
+  }
+
+  // NHS / Trac: the application is a full online form, so no CV is ever uploaded and a
+  // tailored CV PDF would be wasted work. What the Trac agent needs is the match score
+  // (already computed above) and a supporting statement written against the person
+  // specification. Write it BEFORE marking the job ready, so the agent never starts the
+  // form without it (the normal path writes the cover letter in the background).
+  // NHS adverts are scored by the panel against the PERSON SPECIFICATION, and keyword
+  // matching on them is unreliable (the same advert scored 100% then 19%). So for Trac the
+  // gate is: can the candidate evidence at least half of the essential criteria? The
+  // evidence map that answers that is the same one the supporting statement is built from.
+  if (job.source === 'trac') {
+    let det = null;
+    try { det = await require('./modules/nhs_statement').generateNhsStatementDetailed(jobTitle, job.company, job.description, bestRawCvText || bestCvText, { minCoverage: 0.5 }); }
+    catch (err) { console.warn(`  [Scorer Agent] Supporting statement failed: ${err.message}`); }
+    // Couldn't read the person spec / evidence this time (AI hiccup): retry the job later
+    // instead of falling back to the keyword score, which wrongly skips good NHS jobs.
+    if ((!det || !det.essTotal) && (job.retryCount || 0) < 2) {
+      queue.update(job.jobId, { status: 'pending', retryCount: (job.retryCount || 0) + 1 });
+      console.log(`  [Scorer Agent] Could not read the person specification, will retry: ${job.title}`);
+      return;
+    }
+    if (det && det.essTotal) {
+      const pct = Math.round((det.essOk / det.essTotal) * 100);
+      if (det.essOk / det.essTotal < 0.5) {
+        queue.update(job.jobId, { status: 'skipped', cvScore: pct, reason: `Meets ${det.essOk} of ${det.essTotal} essential criteria (missing: ${det.missing.slice(0, 3).join('; ').slice(0, 160)})` });
+        console.log(`  [Scorer Agent] ✗ NHS job skipped, evidences ${det.essOk}/${det.essTotal} essential criteria: ${job.title}`);
+        return;
+      }
+      bestScore = Math.max(bestScore, pct);
+      job._nhsStatement = det.text;
+    }
+  }
+  if (job.source === 'trac' && (job._nhsStatement || bestScore >= cfg.MIN_SCORE)) {
+    let statement = job._nhsStatement || null;
+    if (!statement) {
+      try { statement = await generateSupportingStatement(jobTitle, job.company, job.description, bestRawCvText || bestCvText); }
+      catch (err) { console.warn(`  [Scorer Agent] Supporting statement failed: ${err.message}`); }
+    }
+    queue.update(job.jobId, {
+      status:  REVIEW_MODE ? 'awaiting_review' : 'cv_ready',
+      cvScore: bestScore,
+      cvName:  bestCvName,
+      ...(statement ? { coverLetter: statement } : {}),
+    });
+    console.log(`  [Scorer Agent] ✓ NHS job ${bestScore}% (${bestCvName}), supporting statement ${statement ? 'written' : 'not available, the agent will write answers per section'}${REVIEW_MODE ? ', held for your review' : ''}: ${job.title}`);
+    return;
   }
 
   if (bestScore >= cfg.MIN_SCORE) {
@@ -424,6 +478,15 @@ async function main() {
 
   // Run forever — no idle exit. Reed bot continuously finds new jobs.
   while (true) {
+    // The NHS agent is filling a Trac form and needs the AI for its questions. The AI account
+    // has a per-minute limit, so pause writing statements until it's done (max 15 min, in
+    // case the agent stopped without clearing the flag).
+    const tracSince = Number(queue.getMeta('trac_filling') || 0);
+    if (tracSince && Date.now() - tracSince < 15 * 60 * 1000) {
+      if (logTick++ % 6 === 0) console.log('  [Scorer Agent] Pausing while the NHS agent fills a form (shares the AI limit).');
+      await DELAY(POLL_INTERVAL);
+      continue;
+    }
     // Also recover jobs that got stuck in processing during this run (>30 min)
     const stuckNow = queue.getByStatus('processing').filter(j => {
       const age = Date.now() - new Date(j.updatedAt || j.addedAt).getTime();
@@ -461,6 +524,9 @@ async function main() {
     logTick = 0;
 
     for (const job of pending) {
+      // Re-check before EVERY job: the NHS agent may have started a form mid-batch.
+      const busy = Number(queue.getMeta('trac_filling') || 0);
+      if (busy && Date.now() - busy < 15 * 60 * 1000) break;
       try {
         await processJob(job);
       } catch (err) {

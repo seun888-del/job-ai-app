@@ -1,6 +1,6 @@
 {
   "name": "job-bot-app",
-  "version": "0.6.89",
+  "version": "0.6.90",
   "description": "Desktop app for automated job search and application",
   "main": "main.js",
   "private": true,
@@ -17,15 +17,20 @@
     "fingerprint-injector": "^2.1.82",
     "mammoth": "^1.12.0",
     "pdf-parse": "^1.1.4",
-    "pdfkit": "^0.15.0",
+    "pdfkit": "^0.20.2",
     "playwright": "^1.48.0",
     "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "sql.js": "^1.13.0"
   },
   "devDependencies": {
+    "acorn": "^8.18.0",
+    "acorn-walk": "^8.3.5",
     "electron": "^33.2.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.24.2",
+    "magic-string": "^0.30.21",
+    "pdfjs-dist": "^4.10.38"
   },
   "build": {
     "appId": "com.femimerit.jobbotapp",
@@ -43,7 +48,8 @@
       "**/*",
       "!dist",
       "!playwright-browsers",
-      "!_tmp_*"
+      "!_tmp_*",
+      "!extension"
     ],
     "win": {
       "target": [
