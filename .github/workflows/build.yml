@@ -66,7 +66,9 @@ jobs:
             dist/latest.yml
 
   build-mac:
-    runs-on: macos-latest
+    # Pinned: the macos-latest image from 2026-09-07 breaks electron-builder's temporary
+    # signing keychain ("SecKeychainUnlock: passphrase not correct").
+    runs-on: macos-15
     # Cap the Mac job so signing/notarization can never hang indefinitely. If it
     # exceeds this it fails, and the decoupled release still ships Windows.
     # Budget: ~6 min signed build + concurrent notarization (up to 25 min/DMG wait).
