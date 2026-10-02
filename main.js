@@ -764,6 +764,10 @@ function syncLicenseEnv() {
 // Only changes local state when the backend actually confirms: a network error or
 // a 5xx leaves things untouched (never locks a valid user out on a blip). Emits
 // 'license:updated' on a real status change so the UI (Start button) refreshes.
+// Set by the backend when the last renewal charge failed (Stripe is retrying). Kept in
+// memory only: every licence refresh re-reads it, so it clears itself once paid.
+let paymentIssue = { issue: false, url: null };
+
 async function refreshLicense(reason = '') {
   try {
     const lic = db.getLicense();
@@ -785,6 +789,11 @@ async function refreshLicense(reason = '') {
       // Local table only allows trial/active/expired; fold anything else (revoked) → expired.
       next = ['trial', 'active', 'expired'].includes(data.status) ? data.status : 'expired';
       db.saveLicense({ license_key: data.license_key, email: data.email, status: next, expires_at: data.expires_at });
+      const issue = !!data.payment_issue;
+      if (issue !== paymentIssue.issue) {
+        paymentIssue = { issue, url: data.payment_update_url || null };
+        mainWindow?.webContents.send('license:updated', db.getLicense());
+      }
     } else if (res.status === 401 || res.status === 403) {
       next = 'expired'; // revoked / inactive per the backend
       db.saveLicense({ license_key: lic.license_key, email: lic.email, status: 'expired', expires_at: lic.expires_at });
@@ -801,6 +810,7 @@ async function refreshLicense(reason = '') {
 }
 
 ipcMain.handle('license:get', () => db.getLicense());
+ipcMain.handle('license:paymentIssue', () => paymentIssue);
 ipcMain.handle('license:save', (event, fields) => { const r = db.saveLicense(fields); syncLicenseEnv(); return r; });
 
 // Opens the Stripe billing portal (manage payment / cancel) in the browser.

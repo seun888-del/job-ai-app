@@ -106,6 +106,7 @@ contextBridge.exposeInMainWorld('api', {
   installUpdate: () => ipcRenderer.invoke('update:install'),
   license: {
     get: () => ipcRenderer.invoke('license:get'),
+    paymentIssue: () => ipcRenderer.invoke('license:paymentIssue'),
     save: (fields) => ipcRenderer.invoke('license:save', fields),
     verify: (key) => ipcRenderer.invoke('license:verify', key),
     startTrial: (email) => ipcRenderer.invoke('license:startTrial', email),

@@ -2919,6 +2919,29 @@ async function refreshExpiryBanner() {
   const license = await window.api.license.get();
   if (!license?.license_key || !license.expires_at) return clear();
 
+  // Last renewal payment failed (Stripe is retrying): ask for a new card before it lapses.
+  const pay = await window.api.license.paymentIssue().catch(() => null);
+  if (pay && pay.issue && license.status === 'active') {
+    banner.style.display = '';
+    banner.className = 'expiry-banner warning';
+    banner.innerHTML = `
+      <span>Your last payment didn't go through. Update your card to keep your agents running.</span>
+      <button id="renew-btn">Update card</button>`;
+    document.getElementById('renew-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('renew-btn');
+      btn.disabled = true;
+      btn.textContent = 'Opening…';
+      try {
+        const r = await window.api.license.manageSubscription();
+        if (!r.ok && pay.url) window.api.shell.openExternal(pay.url);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Update card';
+      }
+    });
+    return;
+  }
+
   const daysLeft = Math.ceil((new Date(license.expires_at) - Date.now()) / (1000 * 60 * 60 * 24));
   // A comfortably-valid license needs no banner. This is what makes activation
   // instant: the moment a paid/renewed key is active with runway to spare, any
@@ -3286,6 +3309,7 @@ window.toggleFaq = function(i) {
 // without the user having to re-paste the key or restart.
 if (window.api?.license?.onUpdated) {
   window.api.license.onUpdated(() => {
+    refreshExpiryBanner();
     if (_currentView === 'dashboard' || _currentView === 'license') {
       try { navigate(_currentView); } catch (_) {}
     }
