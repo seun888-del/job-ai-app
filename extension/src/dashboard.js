@@ -70,8 +70,37 @@ const AGENTS = [
   ['ats', 'Company Sites Agent', '', ''],
 ];
 const anyRunning = () => Object.values(agents).some((a) => a.running);
+// ── Setup-step beacon ───────────────────────────────────────────────────────
+// Where new users stall before their first application (activated, CV added, job
+// site signed in, agents started, first application). Anonymous: this install's
+// random device id plus the step name, each step sent once. Same as the app.
+const SETUP_BACKEND = 'https://api.tryjobai.com';
+async function sendStep(step) {
+  try {
+    const sent = (await store.get('stepsSent')) || [];
+    if (sent.includes(step)) return;
+    const r = await fetch(`${SETUP_BACKEND}/v1/telemetry/step`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ install_id: await deviceId(), step, client: 'extension', version: chrome.runtime.getManifest().version }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (r.ok) await store.set('stepsSent', [...new Set([...((await store.get('stepsSent')) || []), step])]);
+  } catch (_) {}
+}
+globalThis.__jobaiStep = sendStep;
+async function checkSteps() {
+  try {
+    if (licenceActive(await store.get('license'))) sendStep('activated');
+    const cv = await store.get('cv');
+    if (cv && cv.text) sendStep('cv_added');
+    if ((await store.jobs()).some((j) => j.status === 'applied')) sendStep('first_applied');
+  } catch (_) {}
+}
+checkSteps();
+setInterval(checkSteps, 5 * 60 * 1000);
+
 // start() resolves when the agent has fully stopped; kept so an update can wait for it.
-function runAgent(key) { agents[key].loop = agents[key].start(); }
+function runAgent(key) { agents[key].loop = agents[key].start(); sendStep('agents_started'); }
 async function startAgent(key) {
   if (!(await recheckLicence())) { navigate('license'); return; }
   runAgent(key);
@@ -162,6 +191,7 @@ function pickCv(stSel, done) {
       const text = await extractText(f);
       if (text.replace(/\s/g, '').length < 200) throw new Error('No readable text found. Is it a scanned image?');
       await store.set('cv', { name: f.name, type: f.type, text, dataB64: toBase64(buf) });
+      checkSteps();
       let msg = 'Using: ' + f.name;
       try {
         const r = await fillFromCv(text);
@@ -490,6 +520,7 @@ VIEWS.license = async function renderLicense() {
       const r = await checkLicense(k);
       if (!r.ok) { setSt('#lic-st', r.http === 401 ? 'That key was not recognised.' : r.error === 'device_trial_used' ? 'This device has already used a free trial.' : /expired|inactive/.test(r.error) ? 'That licence has ended. Renew it to carry on.' : 'Could not check the key (' + r.http + ').', true); return; }
       await store.set('license', { key: k, status: r.licenseStatus || 'active', expiresAt: r.expires_at, checkedAt: Date.now() });
+      checkSteps();
       $('#lic').value = '';
       globalThis.__jobaiLicense = k;
       setSt('#lic-st', `✓ Active${r.expires_at ? ' until ' + new Date(r.expires_at).toLocaleDateString('en-GB') : ''}.`);

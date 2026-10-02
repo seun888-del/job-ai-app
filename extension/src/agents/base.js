@@ -37,6 +37,7 @@ export class SiteAgent {
         const roundEnd = Date.now() + ROUND_MS;
         const ok = await this.signIn().catch((e) => { this.log('Sign-in check failed: ' + e.message); return false; });
         if (!ok) { this.log(`Not signed in. Sign in to ${this.label} in Chrome, then it carries on.`); await this.wait(Date.now() + 2 * 60 * 1000); continue; }
+        if (globalThis.__jobaiStep) globalThis.__jobaiStep('site_connected');
         await this.search().catch((e) => this.log('Search error: ' + e.message));
         await this.scorePending();
         await this.applyReady();

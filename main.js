@@ -331,7 +331,7 @@ app.whenReady().then(async () => {
   setInterval(maybeSendDailySummary, 30 * 60 * 1000);
   // Re-check the licence every 15 min so a reinstated/renewed one recovers on its
   // own — the user never has to re-paste the key or restart.
-  setInterval(() => refreshLicense('periodic'), 15 * 60 * 1000);
+  setInterval(() => { refreshLicense('periodic'); checkSetupSteps(); }, 15 * 60 * 1000);
   maybeSendDailySummary(); // also run immediately on launch in case it's past 6 PM
 
   // Phone companion: push an activity snapshot to the backend on a timer so the
@@ -340,7 +340,7 @@ app.whenReady().then(async () => {
   try { require('./src/services/companionSync').start(); } catch (_) {}
 
   // Anonymous install beacon (once per install) — feeds the founder funnel stats
-  sendInstallBeacon();
+  sendInstallBeacon().then(checkSetupSteps);
 
   // Check for updates silently — download in background, install on next quit
   if (app.isPackaged) {
@@ -446,6 +446,47 @@ function getInstallIdFile() {
   return path.join(app.getPath('userData'), 'install_id.json');
 }
 
+// ── Setup-step beacon ───────────────────────────────────────────────────────
+// Where new users stall before their first application: activated, CV added, job
+// site connected, agents started, first application. Anonymous (the install id
+// above plus the step name), sent once per step, and off when the user turns
+// diagnostics off on the License page.
+function sendStep(step) {
+  try {
+    if (!errorReporter.diagnosticsEnabled()) return;
+    const file = getInstallIdFile();
+    let state = {};
+    try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+    if (!state.id || (state.steps || []).includes(step)) return;
+    fetch(`${JOBBOT_BACKEND_URL}/v1/telemetry/step`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ install_id: state.id, step, platform: process.platform, version: app.getVersion(), client: 'app' }),
+      signal: AbortSignal.timeout(10000),
+    }).then((res) => {
+      if (!res.ok) return; // retried on the next check
+      let cur = {};
+      try { cur = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+      cur.steps = [...new Set([...(cur.steps || []), step])];
+      fs.writeFileSync(file, JSON.stringify(cur), 'utf8');
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+// Read the steps from the app's state (launch, every 15 min, after key actions),
+// so nothing depends on catching a single click.
+async function checkSetupSteps() {
+  try {
+    const lic = db.getLicense();
+    if (lic && lic.license_key && ['trial', 'active'].includes(lic.status)) sendStep('activated');
+    if (db.getCVs().length) sendStep('cv_added');
+    const sites = connectedSitesStatus();
+    if (Object.values(sites).some(Boolean) || fs.existsSync(path.join(app.getPath('userData'), 'trac_profile'))) sendStep('site_connected');
+    const recent = await queueReader.getRecentApplications(200);
+    if ((recent || []).some((a) => a.status === 'applied')) sendStep('first_applied');
+  } catch (_) {}
+}
+
 async function sendInstallBeacon() {
   try {
     const file = getInstallIdFile();
@@ -533,6 +574,7 @@ ipcMain.handle('cvs:pickAndAdd', async (event, label) => {
   const file_path = result.filePaths[0];
   const { keywords, suggestedRoles, profile } = await cvAnalyzer.analyzeCV(file_path);
   const cv = db.addCV({ label, file_path, extracted_keywords: keywords, suggested_roles: suggestedRoles });
+  checkSetupSteps();
   return { ...cv, ...fillProfileFromCV(profile, suggestedRoles) };
 });
 
@@ -693,7 +735,11 @@ async function agentAccessAllowed() {
 }
 
 // ── Bot manager ──────────────────────────────────────────────────────────
-ipcMain.handle('bot:start', async (event, botName) => startBotGated(botName));
+ipcMain.handle('bot:start', async (event, botName) => {
+  const r = await startBotGated(botName); // throws if the licence gate refuses
+  sendStep('agents_started');
+  return r;
+});
 
 // Start an agent exactly as the "Start applying" button does (licence gate included).
 // Shared by the button and by JOBBOT_AUTOSTART (unattended runs).
@@ -888,6 +934,7 @@ ipcMain.handle('license:verify', async (event, key) => {
     expires_at: data.expires_at,
   });
   syncLicenseEnv(); // main-process AI now uses this license via the backend
+  checkSetupSteps();
 
   // On upgrade to a paid licence — only the trial→paid transition, never routine
   // rechecks — raise the daily application limit to the paid maximum so the user
@@ -1092,7 +1139,7 @@ function connectedSitesStatus() {
   }
   return status;
 }
-ipcMain.handle('site:connectedStatus', () => connectedSitesStatus());
+ipcMain.handle('site:connectedStatus', () => { checkSetupSteps(); return connectedSitesStatus(); });
 
 // In-app support assistant. Sends the user's question plus a PII-light snapshot
 // of their local agent state to the licensed backend, which answers using its

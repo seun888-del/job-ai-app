@@ -56,6 +56,7 @@ export class TracAgent {
         const signedIn = await ensureTracLogin(this.page, (m) => { this.log(m); if (/Waiting for you to complete login/i.test(m) && this.windowId) chrome.windows.update(this.windowId, { state: 'normal', focused: true }).catch(() => {}); });
         if (signedIn && this.windowId) chrome.windows.update(this.windowId, { state: 'minimized' }).catch(() => {});
         if (!signedIn) { this.log('Not signed in to Trac. Sign in in the Job-AI window, then it carries on.'); await this.wait(cycleEnd); continue; }
+        if (globalThis.__jobaiStep) globalThis.__jobaiStep('site_connected');
         await this.resumeDrafts().catch((e) => this.log('Drafts error: ' + e.message));
         if (!this.running) break;
         await this.applyReady().catch((e) => this.log('Apply error: ' + e.message));
