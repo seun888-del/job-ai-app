@@ -527,6 +527,17 @@ async function main() {
       // Re-check before EVERY job: the NHS agent may have started a form mid-batch.
       const busy = Number(queue.getMeta('trac_filling') || 0);
       if (busy && Date.now() - busy < 15 * 60 * 1000) break;
+      // Only tailor what can still be sent today (plus a couple spare for ones that fail).
+      // Each tailored CV costs AI calls; past the daily cap they'd just sit unused.
+      // Waiting jobs stay 'pending' and are tailored tomorrow.
+      const left = Math.max(0, cfg.MAX_APPLICATIONS_PER_DAY - queue.countAppliedToday());
+      if (queue.countReadyBacklog() >= left + TAILOR_SPARE) {
+        if (budgetLogged !== new Date().toDateString()) {
+          budgetLogged = new Date().toDateString();
+          console.log(`  [Scorer Agent] Enough CVs ready for today's limit (${cfg.MAX_APPLICATIONS_PER_DAY}/day). The rest are tailored tomorrow.`);
+        }
+        break;
+      }
       try {
         await processJob(job);
       } catch (err) {
@@ -537,6 +548,10 @@ async function main() {
     }
   }
 }
+
+// Spare tailored CVs beyond today's remaining cap, for applications that fail.
+const TAILOR_SPARE = 2;
+let budgetLogged = '';
 
 // Auto-restart on unexpected crash — wait 5 s then restart
 async function run() {

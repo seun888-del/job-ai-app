@@ -308,6 +308,18 @@ function printStatus() {
 }
 
 // Persistent record of job IDs ever applied — survives queue clears
+// Jobs already tailored and waiting to be sent (fresh ones only: anything untouched for
+// 2 days is likely closed or belongs to an agent that isn't running, so it must not
+// block new tailoring forever).
+function countReadyBacklog() {
+  return withDb((db) => {
+    const stmt = db.prepare("SELECT COUNT(*) AS c FROM queue WHERE status IN ('cv_ready','awaiting_review','applying') AND updated_at >= datetime('now','-2 day')");
+    const c = stmt.step() ? (stmt.getAsObject().c || 0) : 0;
+    stmt.free();
+    return c;
+  });
+}
+
 // A completed draft the user submits themselves still used the agent's work: count it.
 function markCapCounted(jobId) {
   withDb((db, markMutated) => {
@@ -583,4 +595,4 @@ function clearReconnect(source) {
   } catch (_) { /* non-fatal */ }
 }
 
-module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, markCapCounted, wasApplied, countAppliedToday, getUcPending, ucPendingCount, markUcLogged, hasCanonical, requeueFailed, wasAppliedToCompanyRecently, isQualityJD, getMeta, setMeta, markSessionChecking, markSessionHealthy, markSessionDead, sessionState, recordUploadFailure, recordUploadSuccess, reconnectNeeded, reconnectSources, tailoringPausedSources, clearReconnect };
+module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, markCapCounted, countReadyBacklog, wasApplied, countAppliedToday, getUcPending, ucPendingCount, markUcLogged, hasCanonical, requeueFailed, wasAppliedToCompanyRecently, isQualityJD, getMeta, setMeta, markSessionChecking, markSessionHealthy, markSessionDead, sessionState, recordUploadFailure, recordUploadSuccess, reconnectNeeded, reconnectSources, tailoringPausedSources, clearReconnect };

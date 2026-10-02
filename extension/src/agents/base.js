@@ -75,6 +75,9 @@ export class SiteAgent {
   async scorePending() {
     for (const job of await store.byStatus('pending', this.source)) {
       if (!this.running) return;
+      // Only tailor what can still be sent today (+2 spare). The rest wait until tomorrow.
+      const left = Math.max(0, cfg.MAX_APPLICATIONS_PER_DAY - (await store.appliedToday()));
+      if ((await store.readyBacklog()) >= left + 2) return;
       await scoreJob(job, (m) => this.log(m)).catch((e) => this.log('Scoring error: ' + e.message));
       this.onChange();
     }

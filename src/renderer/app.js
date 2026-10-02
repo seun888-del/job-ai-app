@@ -132,7 +132,7 @@ function showDailyLimitDialog(limit) {
     bodyHtml: `
       <p style="margin:0 0 10px">Your Agents have already applied to today's maximum of <strong>${limit.cap}</strong> application${limit.cap === 1 ? '' : 's'} (${limit.applied} today).</p>
       <p style="margin:0${limit.isPaid ? '' : ' 0 10px'}">They'll be ready to apply again tomorrow.</p>
-      ${limit.isPaid ? '' : `<p style="margin:0;color:var(--text-muted,#64748b);font-size:13px">Your free trial is capped at 10 applications a day. Paid plans apply up to 25 per day.</p>`}`,
+      ${limit.isPaid ? '' : `<p style="margin:0;color:var(--text-muted,#64748b);font-size:13px">Your free trial is capped at 5 applications a day. Paid plans apply up to 25 per day.</p>`}`,
     okText: limit.isPaid ? 'Got it' : 'Not now',
     extraText: limit.isPaid ? null : 'Subscribe',
     onExtra: limit.isPaid ? null : () => openSubscribe(),
@@ -768,9 +768,9 @@ async function renderSearch() {
 
   // Pre-fill profile-backed fields
   const profile = await window.api.profile.get();
-  // Plan-gated daily application cap: free trial = 10/day, paid ('active') = 25/day.
+  // Plan-gated daily application cap: free trial = 5/day, paid ('active') = 25/day.
   const license = await window.api.license.get().catch(() => null);
-  const planCap = (license && license.status === 'active') ? 25 : 10;
+  const planCap = (license && license.status === 'active') ? 25 : 5;
   const maxAppsSel = document.getElementById('max_apps');
   // Trial users see the higher options as locked "(Pro)".
   Array.from(maxAppsSel.options).forEach(o => {
@@ -787,7 +787,7 @@ async function renderSearch() {
   if (maxAppsHint) {
     maxAppsHint.textContent = planCap === 25
       ? 'Total across all agents. Capped at 25/day to protect your accounts and keep applications looking human.'
-      : 'Free trial: up to 10 applications/day. Upgrade to Pro for up to 25/day.';
+      : 'Free trial: up to 5 applications/day. Upgrade to Pro for up to 25/day.';
   }
   document.getElementById('min_score').value = profile.min_match_score ?? '';
   document.getElementById('seek_sponsorship').checked = !!profile.seek_sponsorship;

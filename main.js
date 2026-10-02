@@ -632,13 +632,13 @@ ipcMain.handle('queue:reviewResolve', (event, jobIds, approve) => queueReader.re
 ipcMain.handle('queue:reviewRegenerate', (event, jobIds) => queueReader.requeueForReview(jobIds));
 ipcMain.handle('queue:dailyApplications', (event, days) => queueReader.getDailyApplications(days || 14));
 // Daily application cap status for the "limit reached" prompt shown on Start.
-// Cap mirrors bot/config.js: paid → 25/day, trial → 10/day, further limited by
-// the user's own "max applications per day" preference. Keep 25/10 in sync.
+// Cap mirrors bot/config.js: paid → 25/day, trial → 5/day, further limited by
+// the user's own "max applications per day" preference. Keep 25/5 in sync.
 ipcMain.handle('bot:dailyLimit', async () => {
   const applied = await queueReader.getTodayAppliedCount();
   const lic = db.getLicense();
   const isPaid = !!(lic && lic.status === 'active');
-  const planCap = isPaid ? 25 : 10;
+  const planCap = isPaid ? 25 : 5;
   let chosen = 15;
   try { const p = db.getProfile(); if (p && Number.isFinite(p.max_applications_per_day)) chosen = p.max_applications_per_day; } catch (_) {}
   const cap = Math.min(chosen, planCap);

@@ -38,6 +38,12 @@ export async function updateJob(jobId, fields) {
   return j;
 }
 export async function byStatus(status, source) { return (await jobs()).filter((j) => j.status === status && (!source || j.source === source)); }
+// Tailored jobs waiting to be sent (fresh only, see the app's countReadyBacklog).
+export async function readyBacklog() {
+  const since = Date.now() - 2 * 864e5;
+  return (await jobs()).filter((j) => ['cv_ready', 'applying'].includes(j.status) && Date.parse(j.updatedAt || 0) >= since).length;
+}
+
 // Today's usage against the daily cap: applications sent plus finished Trac drafts the
 // user submits themselves (countedAt). Each job counts once.
 export async function appliedToday() {

@@ -66,7 +66,7 @@ const cfg = {
     cfg.CONTRACT_TYPE = profile.contractType || 'any';
     cfg.JOB_AGE = profile.jobAge || 'r1209600';
     cfg.SKIP_EXTERNAL_SITES = profile.skipExternalSites !== false;
-    cfg.PLAN_CAP = license.status === 'active' ? 25 : 10;
+    cfg.PLAN_CAP = license.status === 'active' ? 25 : 5;
     cfg.MAX_APPLICATIONS_PER_DAY = Math.min(Number(settings.dailyCap || 15), cfg.PLAN_CAP);
     cfg.MIN_SCORE = Number(profile.minScore ?? 70);
     const full = `${first} ${last}`.trim();

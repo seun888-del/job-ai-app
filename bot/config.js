@@ -17,10 +17,10 @@ if (!USER_DATA) {
 // Enforced here so a tampered DB or stale high value can never exceed the plan's
 // cap. Keep in sync with the UI dropdown in src/renderer/app.js.
 //   • Paid (license status 'active') → 25/day
-//   • Free trial (anything else)     → 10/day
+//   • Free trial (anything else)     → 5/day
 // This is a soft/local cap; the backend AI daily quota is the real backstop.
 const DAILY_APPLICATION_CAP = 25;
-const TRIAL_APPLICATION_CAP = 10;
+const TRIAL_APPLICATION_CAP = 5;
 
 // ── Static paths — available synchronously at require-time ──
 const OUTPUT_DIR = path.join(USER_DATA, 'output');
