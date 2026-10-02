@@ -81,6 +81,10 @@ async function init(userDataPath) {
   db.run(schema); // idempotent — creates tables if missing
   // Key/value store for cross-process bot state (e.g. the reconnect circuit-breaker).
   db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
+  // Work that counts toward the daily cap without being an application: a Trac draft
+  // completed for the user to submit. Kept apart from applied_jobs so the Universal
+  // Credit journal never logs a draft as an application.
+  db.run('CREATE TABLE IF NOT EXISTS cap_counted (job_id TEXT PRIMARY KEY, counted_at TEXT DEFAULT CURRENT_TIMESTAMP)');
 
   // Migrations: add columns if not present
   const colStmt = db.prepare('PRAGMA table_info(queue)');
@@ -304,6 +308,14 @@ function printStatus() {
 }
 
 // Persistent record of job IDs ever applied — survives queue clears
+// A completed draft the user submits themselves still used the agent's work: count it.
+function markCapCounted(jobId) {
+  withDb((db, markMutated) => {
+    db.run('INSERT OR IGNORE INTO cap_counted (job_id) VALUES (?)', [jobId]);
+    markMutated();
+  });
+}
+
 function markApplied(jobId) {
   withDb((db, markMutated) => {
     const stmt = db.prepare('SELECT title, company FROM queue WHERE job_id = ?');
@@ -330,9 +342,15 @@ function wasApplied(jobId) {
   });
 }
 
+// Today's usage against the daily cap: applications sent plus completed drafts
+// (cap_counted). UNION de-duplicates, so a draft submitted later the same day counts once.
+const TODAY_CAP_SQL = `SELECT COUNT(*) AS c FROM (
+  SELECT job_id FROM applied_jobs WHERE date(applied_at) = date('now')
+  UNION SELECT job_id FROM cap_counted WHERE date(counted_at) = date('now'))`;
+
 function countAppliedToday() {
   return withDb((db) => {
-    const stmt = db.prepare("SELECT COUNT(*) AS c FROM applied_jobs WHERE date(applied_at) = date('now')");
+    const stmt = db.prepare(TODAY_CAP_SQL);
     const c = stmt.step() ? (stmt.getAsObject().c || 0) : 0;
     stmt.free();
     return c;
@@ -565,4 +583,4 @@ function clearReconnect(source) {
   } catch (_) { /* non-fatal */ }
 }
 
-module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, wasApplied, countAppliedToday, getUcPending, ucPendingCount, markUcLogged, hasCanonical, requeueFailed, wasAppliedToCompanyRecently, isQualityJD, getMeta, setMeta, markSessionChecking, markSessionHealthy, markSessionDead, sessionState, recordUploadFailure, recordUploadSuccess, reconnectNeeded, reconnectSources, tailoringPausedSources, clearReconnect };
+module.exports = { init, add, update, getByStatus, has, read, printStatus, markApplied, markCapCounted, wasApplied, countAppliedToday, getUcPending, ucPendingCount, markUcLogged, hasCanonical, requeueFailed, wasAppliedToCompanyRecently, isQualityJD, getMeta, setMeta, markSessionChecking, markSessionHealthy, markSessionDead, sessionState, recordUploadFailure, recordUploadSuccess, reconnectNeeded, reconnectSources, tailoringPausedSources, clearReconnect };

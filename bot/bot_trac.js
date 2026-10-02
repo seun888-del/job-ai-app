@@ -205,6 +205,7 @@ async function resumeDrafts(page) {
       if (!owner && result === 'dry_run') {
         const complete = status && status.total && !status.notOk.length && status.groupsOpen === 0;
         queue.add({ jobId: 'trac_draft_' + d.id, title: d.title, company: '', url: d.url, source: SOURCE, status: complete ? 'ready_to_submit' : 'skipped', reason: complete ? 'Every section complete. Open it on Trac and press Submit.' : 'Draft saved on Trac. Needs you: check the draft.', draftUrl: d.url });
+        if (complete) queue.markCapCounted('trac_draft_' + d.id); // a finished draft counts toward the daily cap
       }
       if (owner && result === 'applied') {
         queue.update(owner.jobId, { status: 'applied', reason: 'Submitted on Trac', draftUrl: d.url }); queue.markApplied(owner.jobId);
@@ -216,6 +217,7 @@ async function resumeDrafts(page) {
         const complete = status && status.total && !status.notOk.length && status.groupsOpen === 0;
         const note = complete ? 'Every section complete. Open it on Trac and press Submit.' : `Draft saved on Trac. Needs you: ${missing.slice(0, 6).join('; ') || 'check the draft'}${missing.length > 6 ? ` (+${missing.length - 6} more)` : ''}.`;
         queue.update(owner.jobId, { status: complete ? 'ready_to_submit' : 'skipped', reason: note + ((aiQuestion || aiBlocked) ? AI_NOTE : ''), draftUrl: d.url });
+        if (complete) queue.markCapCounted(owner.jobId); // a finished draft counts toward the daily cap
         console.log(`  [Trac Agent] ${complete ? '✓ Ready to submit' : '⚠ Needs your input'}: ${owner.title}. ${note}`);
       }
       if (result === 'closed') {
@@ -284,6 +286,7 @@ async function phase2(page, until = Infinity) {
           ? 'Every section complete. Open it on Trac and press Submit.'
           : `Draft saved on Trac. Needs you: ${missing.slice(0, 6).join('; ') || 'check the draft'}${missing.length > 6 ? ` (+${missing.length - 6} more)` : ''}.`;
         queue.update(job.jobId, { status: complete ? 'ready_to_submit' : 'skipped', reason: note + (aiQuestion ? AI_NOTE : ''), ...(draftUrl ? { draftUrl } : {}) });
+        if (complete) queue.markCapCounted(job.jobId); // a finished draft counts toward the daily cap
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, complete ? 'READY TO SUBMIT' : 'NEEDS INFO', note);
         console.log(`  [Trac Agent] ${complete ? '✓ Ready to submit' : '⚠ Needs your input'}: ${job.title}. ${note}`);
       } else {

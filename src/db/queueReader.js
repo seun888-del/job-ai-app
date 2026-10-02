@@ -234,8 +234,16 @@ function getRecentApplications(limit = 50) {
 function getTodayAppliedCount() {
   return withQueueDb(db => {
     try {
-      const r = all(db, "SELECT COUNT(*) AS c FROM applied_jobs WHERE date(applied_at) = date('now')");
-      return r[0]?.c || 0;
+      // Same as queue_manager.countAppliedToday: applications plus completed drafts.
+      try {
+        const r = all(db, `SELECT COUNT(*) AS c FROM (
+          SELECT job_id FROM applied_jobs WHERE date(applied_at) = date('now')
+          UNION SELECT job_id FROM cap_counted WHERE date(counted_at) = date('now'))`);
+        return r[0]?.c || 0;
+      } catch (_) {
+        const r = all(db, "SELECT COUNT(*) AS c FROM applied_jobs WHERE date(applied_at) = date('now')"); // no cap_counted table yet
+        return r[0]?.c || 0;
+      }
     } catch (_) { return 0; }
   }, 0);
 }

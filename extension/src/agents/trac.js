@@ -143,7 +143,8 @@ export class TracAgent {
       const missing = [...new Set([...(status && status.notOk ? status.notOk : []), ...paused.map((p) => p.field)])].filter(Boolean);
       const complete = !!(status && status.total && !status.notOk.length && status.groupsOpen === 0);
       const note = complete ? 'Every section complete. Open it on Trac and press Submit.' : `Draft saved on Trac. Needs you: ${missing.slice(0, 6).join('; ') || 'check the draft'}.`;
-      await store.updateJob(job.jobId, { status: complete ? 'ready_to_submit' : 'skipped', reason: note + ((aiQuestion || aiBlocked) ? AI_NOTE : ''), ...(draftUrl ? { draftUrl } : {}) });
+      // A finished draft counts toward the daily cap (countedAt), stamped once.
+      await store.updateJob(job.jobId, { status: complete ? 'ready_to_submit' : 'skipped', reason: note + ((aiQuestion || aiBlocked) ? AI_NOTE : ''), ...(draftUrl ? { draftUrl } : {}), ...(complete && !job.countedAt ? { countedAt: new Date().toISOString() } : {}) });
       this.log(`${complete ? '✓ Ready to submit' : 'Needs you'}: ${job.title}`);
     } else if (result === 'needs_login') {
       await store.updateJob(job.jobId, { status: 'cv_ready' });
@@ -181,7 +182,7 @@ export class TracAgent {
     const s = await this.settings();
     for (const job of await store.byStatus('cv_ready', SOURCE)) {
       if (!this.running) return;
-      if ((await store.appliedToday()) >= Number(s.dailyCap || 25)) { this.log('Daily limit reached.'); return; }
+      if ((await store.appliedToday()) >= cfg.MAX_APPLICATIONS_PER_DAY) { this.log('Daily limit reached.'); return; }
       this.log(`Filling: ${job.title} @ ${job.company}`);
       await store.updateJob(job.jobId, { status: 'applying' });
       const finished = (await store.byStatus('ready_to_submit', SOURCE)).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).map((j) => j.title);

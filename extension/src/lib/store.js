@@ -38,9 +38,11 @@ export async function updateJob(jobId, fields) {
   return j;
 }
 export async function byStatus(status, source) { return (await jobs()).filter((j) => j.status === status && (!source || j.source === source)); }
+// Today's usage against the daily cap: applications sent plus finished Trac drafts the
+// user submits themselves (countedAt). Each job counts once.
 export async function appliedToday() {
   const d = new Date().toISOString().slice(0, 10);
-  return (await jobs()).filter((j) => j.status === 'applied' && String(j.appliedAt || '').startsWith(d)).length;
+  return (await jobs()).filter((j) => (j.status === 'applied' && String(j.appliedAt || '').startsWith(d)) || String(j.countedAt || '').startsWith(d)).length;
 }
 
 // ── Activity log (shown on the dashboard) ─────────────────────────────────────
