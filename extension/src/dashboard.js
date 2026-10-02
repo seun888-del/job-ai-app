@@ -70,11 +70,47 @@ const AGENTS = [
   ['ats', 'Company Sites Agent', '', ''],
 ];
 const anyRunning = () => Object.values(agents).some((a) => a.running);
+// start() resolves when the agent has fully stopped; kept so an update can wait for it.
+function runAgent(key) { agents[key].loop = agents[key].start(); }
 async function startAgent(key) {
   if (!(await recheckLicence())) { navigate('license'); return; }
-  agents[key].start();
+  runAgent(key);
   setTimeout(renderDashboard, 300);
 }
+
+// ── Extension updates ───────────────────────────────────────────────────────
+// background.js flags a waiting update. Apply it at a safe moment: every agent finishes the
+// step it's on (never mid-application), then the extension reloads into the new version and
+// the agents that were running start again.
+let updating = false;
+async function applyPendingUpdate() {
+  if (updating) return;
+  const { updatePending } = await chrome.storage.local.get('updatePending');
+  if (!updatePending) return;
+  updating = true;
+  const wasRunning = Object.keys(agents).filter((k) => agents[k].running);
+  if (wasRunning.length) store.log(`Job-AI ${updatePending} is ready. Finishing the current step, then updating.`);
+  Object.values(agents).forEach((a) => a.stop());
+  await Promise.all(Object.values(agents).map((a) => a.loop).filter(Boolean));
+  await chrome.storage.local.set({ resumeAfterUpdate: { agents: wasRunning, at: Date.now() } });
+  await chrome.storage.local.remove('updatePending');
+  chrome.runtime.reload();
+}
+chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.updatePending && c.updatePending.newValue) applyPendingUpdate(); });
+applyPendingUpdate();
+
+// Just updated: restart the agents that were running before it.
+(async () => {
+  const { resumeAfterUpdate: r } = await chrome.storage.local.get('resumeAfterUpdate');
+  if (!r) return;
+  await chrome.storage.local.remove('resumeAfterUpdate');
+  store.log(`Updated to Job-AI ${chrome.runtime.getManifest().version}.`);
+  if (Date.now() - r.at > 10 * 60 * 1000 || !(r.agents || []).length) return;
+  if (!(await recheckLicence())) return;
+  r.agents.forEach(runAgent);
+  store.log('Agents started again after the update.');
+  setTimeout(renderDashboard, 300);
+})();
 // Stop everything if the licence ends while agents are running (checked every 30 minutes).
 setInterval(async () => { if (anyRunning() && !(await recheckLicence())) { Object.values(agents).forEach((a) => a.stop()); store.log('Licence is no longer active. Agents stopped.'); } }, 30 * 60 * 1000);
 
@@ -290,7 +326,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     $$('.stop').forEach((b) => b.addEventListener('click', () => { agents[b.dataset.bot].stop(); renderDashboard(); }));
     $('#start-all').addEventListener('click', async () => {
       if (!(await recheckLicence())) { navigate('license'); return; }
-      for (const k of Object.keys(agents)) if (canRun[k] && !agents[k].running) agents[k].start();
+      for (const k of Object.keys(agents)) if (canRun[k] && !agents[k].running) runAgent(k);
       setTimeout(renderDashboard, 300);
     });
     $('#stop-all').addEventListener('click', () => { Object.values(agents).forEach((a) => a.stop()); renderDashboard(); });
