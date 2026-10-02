@@ -173,18 +173,20 @@ async function claudeChat(prompt, timeoutMs = CLAUDE_TIMEOUT) {
 
 // ── Hosted (JobBot backend proxy — fallback) ──────────────────────────────
 
+// The backend's /health normally answers in under a second but can take 3s+ on a
+// slow connection. A 3s limit made the app decide "AI unavailable" and quietly skip
+// tailoring, so: allow 10s, try twice, and remember a good answer for 5 minutes.
+let hostedOkUntil = 0;
 async function hostedAvailable() {
   if (!licenseKey()) return false;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3000);
-  try {
-    const res = await fetch(`${backendUrl()}/health`, { method: 'GET', signal: controller.signal });
-    return res.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
+  if (Date.now() < hostedOkUntil) return true;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${backendUrl()}/health`, { method: 'GET', signal: AbortSignal.timeout(10000) });
+      if (res.ok) { hostedOkUntil = Date.now() + 5 * 60 * 1000; return true; }
+    } catch (_) {}
   }
+  return false;
 }
 
 async function hostedChat(prompt, timeoutMs) {

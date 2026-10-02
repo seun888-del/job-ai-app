@@ -144,14 +144,43 @@ function significantTokens(text) {
 function originalIndex(text) {
   const low = String(text).toLowerCase();
   const words = new Set(low.match(/[a-z0-9+#./-]+/g) || []);
+  // Also index each word without trailing/leading punctuation, so a tool ending a
+  // sentence ("...and ServiceNow.") still counts as present.
+  for (const w of [...words]) words.add(w.replace(/^[./-]+|[./-]+$/g, ''));
   for (const n of (low.match(/\d[\d,]*\.?\d*%?/g) || [])) words.add(n.replace(/,/g, ''));
   return words;
+}
+
+// Claims a recruiter takes at face value that the model likes to borrow from the
+// advert: contact channels, sectors and work patterns. Rejected unless the CV says so.
+const CLAIM_PHRASES = ['phone', 'telephone', 'live chat', 'face to face', 'in person', 'public sector',
+  'private sector', 'financial services', 'healthcare', 'nhs', 'charity', 'retail', 'education',
+  'hybrid', 'start-up', 'startup', 'agency'];
+const hasPhrase = (text, p, flags) => new RegExp('(^|[^A-Za-z0-9])' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z0-9])', flags).test(text);
+
+// Capitalised words written mid-sentence ("supported Teams users in London") are
+// names: they must appear in the CV with the same capitals ("teams" is not "Teams").
+function midSentenceNames(text) {
+  const out = new Set();
+  for (const sentence of String(text).split(/(?<=[.!?:;])\s+/)) {
+    sentence.split(/\s+/).forEach((w, i) => {
+      const t = w.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, '');
+      if (i > 0 && /^[A-Z][a-z]/.test(t)) out.add(t);
+    });
+  }
+  return out;
 }
 
 function introducesNewFacts(originalCorpus, reworded) {
   const orig = originalIndex(originalCorpus);
   for (const tok of significantTokens(reworded)) {
     if (!orig.has(tok)) return true;
+  }
+  for (const p of CLAIM_PHRASES) {
+    if (hasPhrase(reworded, p, 'i') && !hasPhrase(originalCorpus, p, 'i')) return true;
+  }
+  for (const name of midSentenceNames(reworded)) {
+    if (!hasPhrase(originalCorpus, name, '')) return true;
   }
   return false;
 }
@@ -303,11 +332,10 @@ function isWeavable(kw, cvText) {
   const low = k.toLowerCase();
   if (DOMAIN_BLOCK.has(low)) return false;                 // no generic domain words
   if (low.split(/\s+/).length > 3) return false;           // no long phrases / responsibilities
-  // Genuine if it already appears in the candidate's own CV text…
-  if (cvText && cvText.toLowerCase().includes(low)) return true;
-  // …otherwise only weave recognisable tools/technologies
-  if (/[A-Z].*[A-Z]/.test(k) || /\d/.test(k)) return true; // CamelCase / acronym / version number
-  return TECH_HINT.test(k);
+  // Only skills the candidate's own CV already mentions (e.g. a tool named in a bullet
+  // but missing from the skills list). Adding an advert tool they never used would be
+  // a made-up claim, and Job-AI promises it only rewords what is in the CV.
+  return !!cvText && hasPhrase(cvText, k, 'i');
 }
 
 // Pick the existing skills category that best fits the keywords (tool/SaaS-ish
@@ -403,4 +431,4 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
   return out;
 }
 
-module.exports = { tailorStructured };
+module.exports = { tailorStructured, _test: { introducesNewFacts, isWeavable, significantTokens, originalIndex, midSentenceNames, hasPhrase, CLAIM_PHRASES } };
