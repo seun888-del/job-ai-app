@@ -12,6 +12,7 @@ import { Page } from './driver/page.js';
 
 const { checkLicense, askAssistant } = require('./shims/llm.js');
 const { importTracText } = require('../../src/services/tracImporter');
+const { readCvProfile } = require('../../src/services/cvProfile');
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -100,6 +101,49 @@ $('#setup-pop').addEventListener('click', () => $('#setup-menu').classList.remov
 document.addEventListener('click', () => $('#setup-menu').classList.remove('open'));
 $('#tn-help').addEventListener('click', () => startTour());
 const setSt = (id, msg, err) => { const el = $(id); if (!el) return; el.textContent = msg; el.style.color = err ? 'var(--danger)' : 'var(--text-muted)'; };
+
+// Pick a CV, save it, and let the AI fill any blank profile fields (never overwriting what the
+// user typed) plus the search terms if there are none yet. done(msg) runs once it's saved.
+const CV_FIELDS = [['firstName', 'First name'], ['middleName', null], ['lastName', 'Last name'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location'], ['linkedin', 'LinkedIn'], ['yearsExperience', 'Years of experience']];
+async function fillFromCv(text) {
+  const r = await readCvProfile(text);
+  const { profile: P } = await loadConfig();
+  const out = {}, filled = [];
+  for (const [k, label] of CV_FIELDS) if (r[k] && !String(P[k] || '').trim()) { out[k] = r[k]; if (label) filled.push(label); }
+  let termsAdded = 0;
+  if (r.roles.length && !(P.searchTerms || []).length) { out.searchTerms = r.roles; termsAdded = r.roles.length; }
+  if (Object.keys(out).length) { await store.patch('profile', out); await loadConfig(); }
+  return { filled, termsAdded };
+}
+function pickCv(stSel, done) {
+  const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.pdf,.doc,.docx' });
+  input.addEventListener('change', async () => {
+    const f = input.files[0]; if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { setSt(stSel, 'That file is over 10 MB. Please use a smaller CV.', true); return; }
+    setSt(stSel, 'Reading your CV. This can take a minute…');
+    try {
+      const buf = await f.arrayBuffer();
+      const text = await extractText(f);
+      if (text.replace(/\s/g, '').length < 200) throw new Error('No readable text found. Is it a scanned image?');
+      await store.set('cv', { name: f.name, type: f.type, text, dataB64: toBase64(buf) });
+      let msg = 'Using: ' + f.name;
+      try {
+        const r = await fillFromCv(text);
+        const parts = [];
+        if (r.filled.length) parts.push(`Filled in from your CV: ${r.filled.join(', ')}.`);
+        if (r.termsAdded) parts.push(`Added ${r.termsAdded} job titles to search for.`);
+        if (parts.length) msg = parts.join(' ') + ' Check your details, then Save.';
+      } catch (err) { msg += '. ' + err.message; }
+      done(msg);
+    } catch (err) { setSt(stSel, err.message, true); }
+  });
+  input.click();
+}
+// After a CV upload from the dashboard or Personal Details, land on Personal Details to check.
+const cvToPersonal = (msg) => navigate('personal').then(() => {
+  const note = Object.assign(document.createElement('div'), { className: 'card', textContent: '✓ ' + msg });
+  $('.page-header').after(note);
+});
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 function gsMark(ok, n) { return ok ? '<span class="gs-step gs-step-done">✓</span>' : `<span class="gs-step gs-step-num">${n}</span>`; }
@@ -191,11 +235,12 @@ VIEWS.dashboard = async function renderDashboardView() {
       <div class="card get-started-card">
         <h3>How to start applying</h3>
         <ol class="get-started-steps">
-          <li>${gsMark(setupDone.personal, 1)}<span>Complete your profile</span>${setupDone.personal ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="personal">Complete profile →</button>'}</li>
-          <li>${gsMark(setupDone.cvs, 2)}<span>Upload a CV</span>${setupDone.cvs ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="cvs">Add a CV →</button>'}</li>
+          <li>${gsMark(setupDone.cvs, 1)}<span>Upload your CV. We fill in your details from it</span>${setupDone.cvs ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link cv-fill-btn">Upload CV →</button>'}</li>
+          <li>${gsMark(setupDone.personal, 2)}<span>Check your details</span>${setupDone.personal ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="personal">Check details →</button>'}</li>
           <li>${gsMark(false, 3)}<span>Sign in to your job sites in this Chrome. Use the <strong>Sign in</strong> buttons on the cards below</span></li>
           <li>${gsMark(running, 4)}<span>Click <strong>Start applying</strong>. The AI scores jobs, tailors your CV and applies for you automatically</span>${running ? '<em class="gs-ok">Applying…</em>' : ''}</li>
         </ol>
+        <span class="status-msg" id="gs-cv-st"></span>
       </div>
 
       <div class="card setup-card">
@@ -249,7 +294,8 @@ VIEWS.dashboard = async function renderDashboardView() {
       setTimeout(renderDashboard, 300);
     });
     $('#stop-all').addEventListener('click', () => { Object.values(agents).forEach((a) => a.stop()); renderDashboard(); });
-    $$('.preflight-link').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
+    $$('.preflight-link[data-view]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
+    $$('.cv-fill-btn').forEach((b) => b.addEventListener('click', () => pickCv('#gs-cv-st', cvToPersonal)));
     $$('.signin').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.url)));
     $$('.auto').forEach((el) => el.addEventListener('change', async (e) => {
       const on = e.target.checked; const key = e.target.dataset.bot;
@@ -317,6 +363,8 @@ VIEWS.personal = async function renderPersonal() {
   const f = (k, l, type = 'text', ph = '') => `<div class="field"><label>${esc(l)}</label><input class="p-in" data-k="${k}" type="${type}" value="${esc(P[k] ?? '')}" placeholder="${esc(ph)}"></div>`;
   content.innerHTML = `
     <div class="page-header"><h2>Personal Details</h2><p>Used to fill in application forms automatically. Saved on this device only.</p></div>
+    ${P.firstName && P.lastName && P.email && P.phone ? '' : `<div class="card"><h3>Fill this in from your CV</h3><p class="muted">Upload your CV and we'll add your name, contact details and experience for you.</p>
+      <div class="ext-inline"><button class="primary" id="cv-fill">Upload CV</button><span class="status-msg" id="cv-fill-st"></span></div></div>`}
     <div class="card"><h3>About you</h3><div class="tracd-grid">
       ${f('firstName', 'First name')}${f('lastName', 'Last name')}${f('email', 'Email', 'email')}${f('phone', 'Phone', 'tel')}
       ${f('location', 'City / town')}${f('linkedin', 'LinkedIn profile URL', 'url', 'https://www.linkedin.com/in/...')}
@@ -332,6 +380,7 @@ VIEWS.personal = async function renderPersonal() {
       ${[['eeoGender', 'Gender', ['', 'Male', 'Female', 'Non-binary']], ['eeoEthnicity', 'Ethnicity', ['', 'White', 'Mixed', 'Asian', 'Black', 'Arab', 'Other']], ['eeoDisability', 'Disability', ['', 'No', 'Yes']], ['eeoVeteran', 'Veteran', ['', 'No', 'Yes']]].map(([k, l, o]) => `<div class="field"><label>${l}</label><select class="p-sel" data-k="${k}">${o.map((x) => `<option value="${x}" ${(P[k] || '') === x ? 'selected' : ''}>${x || 'Prefer not to say'}</option>`).join('')}</select></div>`).join('')}
     </div></div>
     ${saveBar('p-save')}`;
+  $('#cv-fill')?.addEventListener('click', () => pickCv('#cv-fill-st', cvToPersonal));
   $('#p-save').addEventListener('click', async () => {
     const out = {};
     $$('.p-in').forEach((i) => { out[i.dataset.k] = i.value.trim(); });
@@ -351,20 +400,8 @@ VIEWS.cvs = async function renderCVs() {
   content.innerHTML = `
     <div class="page-header"><h2>CVs</h2><p>Your CV is read on this device and never uploaded. Before each application the AI tailors a copy to that job.</p></div>
     <div class="card"><h3>Your CV</h3><p class="muted">Word (.docx) is read most accurately. PDF also works.</p>
-      <div class="ext-inline"><input type="file" id="cv" accept=".pdf,.doc,.docx" hidden><button class="primary" id="cv-pick">${cv && cv.text ? 'Replace CV' : 'Add CV'}</button><span class="status-msg" id="cv-st">${cv && cv.text ? 'Using: ' + esc(cv.name) : 'No CV yet'}</span></div></div>`;
-  $('#cv-pick').addEventListener('click', () => $('#cv').click());
-  $('#cv').addEventListener('change', async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    if (f.size > 10 * 1024 * 1024) { setSt('#cv-st', 'That file is over 10 MB. Please use a smaller CV.', true); return; }
-    setSt('#cv-st', 'Reading…');
-    try {
-      const buf = await f.arrayBuffer();
-      const text = await extractText(f);
-      if (text.replace(/\s/g, '').length < 200) throw new Error('No readable text found. Is it a scanned image?');
-      await store.set('cv', { name: f.name, type: f.type, text, dataB64: toBase64(buf) });
-      setSt('#cv-st', 'Using: ' + f.name);
-    } catch (err) { setSt('#cv-st', err.message, true); }
-  });
+      <div class="ext-inline"><button class="primary" id="cv-pick">${cv && cv.text ? 'Replace CV' : 'Add CV'}</button><span class="status-msg" id="cv-st">${cv && cv.text ? 'Using: ' + esc(cv.name) : 'No CV yet'}</span></div></div>`;
+  $('#cv-pick').addEventListener('click', () => pickCv('#cv-st', (msg) => VIEWS.cvs().then(() => setSt('#cv-st', msg))));
 };
 
 // ── Setup: Search preferences ────────────────────────────────────────────────
@@ -543,8 +580,8 @@ VIEWS['trac-details'] = async function renderTrac() {
 
 // ── Welcome + setup tour (same flow as the app, first open only) ─────────────
 const TOUR_STEPS = [
-  { view: 'personal', title: 'Step 1: Your personal details', tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this page is, the fewer forms the agents leave blank.', action: 'Fill in every field and click Save before moving on.' },
-  { view: 'cvs', title: 'Step 2: Upload your CV', tip: 'Upload your CV as a Word document (.docx) for the best results. PDF also works. Before each application, the AI rewrites your summary and bullet points to match that specific job.', action: 'Click "Add CV" and choose your CV. It is read on this device and never uploaded.' },
+  { view: 'cvs', title: 'Step 1: Upload your CV', tip: 'Start here. We read your CV and fill in your name, contact details, experience and the job titles to search for. Upload it as a Word document (.docx) for the best results. PDF also works. Before each application, the AI rewrites your summary and bullet points to match that specific job.', action: 'Click "Add CV" and choose your CV. It is read on this device and never uploaded.' },
+  { view: 'personal', title: 'Step 2: Check your details', tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this page is, the fewer forms the agents leave blank.', action: 'If you uploaded your CV, most of this is already filled in. Check it, complete anything missing and click Save.' },
   { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want to apply for, for example "IT Support Analyst". The Reed, LinkedIn and company sites agents all use these terms.', action: 'Add at least one job title, set your work type, then click Save.' },
   { view: 'license', title: 'Step 4: Activate your license', tip: 'Enter the license key from your welcome email. The AI that tailors your CV runs on our cloud, so there is nothing extra to install.', action: 'Paste your license key into the box and click Activate.' },
   { view: 'dashboard', title: 'Step 5: Sign in to your job sites', tip: 'The agents work inside this Chrome, using the accounts you are already signed in to. They never see your password.', action: 'Click "Sign in to Reed" or "Sign in to LinkedIn" on an agent card, sign in as normal, then come back to this tab. The company sites agent needs no sign in.' },

@@ -14,6 +14,7 @@ function syncSetupActive(view) {
 navItems.forEach(li => {
   li.addEventListener('click', () => {
     if (_statsPoll) { clearInterval(_statsPoll); _statsPoll = null; }
+    _currentView = li.dataset.view;
     navItems.forEach(x => x.classList.remove('active'));
     li.classList.add('active');
     syncSetupActive(li.dataset.view);
@@ -173,11 +174,20 @@ async function renderPersonal() {
   const region = country === 'United States' ? 'United States' : 'European Union';
   const empTypes = (p.employment_type || '').split(',').filter(Boolean);
 
+  const needsDetails = !(p.first_name && p.last_name && p.email && p.phone);
   content.innerHTML = `
     <div class="page-header">
       <h2>Personal Details</h2>
       <p>This information is used to pre-fill job applications.</p>
     </div>
+
+    ${needsDetails ? `
+    <div class="card cv-fill-card">
+      <h3>Fill this in from your CV</h3>
+      <p class="card-hint">Upload your CV and we'll add your name, contact details and experience for you.</p>
+      <button class="primary" id="cv-fill">Upload CV</button>
+      <span class="status-msg" id="cv-fill-status"></span>
+    </div>` : ''}
 
     <div class="card">
       <h3>Your Region</h3>
@@ -330,6 +340,22 @@ async function renderPersonal() {
     </div>
   `;
 
+  document.getElementById('cv-fill')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget, st = document.getElementById('cv-fill-status');
+    btn.disabled = true;
+    st.className = 'status-msg';
+    st.textContent = 'Reading your CV. This can take a minute...';
+    try {
+      const cv = await uploadCvAndFill();
+      if (cv && _currentView === 'personal') return render('personal').then(() => updateNavProgress());
+      st.textContent = '';
+    } catch (err) {
+      st.className = 'status-msg error';
+      st.textContent = 'Error: ' + err.message;
+    }
+    btn.disabled = false;
+  });
+
   content.querySelectorAll('.country-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       content.querySelectorAll('.country-btn').forEach(b => b.classList.remove('active'));
@@ -413,6 +439,30 @@ async function renderLogin() {
 }
 
 // â”€â”€ 3. CVs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Upload a CV and let the AI fill in the profile (blank fields only) and, for a
+// new user, the search terms. Shared by the CVs page, Personal Details and the
+// Dashboard checklist. Returns the added CV, or null if the picker was cancelled.
+async function uploadCvAndFill(label = 'CV') {
+  const cv = await window.api.cvs.pickAndAdd(label);
+  if (!cv) return null;
+  const filled = cv.filled || [];
+  const parts = [];
+  if (filled.length) parts.push(`<p style="margin:0 0 10px">We filled in from your CV: <strong>${filled.join(', ')}</strong>.</p>`);
+  if (cv.termsAdded) parts.push(`<p style="margin:0 0 10px">We added <strong>${cv.termsAdded}</strong> job title${cv.termsAdded === 1 ? '' : 's'} to search for.</p>`);
+  if (parts.length) {
+    await showInfoDialog({
+      title: 'CV added',
+      bodyHtml: parts.join('') + '<p style="margin:0">Give your details a quick check, then press Save.</p>',
+      okText: 'Later',
+      extraText: 'Check my details',
+      onExtra: () => navigate('personal'),
+    });
+  } else {
+    showToast('CV added');
+  }
+  return cv;
+}
+
 async function renderCVs() {
   const cvs = await window.api.cvs.get();
 
@@ -475,11 +525,11 @@ async function renderCVs() {
     const statusEl = document.getElementById('status');
     addBtn.disabled = true;
     statusEl.className = 'status-msg';
-    statusEl.textContent = 'Analysing CV with AI. This can take a couple of minutes...';
+    statusEl.textContent = 'Reading your CV. This can take a minute...';
     try {
-      const result = await window.api.cvs.pickAndAdd(label);
+      const result = await uploadCvAndFill(label);
       if (result) {
-        renderCVs();
+        if (_currentView === 'cvs') render('cvs');
       } else {
         statusEl.textContent = '';
         addBtn.disabled = false;
@@ -1209,16 +1259,18 @@ function buildPreflightWarning(profile, cvs) {
   if (!profile?.last_name)  profileMissing.push('Last name');
   if (!profile?.email)      profileMissing.push('Email');
   if (!profile?.phone)      profileMissing.push('Phone');
-  if (profileMissing.length) {
+  const noCv = !cvs || cvs.length === 0;
+  // With no CV yet, one banner covers both: uploading the CV fills the profile too.
+  if (profileMissing.length && !noCv) {
     warnings.push(`<div class="preflight-warning">
       &#9888; Profile incomplete. Agents will leave contact fields blank: <strong>${profileMissing.join(', ')}</strong>
       <button class="preflight-link" data-view="personal">Complete Profile →</button>
     </div>`);
   }
-  if (!cvs || cvs.length === 0) {
+  if (noCv) {
     warnings.push(`<div class="preflight-warning">
-      &#9888; No CV uploaded. The Agent cannot tailor applications without one.
-      <button class="preflight-link" data-view="cvs">Add a CV →</button>
+      &#9888; No CV yet. Upload it and we'll fill in your details too.
+      <button class="preflight-link cv-fill-btn">Upload CV →</button>
     </div>`);
   }
   return warnings.join('');
@@ -1239,10 +1291,10 @@ function buildGetStartedCard(profile, cvs, anyConnected, anyRunning) {
     <div class="card get-started-card">
       <h3>How to start applying</h3>
       <ol class="get-started-steps">
-        <li>${mark(profileDone, 1)}<span>Complete your profile</span>
-          ${profileDone ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="personal">Complete profile →</button>'}</li>
-        <li>${mark(cvDone, 2)}<span>Upload a CV</span>
-          ${cvDone ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="cvs">Add a CV →</button>'}</li>
+        <li>${mark(cvDone, 1)}<span>Upload your CV. We fill in your details from it</span>
+          ${cvDone ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link cv-fill-btn">Upload CV →</button>'}</li>
+        <li>${mark(profileDone, 2)}<span>Check your details</span>
+          ${profileDone ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="personal">Check details →</button>'}</li>
         <li>${mark(anyConnected, 3)}<span>Connect your job sites. Click <strong>Connect account</strong> on a card below and log in once</span>
           ${anyConnected ? '<em class="gs-ok">Done</em>' : ''}</li>
         <li><span id="gs-mark-4">${mark(anyRunning, 4)}</span><span>Click <strong>Start applying</strong>. The AI scores jobs, tailors your CV and applies for you automatically</span>
@@ -1874,9 +1926,22 @@ ${statCardsHtml(summary)}
   // preflight warnings) must jump to its page. querySelector wired only the
   // first, so all the others did nothing — use querySelectorAll + navigate so
   // the Setup menu highlights the destination too.
-  content.querySelectorAll('.preflight-link').forEach(link => {
+  content.querySelectorAll('.preflight-link[data-view]').forEach(link => {
     link.addEventListener('click', () => navigate(link.dataset.view));
   });
+  content.querySelectorAll('.cv-fill-btn').forEach(b => b.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Reading your CV...';
+    try {
+      const cv = await uploadCvAndFill();
+      if (cv && _currentView === 'dashboard') return render('dashboard').then(() => updateNavProgress());
+    } catch (err) {
+      showToast('Could not add that CV: ' + err.message, 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Upload CV →';
+  }));
 
   bindViewCvButtons();
 
@@ -2942,16 +3007,16 @@ let _isUKUser = true;
 
 const TOUR_STEPS = [
   {
-    view: 'personal',
-    title: 'Step 1: Your personal details',
-    tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this section is, the fewer forms the Agent leaves blank.',
-    action: 'Fill in every field and click Save before moving on.',
+    view: 'cvs',
+    title: 'Step 1: Upload your CV',
+    tip: 'Start here. We read your CV and fill in your name, contact details, experience and the job titles to search for. Upload it as a Word document (.docx) for the best results. It is read most accurately, so your tailored CV keeps every detail. PDF also works but can occasionally be misread. Before each application, the AI rewrites your professional summary and bullet points to match that specific job, so it reads naturally to a recruiter rather than being stuffed with keywords.',
+    action: 'Click "Add CV" and upload at least one CV, ideally a Word (.docx) file. You can add several CVs for different role types and the Agent picks the best one for each job.',
   },
   {
-    view: 'cvs',
-    title: 'Step 2: Upload your CV',
-    tip: 'Upload your CV as a Word document (.docx) for the best results. It is read most accurately, so your tailored CV keeps every detail. PDF also works but can occasionally be misread. Before each application, the AI rewrites your professional summary and bullet points to match that specific job, so it reads naturally to a recruiter rather than being stuffed with keywords.',
-    action: 'Click "Add CV" and upload at least one CV, ideally a Word (.docx) file. You can add several CVs for different role types and the Agent picks the best one for each job.',
+    view: 'personal',
+    title: 'Step 2: Check your details',
+    tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this section is, the fewer forms the Agent leaves blank.',
+    action: 'If you uploaded your CV, most of this is already filled in. Check it, complete anything missing and click Save.',
   },
   {
     view: 'search',

@@ -77,7 +77,7 @@ const shims = {
   setup(b) {
     b.onResolve({ filter: /^\.\.?\/config$/ }, (a) => (/[\\/]bot([\\/]|$)/.test(a.resolveDir) ? { path: S('config.js') } : null));
     b.onResolve({ filter: /services\/llm$/ }, () => ({ path: S('llm.js') }));
-    b.onResolve({ filter: /^\.\/llm$/ }, (x) => (/services[\\/]tracImporter/.test(x.importer) ? { path: S('llm.js') } : null));
+    b.onResolve({ filter: /^\.\/llm$/ }, (x) => (/services[\\/](tracImporter|cvProfile)/.test(x.importer) ? { path: S('llm.js') } : null));
     b.onResolve({ filter: /^\.\/cvAnalyzer$/ }, () => ({ path: S('cvAnalyzer.js') }));
     b.onResolve({ filter: /^(node:)?fs$/ }, () => ({ path: S('fs.js') }));
     b.onResolve({ filter: /^(node:)?path$/ }, () => ({ path: S('path.js') }));

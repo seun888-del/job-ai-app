@@ -531,9 +531,37 @@ ipcMain.handle('cvs:pickAndAdd', async (event, label) => {
   if (result.canceled || !result.filePaths.length) return null;
 
   const file_path = result.filePaths[0];
-  const { keywords, suggestedRoles } = await cvAnalyzer.analyzeCV(file_path);
-  return db.addCV({ label, file_path, extracted_keywords: keywords, suggested_roles: suggestedRoles });
+  const { keywords, suggestedRoles, profile } = await cvAnalyzer.analyzeCV(file_path);
+  const cv = db.addCV({ label, file_path, extracted_keywords: keywords, suggested_roles: suggestedRoles });
+  return { ...cv, ...fillProfileFromCV(profile, suggestedRoles) };
 });
+
+// New-user shortcut: details read from the CV go into any profile field still
+// blank (never overwriting what the user typed), and the suggested roles become
+// the search terms if there are none yet. Returns what was filled for the UI.
+function fillProfileFromCV(cvp, roles) {
+  const filled = [];
+  if (cvp) {
+    const p = db.getProfile() || {};
+    const fields = {};
+    const map = [
+      ['first_name', cvp.firstName, 'First name'], ['middle_name', cvp.middleName, null],
+      ['last_name', cvp.lastName, 'Last name'], ['email', cvp.email, 'Email'],
+      ['phone', cvp.phone, 'Phone'], ['location', cvp.location, 'Location'],
+      ['linkedin_url', cvp.linkedin, 'LinkedIn'], ['experience_level', cvp.experienceLevel, 'Experience level'],
+    ];
+    for (const [col, val, name] of map) {
+      if (val && !String(p[col] || '').trim()) { fields[col] = val; if (name) filled.push(name); }
+    }
+    if (cvp.yearsExperience && !p.years_experience) { fields.years_experience = cvp.yearsExperience; filled.push('Years of experience'); }
+    if (Object.keys(fields).length) db.saveProfile(fields);
+  }
+  let termsAdded = 0;
+  if (roles && roles.length && db.getSearchTerms(false).length === 0) {
+    termsAdded = db.addSearchTerms(roles, 'ai_generated').length;
+  }
+  return { filled, termsAdded };
+}
 
 ipcMain.handle('cvs:addSuggestedTerms', (event, cvId) => {
   const cv = db.getCVs().find(c => c.id === cvId);
