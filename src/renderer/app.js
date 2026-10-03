@@ -139,6 +139,51 @@ function showDailyLimitDialog(limit) {
   });
 }
 
+// ── Autofill for the user's own details ────────────────────────────────────
+// The app runs on Electron, which has no browser autofill, so the details the user
+// already gave us elsewhere (Personal Details, the NHS form, their CV) are offered
+// as suggestions: typing the first letter of a name, email or address shows it.
+// Each box also gets the standard autocomplete label. Referee boxes are never
+// touched, so a referee can't be filled with the user's own address.
+const AUTOFILL_FIELDS = {
+  first_name: 'given-name', 'tracd-forename': 'given-name',
+  middle_name: 'additional-name', 'tracd-middlename': 'additional-name',
+  last_name: 'family-name', 'tracd-surname': 'family-name',
+  email: 'email', 'tracd-email': 'email',
+  phone: 'tel', 'tracd-mobile': 'tel',
+  address: 'address-line1', 'tracd-address': 'address-line1',
+  location: 'address-level2', 'tracd-city': 'address-level2',
+  'tracd-county': 'address-level1',
+  'tracd-postcode': 'postal-code',
+  'tracd-country': 'country-name',
+  linkedin_url: 'url',
+};
+async function attachAutofill() {
+  const inputs = Object.keys(AUTOFILL_FIELDS).map((id) => document.getElementById(id)).filter((el) => el && el.tagName === 'INPUT');
+  if (!inputs.length) return;
+  let p = {}, t = {};
+  try { p = (await window.api.profile.get()) || {}; } catch (_) {}
+  try { t = JSON.parse(p.trac_details || '{}') || {}; } catch (_) {}
+  const city = String(p.location || '').split(',')[0].trim();
+  const known = {
+    'given-name': [p.first_name, t.firstName], 'additional-name': [p.middle_name, t.middleName],
+    'family-name': [p.last_name, t.lastName], email: [p.email, t.email], tel: [p.phone, t.mobile],
+    'address-line1': [p.address, t.address], 'address-level2': [p.location, city, t.city],
+    'address-level1': [t.county], 'postal-code': [t.postcode], 'country-name': [t.country, p.country], url: [p.linkedin_url],
+  };
+  for (const el of inputs) {
+    const kind = AUTOFILL_FIELDS[el.id];
+    el.setAttribute('autocomplete', kind);
+    const values = [...new Set((known[kind] || []).map((v) => String(v || '').trim()).filter(Boolean))];
+    if (!values.length) continue;
+    const listId = 'af-' + el.id;
+    let dl = document.getElementById(listId);
+    if (!dl) { dl = document.createElement('datalist'); dl.id = listId; el.after(dl); }
+    dl.innerHTML = values.map((v) => `<option value="${v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"></option>`).join('');
+    el.setAttribute('list', listId);
+  }
+}
+
 async function render(view) {
   let fn;
   switch (view) {
@@ -155,6 +200,7 @@ async function render(view) {
     default:           fn = renderPersonal;
   }
   await fn();
+  attachAutofill();
   // Wrap the rendered content in a fluid max-width container so it stretches
   // proportionally at any window size rather than being pinned to a fixed width.
   if (!content.querySelector('.page-content')) {
@@ -951,7 +997,7 @@ const LICENSE_ERRORS = {
   license_expired: 'This license has expired',
   rate_limit_exceeded: 'Daily usage limit reached for this license',
   invalid_email: 'Enter a valid email address',
-  already_registered: 'A license is already registered to this email. Check your inbox',
+  already_registered: 'A license is already registered to this email. Check your inbox, and your spam or junk folder',
   server_error: 'Something went wrong on our end. Please try again',
   device_trial_used: 'This device has already used its free trial. Subscribe to keep using Job-AI.',
   disposable_email: 'Please use a permanent email address (temporary inboxes aren’t accepted)',

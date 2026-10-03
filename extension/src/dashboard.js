@@ -150,6 +150,37 @@ window.addEventListener('beforeunload', (e) => { if (anyRunning()) { e.preventDe
 // ── Navigation (top tabs + Setup menu, like the app) ─────────────────────────
 let current = 'dashboard';
 const VIEWS = {};
+// Label the user's own detail boxes so Chrome can autofill them from the person's
+// saved name and addresses, and offer what they already gave Job-AI elsewhere
+// (Personal Details <-> NHS form). Referee boxes are left alone.
+const AUTOFILL_KEYS = {
+  'p-in': { firstName: 'given-name', lastName: 'family-name', email: 'email', phone: 'tel', location: 'address-level2', linkedin: 'url' },
+  't-text': { firstName: 'given-name', middleName: 'additional-name', lastName: 'family-name', email: 'email', mobile: 'tel', address: 'address-line1', city: 'address-level2', county: 'address-level1', postcode: 'postal-code', country: 'country-name' },
+};
+async function attachAutofill() {
+  const P = (await store.get('profile')) || {}, T = (await store.get('trac')) || {};
+  const known = {
+    'given-name': [P.firstName, T.firstName], 'additional-name': [T.middleName], 'family-name': [P.lastName, T.lastName],
+    email: [P.email, T.email], tel: [P.phone, T.mobile], 'address-line1': [T.address], 'address-level2': [P.location, T.city],
+    'address-level1': [T.county], 'postal-code': [T.postcode], 'country-name': [T.country], url: [P.linkedin],
+  };
+  for (const [cls, keys] of Object.entries(AUTOFILL_KEYS)) {
+    for (const el of $$('input.' + cls)) {
+      const kind = keys[el.dataset.k];
+      if (!kind) continue;
+      el.setAttribute('autocomplete', kind);
+      el.setAttribute('name', kind);
+      const values = [...new Set((known[kind] || []).map((v) => String(v || '').trim()).filter(Boolean))];
+      if (!values.length) continue;
+      const listId = 'af-' + cls + '-' + el.dataset.k;
+      let dl = document.getElementById(listId);
+      if (!dl) { dl = document.createElement('datalist'); dl.id = listId; el.after(dl); }
+      dl.innerHTML = values.map((v) => `<option value="${esc(v)}"></option>`).join('');
+      el.setAttribute('list', listId);
+    }
+  }
+}
+
 function navigate(v) {
   if (!VIEWS[v]) v = 'dashboard';
   current = v;
@@ -158,7 +189,7 @@ function navigate(v) {
   $$('#nav-setup .setup-item').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
   $('#setup-label').classList.toggle('active', $$('#nav-setup .setup-item').some((b) => b.dataset.view === v));
   window.scrollTo(0, 0);
-  return VIEWS[v]();
+  return Promise.resolve(VIEWS[v]()).then((r) => { attachAutofill().catch(() => {}); return r; });
 }
 $$('#nav .tab, #nav-setup .setup-item').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
 $('#setup-label').addEventListener('click', (e) => { e.stopPropagation(); $('#setup-menu').classList.toggle('open'); });

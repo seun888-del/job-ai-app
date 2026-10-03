@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Job-AI: Auto-apply for jobs",
   "short_name": "Job-AI",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Finds jobs that match your CV, writes tailored applications and fills in the forms for you. Your data stays on your device.",
   "icons": {
     "16": "icons/icon16.png",
