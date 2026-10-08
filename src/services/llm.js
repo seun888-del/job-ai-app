@@ -229,7 +229,7 @@ async function llmChat(prompt, timeoutMs = 300000) {
   // access (the backend surfaces 401/403/429 as an error) rather than silently
   // bypassing the gate with a local model.
   if (licenseKey()) {
-    console.log('[LLM] Using licensed backend (Groq)');
+    console.log('[LLM] Using the licensed Job-AI backend');
     // The AI account has a per-minute limit shared by all users. When it's hit (backend 429/502)
     // or a call times out, wait for the minute to roll over and try again instead of failing.
     const waits = [20000, 40000];

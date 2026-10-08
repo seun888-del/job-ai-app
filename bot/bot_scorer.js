@@ -447,7 +447,7 @@ async function main() {
   await queue.init(process.env.JOBBOT_USERDATA);
 
   const modeLabel = llmMode === 'claude' ? 'Claude API'
-    : (llmMode === 'hosted' || llmMode === 'groq') ? 'licensed backend (Groq)'
+    : (llmMode === 'hosted' || llmMode === 'groq') ? 'licensed Job-AI backend'
     : 'local Ollama';
   console.log('═══════════════════════════════════════════════════════');
   console.log(`  Scorer Agent — Starting (${modeLabel}, no browser)`);
@@ -476,12 +476,14 @@ async function main() {
 
   let logTick = 0;
 
+  const YIELD_TO_TRAC = process.env.JOBBOT_SCORER_YIELD_TO_TRAC === '1';
   // Run forever — no idle exit. Reed bot continuously finds new jobs.
   while (true) {
-    // The NHS agent is filling a Trac form and needs the AI for its questions. The AI account
-    // has a per-minute limit, so pause writing statements until it's done (max 15 min, in
-    // case the agent stopped without clearing the flag).
-    const tracSince = Number(queue.getMeta('trac_filling') || 0);
+    // Old Groq free-plan workaround: pause while the NHS agent fills a Trac form, because both
+    // shared a tiny per-minute AI limit. The backend now uses DeepInfra (no tight limit, Groq
+    // only as fallback), and the pause starved Reed/LinkedIn whenever Trac worked through its
+    // drafts back to back. Off by default; JOBBOT_SCORER_YIELD_TO_TRAC=1 turns it back on.
+    const tracSince = YIELD_TO_TRAC ? Number(queue.getMeta('trac_filling') || 0) : 0;
     if (tracSince && Date.now() - tracSince < 15 * 60 * 1000) {
       if (logTick++ % 6 === 0) console.log('  [Scorer Agent] Pausing while the NHS agent fills a form (shares the AI limit).');
       await DELAY(POLL_INTERVAL);
@@ -525,7 +527,7 @@ async function main() {
 
     for (const job of pending) {
       // Re-check before EVERY job: the NHS agent may have started a form mid-batch.
-      const busy = Number(queue.getMeta('trac_filling') || 0);
+      const busy = YIELD_TO_TRAC ? Number(queue.getMeta('trac_filling') || 0) : 0;
       if (busy && Date.now() - busy < 15 * 60 * 1000) break;
       // Only tailor what can still be sent today (plus a couple spare for ones that fail).
       // Each tailored CV costs AI calls; past the daily cap they'd just sit unused.
