@@ -157,4 +157,19 @@ function act(sel, idx, action, arg, scope) {
   }
 }
 
-globalThis.__jobai = { act, version: 2 };
+// Never let a job page open the native Windows/Mac file picker. When the agent clicks an
+// "Upload CV" / "Choose your CV file" button, the browser fires a click on the hidden
+// <input type=file>; cancelling that click stops the picker. The input is marked so the
+// driver's filechooser (page.waitForEvent('filechooser')) attaches the CV to exactly it.
+if (!globalThis.__jobaiChooserGuard) {
+  globalThis.__jobaiChooserGuard = true;
+  window.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t && t.tagName === 'INPUT' && t.type === 'file') {
+      e.preventDefault();
+      t.setAttribute('data-jobai-chooser', String(Date.now()));
+    }
+  }, true);
+}
+
+globalThis.__jobai = { act, version: 3 };

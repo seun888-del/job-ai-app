@@ -142,7 +142,23 @@ export class Page {
     });
     let res = await call();
     let out = res && res[0] && res[0].result;
-    if (out && out.__noHelper) { await chrome.scripting.executeScript({ target: { tabId: this.tabId }, files: ['helper.js'] }); res = await call(); out = res && res[0] && res[0].result; }
+    if (out && out.__noHelper) {
+      await chrome.scripting.executeScript({ target: { tabId: this.tabId }, files: ['helper.js'] });
+      // Page scripts can also open the picker with input.click() or input.showPicker() in the
+      // page's own world; make those mark the input instead of opening a native dialog.
+      await chrome.scripting.executeScript({
+        target: { tabId: this.tabId }, world: 'MAIN',
+        func: () => {
+          if (window.__jobaiPickerPatched) return;
+          window.__jobaiPickerPatched = true;
+          const P = HTMLInputElement.prototype;
+          const mark = (el) => el.setAttribute('data-jobai-chooser', String(Date.now()));
+          const origPicker = P.showPicker;
+          if (origPicker) P.showPicker = function () { if (this.type === 'file') { mark(this); return; } return origPicker.call(this); };
+        },
+      }).catch(() => {});
+      res = await call(); out = res && res[0] && res[0].result;
+    }
     if (!out) throw new Error('page not ready');
     if (out.err) throw new Error(out.err);
     return out.v;
@@ -183,9 +199,16 @@ export class Page {
       throw new Error('Timeout waiting for popup');
     }
     if (ev === 'filechooser') {
-      await sleep(400);
+      // The click that "opens" the picker is cancelled by the helper, which marks the file
+      // input instead. Wait briefly for that mark so the CV goes into the right input.
       const page = this;
-      return { page: () => page, isMultiple: () => false, element: async () => page.$('input[type=file]'), setFiles: (files) => page._act('input[type=file]', -1, 'setFiles', (Array.isArray(files) ? files : [files]).map(fileSpec)) };
+      const end = Date.now() + Math.min(timeout, 4000);
+      let sel = 'input[type=file]';
+      while (Date.now() < end) {
+        if ((await page._act('input[type=file][data-jobai-chooser]', 0, 'count').catch(() => 0)) > 0) { sel = 'input[type=file][data-jobai-chooser]'; break; }
+        await sleep(200);
+      }
+      return { page: () => page, isMultiple: () => false, element: async () => page.$(sel), setFiles: (files) => page._act(sel, -1, 'setFiles', (Array.isArray(files) ? files : [files]).map(fileSpec)) };
     }
     await sleep(Math.min(timeout, 3000));
     throw new Error('Timeout waiting for ' + ev);
