@@ -291,7 +291,10 @@ VIEWS.dashboard = async function renderDashboardView() {
     const hour = new Date().getHours();
     const name = profile.firstName || trac.firstName || '';
     const apps = [...needs, ...ready].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac), ats: settings.atsSubmit !== false };
+    // Only the NHS agent has a "Submit for me" switch; company sites always submit.
+    const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac) };
+    // Which agents "Start applying" runs (tick box on each card, like the app). All ticked by default.
+    const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
     const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company sites' };
     const bySource = Object.keys(LABEL).map((s) => [s, applied.filter((j) => j.source === s).length]).filter(([, n]) => n);
 
@@ -299,14 +302,17 @@ VIEWS.dashboard = async function renderDashboardView() {
       const on = agents[key].running;
       const toggle = key in submitOn ? `<label class="agent-submit-toggle">
           <input type="checkbox" class="auto" data-bot="${key}" ${submitOn[key] ? 'checked' : ''}>
-          <span><strong>Submit for me</strong><br><small>${submitOn[key] ? 'Complete applications are submitted automatically.' : key === 'trac' ? 'Off: you check each application and press Submit on Trac.' : 'Off: forms are filled in a tab for you to check and submit.'}</small></span>
+          <span><strong>Submit for me</strong><br><small>${submitOn[key] ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.'}</small></span>
         </label>` : '';
       return `<div class="card bot-card${on ? ' bot-card-running' : ''}" id="bot-card-${key}">
         <div class="bot-card-header">
-          <strong>${label}</strong>
+          <label class="agent-run-toggle" title="Tick to run this agent when you press Start applying, untick to skip it">
+            <input type="checkbox" class="agent-enabled" data-bot="${key}" ${enabled(key) ? 'checked' : ''}>
+            <strong>${label}</strong>
+          </label>
           <span class="bot-status bot-status-${on ? 'running' : 'stopped'}">${on ? 'running' : 'stopped'}</span>
         </div>
-        <div class="agent-run-state ${on ? 'on' : 'off'}">${on ? '✓ Working in a separate minimised Chrome window' : canRun[key] ? '○ Ready. Press Start' : '○ Finish setup to use this agent'}</div>
+        <div class="agent-run-state ${on ? 'on' : 'off'}">${on ? '✓ Working in a separate minimised Chrome window' : !canRun[key] ? '○ Finish setup to use this agent' : enabled(key) ? '✓ Included, runs when you press Start applying' : '○ Unticked, this agent will be skipped'}</div>
         ${toggle}
         <div class="bot-card-actions">
           ${on ? `<button class="secondary stop" data-bot="${key}">Stop</button>` : `<button class="primary start" data-bot="${key}" ${canRun[key] ? '' : 'disabled'}>Start</button>`}
@@ -323,7 +329,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         </div>
         <div class="dash-cta">
           <button class="secondary stop-all-btn" id="stop-all" ${running ? '' : 'disabled'}>Stop</button>
-          <button class="primary start-applying-btn" id="start-all" ${Object.values(canRun).some(Boolean) ? '' : 'disabled'}>▶ Start applying</button>
+          <button class="primary start-applying-btn" id="start-all" ${Object.keys(canRun).some((k) => canRun[k] && enabled(k)) ? '' : 'disabled'}>▶ Start applying</button>
         </div>
       </div>
 
@@ -374,7 +380,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       <div class="dash-cols">
         <div class="dash-col-main">
           <div class="dash-col-title">Your agents</div>
-          <p class="bot-controls-hint">Press <strong>Start applying</strong> to run every agent that is set up, or start one on its card.</p>
+          <p class="bot-controls-hint">Tick the agents you want, then press <strong>Start applying</strong>. Or start one on its own card.</p>
           <div class="bot-controls">${AGENTS.map(card).join('')}</div>
         </div>
         <div class="dash-col-side">
@@ -387,7 +393,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     $$('.stop').forEach((b) => b.addEventListener('click', () => { agents[b.dataset.bot].stop(); renderDashboard(); }));
     $('#start-all').addEventListener('click', async () => {
       if (!(await recheckLicence())) { navigate('license'); return; }
-      for (const k of Object.keys(agents)) if (canRun[k] && !agents[k].running) runAgent(k);
+      for (const k of Object.keys(agents)) if (canRun[k] && enabled(k) && !agents[k].running) runAgent(k);
       setTimeout(renderDashboard, 300);
     });
     $('#stop-all').addEventListener('click', () => { Object.values(agents).forEach((a) => a.stop()); renderDashboard(); });
@@ -398,7 +404,12 @@ VIEWS.dashboard = async function renderDashboardView() {
       const on = e.target.checked; const key = e.target.dataset.bot;
       if (on && key === 'trac' && !confirm('Let the NHS agent submit applications for you?\n\nIt only submits when every section on Trac is complete, and never forms that ask about AI use.')) { e.target.checked = false; return; }
       const s = await store.get('settings');
-      if (key === 'trac') s.autoSubmit = { ...(s.autoSubmit || {}), trac: on }; else s.atsSubmit = on;
+      s.autoSubmit = { ...(s.autoSubmit || {}), trac: on };
+      await store.set('settings', s); renderDashboard();
+    }));
+    $$('.agent-enabled').forEach((el) => el.addEventListener('change', async (e) => {
+      const s = await store.get('settings');
+      s.enabled = { ...(s.enabled || {}), [e.target.dataset.bot]: e.target.checked };
       await store.set('settings', s); renderDashboard();
     }));
     $$('.mark-sent').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'applied', appliedAt: new Date().toISOString(), reason: '' }); renderDashboard(); }));

@@ -1,7 +1,7 @@
 // Company-sites agent for the extension: the same jobs feed, form filler and Recruitee direct
 // submit as the desktop app's Auto-Apply agent (bot/bot_greenhouse.js), run in the user's Chrome.
 // Jobs come from the Job-AI feed (Greenhouse, Lever, Recruitee and other company career pages).
-// "Submit for me" off = the form is filled in a normal tab and left open for the user to send.
+// Company-site applications are always submitted once the form is complete.
 import cfg from '../shims/config.js';
 import * as store from '../lib/store.js';
 import { Page } from '../driver/page.js';
@@ -92,7 +92,8 @@ export class AtsAgent extends SiteAgent {
     }
   }
 
-  async submitOn() { return ((await store.get('settings')) || {}).atsSubmit !== false; }
+  // Company sites always submit (the old fill-only "Submit for me" switch was removed).
+  async submitOn() { return true; }
 
   async apply(job) {
     const ats = atsFiller.detectATS(job.url);
