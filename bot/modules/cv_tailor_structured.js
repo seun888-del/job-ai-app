@@ -24,7 +24,7 @@
 
 const { llmAvailable, llmChat } = require('../../src/services/llm');
 
-const MAX_BULLETS_PER_ROLE = 4;
+// Every original bullet is kept (reordered + reworded), never capped: dropping them lost real experience.
 const REFUSAL_RE = /\b(cannot|can't|i'm sorry|i am sorry|unable to|not able to|as an ai)\b/i;
 
 // Empty CV clichés that read as filler to a recruiter — banned from every rewrite.
@@ -245,8 +245,8 @@ ORIGINAL BULLETS:
 ${indexed}
 
 Task:
-1. The ORIGINAL BULLETS are already pre-ordered with the most job-relevant first. Choose at most ${MAX_BULLETS_PER_ROLE} (fewer is fine — a few strong bullets beat many weak ones; never pad), keeping that priority — favour the earlier (more relevant) bullets unless a later one is clearly a stronger match for this job.
-2. Rewrite each chosen bullet using this shape wherever the source supports it:
+1. The ORIGINAL BULLETS are already pre-ordered with the most job-relevant first. Rewrite EVERY one of them: return exactly ${ordered.length} bullets, in the same order, one rewritten bullet for each original. Never drop or merge bullets: they are the candidate's real experience.
+2. Rewrite each bullet using this shape wherever the source supports it:
    ACTION (what they did) → HOW (the tool, system or method they used) → PURPOSE (why) → RESULT (the outcome).
    - Open with a strong, varied action verb (never reuse the same opener twice).
    - Only include a HOW (tool/system/process) or a RESULT (metric/outcome) when it is ALREADY present or clearly implied in that original bullet. If the original doesn't state a tool or a result, build the bullet from the parts that ARE there — never manufacture the missing element.
@@ -271,17 +271,19 @@ Return ONLY the rewritten bullets, one per line, each starting with "- ". No num
     // The prompt asks for it, but a model can drift — reject word-heavy lines
     // outright so the ranked originals take their place instead.
     const MAX_BULLET_WORDS = 24;
-    lines = lines.filter(l => l.split(/\s+/).length <= MAX_BULLET_WORDS);
-    // Drop any line that smuggles in a new tool/number/fact
-    let safe = lines.filter(rw => !introducesNewFacts(originals, rw)).slice(0, MAX_BULLETS_PER_ROLE);
-    if (safe.length >= Math.min(2, bullets.length)) {
-      const dropped = lines.length - safe.length;
-      if (dropped > 0) console.log(`  [Tailor] ${role.company}: rejected ${dropped} reworded bullet(s) that added new facts`);
-      return safe;
-    }
+    // One rewrite per original, in order. A rewrite that's missing, too long or adds a new
+    // fact is replaced by that original bullet, so no experience is ever lost.
+    let kept = 0, reverted = 0;
+    const result = ordered.map((orig, i) => {
+      const rw = lines[i];
+      if (rw && rw.split(/\s+/).length <= MAX_BULLET_WORDS && !introducesNewFacts(originals, rw)) { kept++; return rw; }
+      reverted++; return orig;
+    });
+    if (reverted) console.log(`  [Tailor] ${role.company}: kept ${reverted} original bullet(s) where the rewrite wasn't safe`);
+    return result;
   } catch (_) {}
-  // Fallback: keep the most job-relevant original bullets, unmodified.
-  return ordered.slice(0, MAX_BULLETS_PER_ROLE);
+  // Fallback: every original bullet, most job-relevant first, unmodified.
+  return ordered;
 }
 
 // ── Skills: reorder by JD relevance, then weave missing keywords ─────────────
@@ -393,8 +395,7 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
   };
 
   if (!await llmAvailable()) {
-    console.log('  [Tailor] AI unavailable — capping bullets only, no JD tailoring');
-    out.experience.forEach(j => { j.bullets = j.bullets.slice(0, MAX_BULLETS_PER_ROLE); });
+    console.log('  [Tailor] AI unavailable: keeping the CV as written, no JD tailoring');
     return out;
   }
 

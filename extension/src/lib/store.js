@@ -22,20 +22,28 @@ export async function patch(key, fields) { const cur = (await get(key)) || {}; c
 // ── Job queue ───────────────────────────────────────────────────────────────
 export async function jobs() { return get('jobs'); }
 export async function hasJob(jobId) { return (await jobs()).some((j) => j.jobId === jobId); }
-export async function addJob(job) {
-  const all = await jobs();
-  if (all.some((j) => j.jobId === job.jobId)) return false;
-  all.push({ status: 'pending', retryCount: 0, addedAt: new Date().toISOString(), ...job, updatedAt: new Date().toISOString() });
-  await set('jobs', all);
-  return true;
+// Several agents run at once and each change rewrites the whole list, so changes are queued
+// one at a time. Without this, two near-simultaneous saves lost one (e.g. an "Applied" status).
+let jobsLock = Promise.resolve();
+function withJobs(fn) {
+  const run = jobsLock.then(async () => { const all = await jobs(); const r = fn(all); if (r && r.save) await set('jobs', all); return r && r.value; });
+  jobsLock = run.catch(() => {});
+  return run;
 }
-export async function updateJob(jobId, fields) {
-  const all = await jobs();
-  const j = all.find((x) => x.jobId === jobId);
-  if (!j) return null;
-  Object.assign(j, fields, { updatedAt: new Date().toISOString() });
-  await set('jobs', all);
-  return j;
+export function addJob(job) {
+  return withJobs((all) => {
+    if (all.some((j) => j.jobId === job.jobId)) return { value: false };
+    all.push({ status: 'pending', retryCount: 0, addedAt: new Date().toISOString(), ...job, updatedAt: new Date().toISOString() });
+    return { save: true, value: true };
+  });
+}
+export function updateJob(jobId, fields) {
+  return withJobs((all) => {
+    const j = all.find((x) => x.jobId === jobId);
+    if (!j) return { value: null };
+    Object.assign(j, fields, { updatedAt: new Date().toISOString() });
+    return { save: true, value: j };
+  });
 }
 export async function byStatus(status, source) { return (await jobs()).filter((j) => j.status === status && (!source || j.source === source)); }
 // Tailored jobs waiting to be sent (fresh only, see the app's countReadyBacklog).
