@@ -24,7 +24,11 @@
 
 const { llmAvailable, llmChat } = require('../../src/services/llm');
 
-// Every original bullet is kept (reordered + reworded), never capped: dropping them lost real experience.
+// Bullets per role by recency, so the CV stays easy to skim: latest job 5, the one before 4,
+// the next 3, older jobs 2. The bullets kept are the ones that best match the advert, and
+// every role keeps at least 2, so no job disappears.
+const BULLETS_BY_ROLE = [5, 4, 3];
+const bulletCap = (roleIndex) => BULLETS_BY_ROLE[roleIndex] || 2;
 const REFUSAL_RE = /\b(cannot|can't|i'm sorry|i am sorry|unable to|not able to|as an ai)\b/i;
 
 // Empty CV clichés that read as filler to a recruiter — banned from every rewrite.
@@ -218,7 +222,14 @@ function bulletJDScore(bullet, jdSet) {
 // Select the most relevant bullets for a role AND genuinely rewrite each into
 // natural, recruiter-grade prose tuned to the JD — without ever adding facts the
 // candidate didn't state (the anti-fabrication verifier below enforces this).
-async function selectAndRewordBullets(role, jdExcerpt) {
+// No-AI path: the same recency cap, keeping the bullets that best match the advert, unchanged.
+function pickBullets(bullets, jdText, roleIndex) {
+  const jdSet = jdKeywordSet((jdText || '').substring(0, 3000));
+  return (bullets || []).map((b, i) => ({ b, i, s: bulletJDScore(b, jdSet) }))
+    .sort((a, z) => z.s - a.s || a.i - z.i).slice(0, bulletCap(roleIndex)).map(r => r.b);
+}
+
+async function selectAndRewordBullets(role, jdExcerpt, roleIndex = 0) {
   const bullets = role.bullets || [];
   if (!bullets.length) return bullets;
 
@@ -230,7 +241,7 @@ async function selectAndRewordBullets(role, jdExcerpt) {
   const ranked  = bullets
     .map((b, i) => ({ b, i, s: bulletJDScore(b, jdSet) }))
     .sort((a, z) => z.s - a.s || a.i - z.i);   // JD relevance desc, stable by original order
-  const ordered = ranked.map(r => r.b);
+  const ordered = ranked.map(r => r.b).slice(0, bulletCap(roleIndex));
 
   const indexed   = ordered.map((b, i) => `[${i + 1}] ${b}`).join('\n');
   const originals = bullets.join('  ');   // corpus for the anti-fabrication check
@@ -396,6 +407,7 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
 
   if (!await llmAvailable()) {
     console.log('  [Tailor] AI unavailable: keeping the CV as written, no JD tailoring');
+    out.experience.forEach((role, i) => { role.bullets = pickBullets(role.bullets, jdText, i); });
     return out;
   }
 
@@ -419,8 +431,8 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
 
   // 2. Bullets — select most relevant per role AND lightly reword to the JD,
   //    rejecting any rewrite that introduces a new fact (sequential = rate-limit safe)
-  for (const role of out.experience) {
-    role.bullets = await selectAndRewordBullets(role, jd);
+  for (const [i, role] of out.experience.entries()) {
+    role.bullets = await selectAndRewordBullets(role, jd, i);
   }
   console.log(`  [Tailor] Bullets selected + lightly reworded for ${out.experience.length} role(s)`);
 
