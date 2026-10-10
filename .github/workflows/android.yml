@@ -9,7 +9,7 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - name: Enable KVM
@@ -33,6 +33,9 @@ jobs:
         run: gradle assembleDebug --no-daemon -q
       - name: Run on emulator
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          # Test licence (repo secret). Agents run with the safety switch on: nothing is ever sent.
+          JOBAI_TEST_LICENSE: ${{ secrets.JOBAI_TEST_LICENSE }}
         with:
           api-level: 34
           target: google_apis

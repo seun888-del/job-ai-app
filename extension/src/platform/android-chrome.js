@@ -72,9 +72,23 @@
   const windows = new Set([1]);
   const isWeb = (u) => /^https?:/i.test(String(u || ''));
 
+  // Job sites the agents work on. Signing in to these must happen inside the app, where the
+  // agents' pages share the cookies; the phone's own browser is a separate sign-in.
+  const JOB_SITE = /(^|\.)(trac\.jobs|healthjobsuk\.com|reed\.co\.uk|linkedin\.com|greenhouse\.io|lever\.co|recruitee\.com|ashbyhq\.com|smartrecruiters\.com|workable\.com|breezy\.hr|teamtailor\.com|pinpointhq\.com|bamboohr\.com|jobvite\.com|applytojob\.com)$/i;
+  const SIGNIN_WINDOW = 0;
+
   async function createTab({ url, windowId, active } = {}) {
-    // A link the user opens from the dashboard (help pages, job adverts) goes to their browser.
+    // A link the user opens from the dashboard: job sites open full screen in the app (closed
+    // again with Done); anything else (help pages) goes to the phone's browser.
     if (windowId == null && active !== false) {
+      let host = ''; try { host = new URL(url).hostname; } catch (_) {}
+      if (isWeb(url) && JOB_SITE.test(host)) {
+        const r = await call('tabCreate', { url, windowId: SIGNIN_WINDOW, closeOnHide: true });
+        const t = { id: r.id, windowId: SIGNIN_WINDOW, url, title: '', status: 'loading', ...(tabs.get(r.id) || {}) };
+        tabs.set(t.id, t);
+        await call('tabShow', { tabId: t.id });
+        return info(t);
+      }
       if (isWeb(url)) await call('openExternal', { url });
       return { id: -1, windowId: -1, url, status: 'complete' };
     }
@@ -230,6 +244,12 @@
   };
   // Backend: requests from the app are tagged as the Android app.
   globalThis.__jobaiClient = 'android';
-  // Keep the service notification in step with the agents.
-  window.__jobaiStatus = (text) => call('status', { text: String(text || '') }).catch(() => {});
+  // Keep the "Job-AI" notification in step with the agents: it shows their latest log line.
+  let lastStatus = '';
+  ev.storageChanged.addListener((changes) => {
+    const log = changes.log && changes.log.newValue;
+    if (!Array.isArray(log) || !log.length) return;
+    const text = String(log[log.length - 1]).replace(/^\[[^\]]*\]\s*/, '').slice(0, 120);
+    if (text && text !== lastStatus) { lastStatus = text; call('status', { text }).catch(() => {}); }
+  });
 })();

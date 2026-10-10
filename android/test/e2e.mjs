@@ -154,6 +154,69 @@ await c.run(`await chrome.windows.update(1, { state: 'minimized' }); return true
 await sleep(1500);
 shot('08-back-to-dashboard');
 
+// ── Step 3: the agents for real, from the Start button (safety switch on: nothing is sent) ──
+const KEY = process.env.JOBAI_TEST_LICENSE || '';
+const adb = (cmd) => { try { execSync('adb ' + cmd); } catch (_) {} };
+if (KEY) {
+  results.start = await c.run(`
+    const T = globalThis.__jobaiTest;
+    globalThis.__jobaiDryRun = true;
+    await T.store.set('license', { key: ${JSON.stringify(KEY)} });
+    await T.store.patch('profile', { searchTerms: ['IT Support', 'Technical Support', 'Service Desk', 'Customer Support'], country: 'United Kingdom' });
+    await T.store.patch('settings', { enabled: { trac: false, linkedin: false, reed: true, ats: true }, dailyCap: 5 });
+    await T.loadConfig();
+    document.querySelector('#nav .tab[data-view=license]')?.click();
+    document.querySelector('#nav .tab[data-view=dashboard]').click();
+    await new Promise((r) => setTimeout(r, 1500));
+    const btn = document.querySelector('#start-all');
+    if (!btn || btn.disabled) return { started: false, why: btn ? 'Start button disabled' : 'no Start button' };
+    btn.click();
+    await new Promise((r) => setTimeout(r, 4000));
+    return { started: true, running: Object.entries(T.agents).filter(([, a]) => a.running).map(([k]) => k) };
+  `);
+  console.log('start', JSON.stringify(results.start));
+  shot('10-agents-running');
+  adb('shell cmd statusbar expand-notifications'); await sleep(2000); shot('11-notification'); adb('shell cmd statusbar collapse');
+
+  // Lock the screen while they work, like a phone left on charge.
+  adb('shell input keyevent 223');
+  const t0 = Date.now(); let st = {};
+  while (Date.now() - t0 < 18 * 60 * 1000) {
+    await sleep(30000);
+    st = await c.run(`const j = await globalThis.__jobaiTest.store.jobs(); const by = {}; for (const x of j) by[x.source + ':' + x.status] = (by[x.source + ':' + x.status] || 0) + 1; return by;`);
+    console.log(Math.round((Date.now() - t0) / 60000) + 'min', JSON.stringify(st));
+    if (st && st['ats:ready']) break;
+  }
+  results.agentRun = { minutes: Math.round((Date.now() - t0) / 60000), statuses: st };
+  adb('shell input keyevent 224'); adb('shell wm dismiss-keyguard'); await sleep(2000);
+  results.readyJob = await c.run(`const j = (await globalThis.__jobaiTest.store.jobs()).find((x) => x.status === 'ready'); return j ? { title: j.title, company: j.company, url: j.url, reason: j.reason, cv: j.cvPath } : null;`);
+  results.agentLog = await c.run(`return (await globalThis.__jobaiTest.store.get('log')).slice(-60);`);
+  await view('#nav .tab[data-view=dashboard]', '12-dashboard-after');
+  await view('#nav .tab[data-view=tracker]', '13-tracker-after');
+  await view('#nav .tab[data-view=activity]', '14-activity-after');
+  // The filled company form, as the user would see it before pressing Submit themselves.
+  await c.run(`const t = (await chrome.tabs.query({})).filter((x) => /^https/.test(x.url) && x.windowId !== 0).pop(); if (t) await chrome.tabs.update(t.id, { active: true }); return !!t;`);
+  await sleep(2500); shot('15-filled-by-agent'); adb('shell input keyevent 4'); await sleep(1000);
+  await c.run(`document.querySelector('#stop-all')?.click(); return true;`);
+}
+
+// Reed sign-in opens inside the app (shares cookies with the agents); Back/Done closes it.
+await view('#nav .tab[data-view=dashboard]', '03-dashboard');
+results.signin = await c.run(`
+  const b = document.querySelector('.signin[data-url*="reed"]');
+  if (!b) return { button: false };
+  b.click();
+  await new Promise((r) => setTimeout(r, 6000));
+  const open = (await chrome.tabs.query({})).filter((t) => t.windowId === 0);
+  return { button: true, opened: open.length, url: open[0] && open[0].url };
+`);
+shot('16-reed-signin');
+adb('shell input keyevent 4');
+await sleep(2000);
+results.signin.closedAfterBack = await c.run(`return (await chrome.tabs.query({})).filter((t) => t.windowId === 0).length === 0;`);
+shot('17-after-signin-closed');
+console.log('signin', JSON.stringify(results.signin));
+
 results.errors = await c.run(`return (await globalThis.__jobaiTest.store.get('log')).slice(-30);`);
 writeFileSync(`${OUT}/results.json`, JSON.stringify(results, null, 2));
 c.close();
@@ -165,7 +228,14 @@ const pass = {
   // case is reported, not failed.
   nhs: !!(results.nhs && (results.nhs.found > 0 || results.nhs.securityCheck)),
   ats: !!(results.ats && results.ats.filledFields >= 3 && results.ats.cvAttached && results.ats.cvAttached.length),
+  signin: !!(results.signin && results.signin.opened > 0 && results.signin.closedAfterBack),
 };
+if (KEY) {
+  const s = (results.agentRun && results.agentRun.statuses) || {};
+  pass.started = !!(results.start && results.start.started);
+  pass.tailored = Object.keys(s).some((k) => /^ats:(cv_ready|ready|applying)$/.test(k));
+  pass.filledByAgent = !!s['ats:ready'];
+}
 console.log('PASS?', JSON.stringify(pass));
 writeFileSync(`${OUT}/pass.json`, JSON.stringify(pass));
 process.exit(Object.values(pass).every(Boolean) ? 0 : 1);

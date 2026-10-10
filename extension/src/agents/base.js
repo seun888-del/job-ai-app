@@ -115,7 +115,9 @@ export class SiteAgent {
       await store.updateJob(job.jobId, { status: 'applying' });
       this.log(`Applying: ${job.title} @ ${job.company}`);
       let r;
-      try { r = await this.apply(job); } catch (e) { r = { error: e.message }; }
+      // Test runs (globalThis.__jobaiDryRun) never apply, except Company sites which then only fills.
+      if (globalThis.__jobaiDryRun && !this.fillsInDryRun) r = 'Dry run (test)';
+      else try { r = await this.apply(job); } catch (e) { r = { error: e.message }; }
       await this.record(job, r);
       await sleep(8000 + Math.random() * 7000);
     }

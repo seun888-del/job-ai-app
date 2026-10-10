@@ -36,7 +36,8 @@ export class TracAgent {
   log(m) { store.log('[NHS] ' + m); }
 
   async settings() { return store.get('settings'); }
-  async autoSubmit() { const s = await this.settings(); return !!(s.autoSubmit && s.autoSubmit.trac); }
+  // Test runs (globalThis.__jobaiDryRun) never submit.
+  async autoSubmit() { if (globalThis.__jobaiDryRun) return false; const s = await this.settings(); return !!(s.autoSubmit && s.autoSubmit.trac); }
 
   async start() {
     if (this.running) return;

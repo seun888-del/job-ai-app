@@ -76,6 +76,7 @@ public class JobAIService extends Service {
 
   static class Tab {
     int id, windowId, openerId;
+    boolean closeOnHide; // a sign-in page the user opened: closed again when they tap Done
     WebView wv;
     MutableContextWrapper ctx;
     String url = "about:blank", title = "", status = "complete";
@@ -198,6 +199,7 @@ public class JobAIService extends Service {
       switch (m.getString("op")) {
         case "tabCreate": {
           Tab n = newTab(a.optInt("windowId", 1), -1);
+          n.closeOnHide = a.optBoolean("closeOnHide", false);
           String url = a.optString("url", "about:blank");
           if (url.startsWith("http")) { n.status = "loading"; n.url = url; n.wv.loadUrl(url); }
           reply(id, new JSONObject().put("id", n.id));
@@ -314,11 +316,28 @@ public class JobAIService extends Service {
   }
 
   // Show an agent's page full screen (e.g. Trac or Reed asks the user to sign in).
-  void show(Tab t) { shown = t; if (activity != null) activity.showTab(t); }
+  void show(Tab t) {
+    shown = t;
+    if (activity != null) activity.showTab(t);
+    else needsYou();
+  }
   void hide() {
     Tab t = shown; shown = null;
     if (activity != null) activity.hideTab();
-    if (t != null) { t.ctx.setBaseContext(this); layoutHidden(t.wv); }
+    getSystemService(NotificationManager.class).cancel(2);
+    if (t == null) return;
+    if (t.closeOnHide) { closeTab(t, true); return; }
+    t.ctx.setBaseContext(this); layoutHidden(t.wv);
+  }
+
+  // An agent needs the user (a site asks them to sign in) while the app is in the background.
+  void needsYou() {
+    NotificationManager nm = getSystemService(NotificationManager.class);
+    nm.createNotificationChannel(new NotificationChannel("needs_you", "Needs you", NotificationManager.IMPORTANCE_HIGH));
+    PendingIntent open = PendingIntent.getActivity(this, 2, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+    nm.notify(2, new Notification.Builder(this, "needs_you").setContentTitle("Job-AI needs you")
+      .setContentText("A job site is asking you to sign in. Tap to open it.")
+      .setSmallIcon(android.R.drawable.stat_notify_error).setAutoCancel(true).setContentIntent(open).build());
   }
 
   // ── The activity (UI) comes and goes; the service and its pages stay ─────────

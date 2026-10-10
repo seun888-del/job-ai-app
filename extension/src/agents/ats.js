@@ -63,7 +63,7 @@ async function formState(page) {
 }
 
 export class AtsAgent extends SiteAgent {
-  constructor(opts) { super({ ...opts, source: 'ats', label: 'Company sites' }); this.minWords = 60; this.lazyWindow = true; }
+  constructor(opts) { super({ ...opts, source: 'ats', label: 'Company sites' }); this.minWords = 60; this.lazyWindow = true; this.fillsInDryRun = true; }
 
   async search() {
     if (!(cfg.JOB_SEARCHES || []).length) { this.log('Add search terms on the Setup page to find jobs.'); return; }
@@ -93,7 +93,8 @@ export class AtsAgent extends SiteAgent {
   }
 
   // Company sites always submit (the old fill-only "Submit for me" switch was removed).
-  async submitOn() { return true; }
+  // Test runs (globalThis.__jobaiDryRun) only fill the form, never send it.
+  async submitOn() { return !globalThis.__jobaiDryRun; }
 
   async apply(job) {
     const ats = atsFiller.detectATS(job.url);
