@@ -39,13 +39,21 @@ export class SiteAgent {
   async start() {
     if (this.running) return;
     this.running = true; this.onChange();
+    this._askedSignIn = false;
     this.log('Starting.');
     try {
       if (!this.lazyWindow) await this.ensurePage();
       while (this.running) {
         const roundEnd = Date.now() + ROUND_MS;
         const ok = await this.signIn().catch((e) => { this.log('Sign-in check failed: ' + e.message); return false; });
-        if (!ok) { this.log(`Not signed in. Sign in to ${this.label} in Chrome, then it carries on.`); await this.wait(Date.now() + 2 * 60 * 1000); continue; }
+        if (!ok) {
+          this.log(globalThis.__jobaiClient === 'android'
+            ? `Not signed in. Tap "Sign in to ${this.label}" on the dashboard, then it carries on.`
+            : `Not signed in. Sign in to ${this.label} in Chrome, then it carries on.`);
+          // Android: tell the user once per run, since the app may be in the background.
+          if (globalThis.__jobaiNotify && !this._askedSignIn) { this._askedSignIn = true; globalThis.__jobaiNotify(`Sign in to ${this.label} so the ${this.label} agent can apply for you.`); }
+          await this.wait(Date.now() + 2 * 60 * 1000); continue;
+        }
         if (globalThis.__jobaiStep) globalThis.__jobaiStep('site_connected');
         await this.search().catch((e) => this.log('Search error: ' + e.message));
         await this.scorePending();

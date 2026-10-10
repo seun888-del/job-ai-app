@@ -2,7 +2,31 @@ plugins { id 'com.android.application' }
 android {
   namespace 'com.tryjobai.app'
   compileSdk 35
-  defaultConfig { applicationId 'com.tryjobai.app'; minSdk 26; targetSdk 35; versionCode 1; versionName '0.1.0' }
+  defaultConfig {
+    applicationId 'com.tryjobai.app'
+    minSdk 26
+    targetSdk 35
+    // CI sets these: each build gets a higher versionCode (Google Play requires it).
+    versionCode Integer.parseInt(System.getenv('JOBAI_VERSION_CODE') ?: '1')
+    versionName System.getenv('JOBAI_VERSION_NAME') ?: '0.1.0'
+  }
+  // Release signing: the upload key comes from CI secrets (backup: D:\Android\keys).
+  signingConfigs {
+    release {
+      if (System.getenv('JOBAI_KEYSTORE')) {
+        storeFile file(System.getenv('JOBAI_KEYSTORE'))
+        storePassword System.getenv('JOBAI_KEYSTORE_PASSWORD')
+        keyAlias 'jobai'
+        keyPassword System.getenv('JOBAI_KEYSTORE_PASSWORD')
+      }
+    }
+  }
+  buildTypes {
+    release {
+      minifyEnabled false
+      if (System.getenv('JOBAI_KEYSTORE')) signingConfig signingConfigs.release
+    }
+  }
   compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 dependencies { implementation 'androidx.webkit:webkit:1.12.1' }

@@ -49,4 +49,15 @@ main { min-width: 0; }
   #asst-panel { right: 8px; left: 8px; width: auto; max-width: none; bottom: 8px; height: calc(100vh - 16px); max-height: none; }
   #asst-fab span { display: none; }
   .setup-pop { right: -8px; }
+  /* Tracker on a phone: each job becomes a small card (title, company, then status, site, date). */
+  .tracker-table thead { display: none; }
+  .tracker-table, .tracker-table tbody { display: block; width: 100%; }
+  .tracker-table tr { display: grid; grid-template-columns: auto auto 1fr; grid-template-areas: "t t t" "c c c" "st si d"; align-items: center; column-gap: 10px; row-gap: 3px; padding: 12px 2px; border-bottom: 1px solid var(--border); }
+  .tracker-table td { display: block; border: 0; padding: 0; white-space: normal; max-width: none; }
+  .tracker-table td:nth-child(1) { grid-area: t; font-weight: 600; }
+  .tracker-table td:nth-child(2) { grid-area: c; color: var(--text-muted); font-size: 13.5px; }
+  .tracker-table td:nth-child(3) { grid-area: si; color: var(--text-muted); font-size: 13px; }
+  .tracker-table td:nth-child(4) { grid-area: st; }
+  .tracker-table td:nth-child(5) { grid-area: d; color: var(--text-faint); font-size: 13px; text-align: right; }
+  .card-wide .table-scroll { overflow-x: visible; }
 }

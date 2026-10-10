@@ -124,7 +124,7 @@ public class JobAIService extends Service {
     PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
     PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, JobAIService.class).setAction("STOP"), PendingIntent.FLAG_IMMUTABLE);
     return new Notification.Builder(this, CH).setContentTitle("Job-AI").setContentText(statusText)
-      .setSmallIcon(android.R.drawable.stat_notify_sync).setOngoing(true).setContentIntent(open)
+      .setSmallIcon(R.drawable.ic_stat_jobai).setOngoing(true).setContentIntent(open)
       .addAction(new Notification.Action.Builder(null, "Quit Job-AI", stop).build()).build();
   }
 
@@ -221,6 +221,15 @@ public class JobAIService extends Service {
           return;
         }
         case "openExternal": openExternal(a.getString("url")); reply(id, ok); return;
+        case "phoneState": {
+          boolean notif = getSystemService(NotificationManager.class).areNotificationsEnabled();
+          boolean batt = getSystemService(PowerManager.class).isIgnoringBatteryOptimizations(getPackageName());
+          reply(id, new JSONObject().put("notifications", notif).put("battery", batt));
+          return;
+        }
+        case "askNotifications": if (activity != null) activity.askNotifications(); reply(id, ok); return;
+        case "askBattery": if (activity != null) activity.askBattery(); reply(id, ok); return;
+        case "notify": needsYou(a.optString("text", "")); reply(id, ok); return;
         case "status": statusText = a.optString("text", "Ready"); getSystemService(NotificationManager.class).notify(1, notification()); reply(id, ok); return;
         case "http": {
           final int rid = id; final JSONObject args = a;
@@ -335,13 +344,14 @@ public class JobAIService extends Service {
   }
 
   // An agent needs the user (a site asks them to sign in) while the app is in the background.
-  void needsYou() {
+  void needsYou() { needsYou(""); }
+  void needsYou(String text) {
     NotificationManager nm = getSystemService(NotificationManager.class);
     nm.createNotificationChannel(new NotificationChannel("needs_you", "Needs you", NotificationManager.IMPORTANCE_HIGH));
     PendingIntent open = PendingIntent.getActivity(this, 2, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
     nm.notify(2, new Notification.Builder(this, "needs_you").setContentTitle("Job-AI needs you")
-      .setContentText("A job site is asking you to sign in. Tap to open it.")
-      .setSmallIcon(android.R.drawable.stat_notify_error).setAutoCancel(true).setContentIntent(open).build());
+      .setContentText(text.isEmpty() ? "A job site is asking you to sign in. Tap to open it." : text)
+      .setSmallIcon(R.drawable.ic_stat_jobai).setAutoCancel(true).setContentIntent(open).build());
   }
 
   // ── The activity (UI) comes and goes; the service and its pages stay ─────────

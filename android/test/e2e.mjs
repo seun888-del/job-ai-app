@@ -79,6 +79,12 @@ results.setup = await c.run(`
   return 'ok';
 `);
 const view = async (sel, name) => { await c.run(`const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); return !!el;`); await sleep(1500); shot(name); };
+// Android wording: nothing about Chrome or LinkedIn; the phone setup card is there.
+results.copy = await c.run(`
+  const txt = document.body.innerText;
+  return { mentionsChrome: /chrome|this browser|this tab/i.test(txt), linkedinCard: !!document.querySelector('#bot-card-linkedin'), phoneSetupCard: !!document.querySelector('.phone-setup-card') };
+`);
+console.log('copy', JSON.stringify(results.copy));
 await view('#nav .tab[data-view=activity]', '02-activity');
 await view('#nav .tab[data-view=dashboard]', '03-dashboard');
 await c.run(`document.querySelector('#setup-label').click(); return true;`);
@@ -216,7 +222,9 @@ results.signin = await c.run(`
   const b = document.querySelector('.signin[data-url*="reed"]');
   if (!b) return { button: false };
   b.click();
-  await new Promise((r) => setTimeout(r, 6000));
+  // Wait for the sign-in page to finish loading before the screenshot.
+  for (let i = 0; i < 40; i++) { const t = (await chrome.tabs.query({})).find((x) => x.windowId === 0); if (t && t.status === 'complete' && /^https/.test(t.url)) break; await new Promise((r) => setTimeout(r, 500)); }
+  await new Promise((r) => setTimeout(r, 3000));
   const open = (await chrome.tabs.query({})).filter((t) => t.windowId === 0);
   return { button: true, opened: open.length, url: open[0] && open[0].url };
 `);
@@ -239,6 +247,7 @@ const pass = {
   nhs: !!(results.nhs && (results.nhs.found > 0 || results.nhs.securityCheck)),
   ats: !!(results.ats && results.ats.filledFields >= 3 && results.ats.cvAttached && results.ats.cvAttached.length),
   signin: !!(results.signin && results.signin.opened > 0 && results.signin.closedAfterBack),
+  androidCopy: !!(results.copy && !results.copy.mentionsChrome && !results.copy.linkedinCard && results.copy.phoneSetupCard),
 };
 if (KEY) {
   const s = (results.agentRun && results.agentRun.statuses) || {};

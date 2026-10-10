@@ -55,6 +55,9 @@ async function recheckLicence() {
 }
 
 // ── Agents ───────────────────────────────────────────────────────────────────
+// The Android app runs this same dashboard (see src/platform/android-chrome.js). It has no
+// LinkedIn agent, and its wording talks about the phone instead of Chrome.
+const ANDROID = globalThis.__jobaiClient === 'android';
 const onChange = () => { if (current === 'dashboard') renderDashboard(); };
 const agents = {
   trac: new TracAgent({ onChange }),
@@ -62,13 +65,14 @@ const agents = {
   linkedin: new LinkedInAgent({ onChange }),
   ats: new AtsAgent({ onChange }),
 };
+if (ANDROID) delete agents.linkedin;
 const agent = agents.trac;
 const AGENTS = [
   ['trac', 'Trac (NHS) Agent', 'https://apps.trac.jobs/', 'Sign in to Trac'],
   ['reed', 'Reed Agent', 'https://www.reed.co.uk/account/signin', 'Sign in to Reed'],
   ['linkedin', 'LinkedIn Agent', 'https://www.linkedin.com/login', 'Sign in to LinkedIn'],
   ['ats', 'Company Sites Agent', '', ''],
-];
+].filter(([k]) => agents[k]);
 const anyRunning = () => Object.values(agents).some((a) => a.running);
 // ── Setup-step beacon ───────────────────────────────────────────────────────
 // Where new users stall before their first application (activated, CV added, job
@@ -248,6 +252,27 @@ const cvToPersonal = (msg) => navigate('personal').then(() => {
 });
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
+// Android: the two phone permissions the agents need to keep working with the screen locked.
+// Shown on the dashboard until both are on (see android-chrome.js / JobAIService).
+async function renderPhoneSetup() {
+  const box = $('#phone-setup');
+  if (!box || !globalThis.__jobaiPhone) return;
+  const st = await globalThis.__jobaiPhone.state().catch(() => null);
+  if (!st || (st.notifications && st.battery)) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="card get-started-card phone-setup-card">
+      <h3>Let Job-AI work while your phone is locked</h3>
+      <ol class="get-started-steps">
+        <li>${gsMark(st.notifications, 1)}<span>Allow notifications, so Job-AI can tell you when a job site needs you</span>${st.notifications ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" id="ps-notif">Allow →</button>'}</li>
+        <li>${gsMark(st.battery, 2)}<span>Let Job-AI keep running in the background</span>${st.battery ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" id="ps-batt">Allow →</button>'}</li>
+      </ol>
+    </div>`;
+  const ask = (what) => async () => { await globalThis.__jobaiPhone.ask(what).catch(() => {}); setTimeout(renderPhoneSetup, 1500); };
+  if ($('#ps-notif')) $('#ps-notif').addEventListener('click', ask('notifications'));
+  if ($('#ps-batt')) $('#ps-batt').addEventListener('click', ask('battery'));
+}
+// Back from Android's permission screens: refresh the card.
+if (ANDROID) document.addEventListener('jobai-resume', () => { if (current === 'dashboard') renderPhoneSetup(); });
+
 function gsMark(ok, n) { return ok ? '<span class="gs-step gs-step-done">✓</span>' : `<span class="gs-step gs-step-num">${n}</span>`; }
 function buildApplicationsGraph(all) {
   const applied = all.filter((j) => j.status === 'applied' && j.appliedAt);
@@ -317,7 +342,7 @@ VIEWS.dashboard = async function renderDashboardView() {
           </label>
           <span class="bot-status bot-status-${on ? 'running' : 'stopped'}">${on ? 'running' : 'stopped'}</span>
         </div>
-        <div class="agent-run-state ${on ? 'on' : 'off'}">${on ? '✓ Working in a separate minimised Chrome window' : !canRun[key] ? '○ Finish setup to use this agent' : enabled(key) ? '✓ Included, runs when you press Start applying' : '○ Unticked, this agent will be skipped'}</div>
+        <div class="agent-run-state ${on ? 'on' : 'off'}">${on ? (ANDROID ? '✓ Working in the background' : '✓ Working in a separate minimised Chrome window') : !canRun[key] ? '○ Finish setup to use this agent' : enabled(key) ? '✓ Included, runs when you press Start applying' : '○ Unticked, this agent will be skipped'}</div>
         ${toggle}
         <div class="bot-card-actions">
           ${on ? `<button class="secondary stop" data-bot="${key}">Stop</button>` : `<button class="primary start" data-bot="${key}" ${canRun[key] ? '' : 'disabled'}>Start</button>`}
@@ -330,7 +355,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       <div class="dash-head">
         <div>
           <h2 class="dash-greeting">Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}${name ? ', ' + esc(name) : ''}</h2>
-          <p class="dash-sub">${running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Monitor agent activity and track your application progress.'}</p>
+          <p class="dash-sub">${running ? (ANDROID ? 'Your agents are working. You can lock your phone; keep it charging.' : 'Your agents are working. Keep this tab open.') : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Monitor agent activity and track your application progress.'}</p>
         </div>
         <div class="dash-cta">
           <button class="secondary stop-all-btn" id="stop-all" ${running ? '' : 'disabled'}>Stop</button>
@@ -340,12 +365,14 @@ VIEWS.dashboard = async function renderDashboardView() {
 
       ${hasLicence ? '' : `<div class="no-license-banner"><span>&#9888;  A license is required to start the Agents.</span><button class="no-license-cta preflight-link" data-view="license">Activate license →</button></div>`}
 
+      ${ANDROID ? '<div id="phone-setup"></div>' : ''}
+
       <div class="card get-started-card">
         <h3>How to start applying</h3>
         <ol class="get-started-steps">
           <li>${gsMark(setupDone.cvs, 1)}<span>Upload your CV. We fill in your details from it</span>${setupDone.cvs ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link cv-fill-btn">Upload CV →</button>'}</li>
           <li>${gsMark(setupDone.personal, 2)}<span>Check your details</span>${setupDone.personal ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="personal">Check details →</button>'}</li>
-          <li>${gsMark(false, 3)}<span>Sign in to your job sites in this Chrome. Use the <strong>Sign in</strong> buttons on the cards below</span></li>
+          <li>${gsMark(false, 3)}<span>${ANDROID ? 'Sign in to your job sites in Job-AI' : 'Sign in to your job sites in this Chrome'}. Use the <strong>Sign in</strong> buttons on the cards below</span></li>
           <li>${gsMark(running, 4)}<span>Click <strong>Start applying</strong>. The AI scores jobs, tailors your CV and applies for you automatically</span>${running ? '<em class="gs-ok">Applying…</em>' : ''}</li>
         </ol>
         <span class="status-msg" id="gs-cv-st"></span>
@@ -396,6 +423,7 @@ VIEWS.dashboard = async function renderDashboardView() {
 
     $$('.start').forEach((b) => b.addEventListener('click', () => startAgent(b.dataset.bot)));
     $$('.stop').forEach((b) => b.addEventListener('click', () => { agents[b.dataset.bot].stop(); renderDashboard(); }));
+    if (ANDROID) renderPhoneSetup();
     $('#start-all').addEventListener('click', async () => {
       if (!(await recheckLicence())) { navigate('license'); return; }
       for (const k of Object.keys(agents)) if (canRun[k] && enabled(k) && !agents[k].running) runAgent(k);
@@ -521,7 +549,7 @@ VIEWS.cvs = async function renderCVs() {
 VIEWS.search = async function renderSearch() {
   const { profile, settings } = await loadConfig();
   content.innerHTML = `
-    <div class="page-header"><h2>Search Preferences</h2><p>Used by the Reed, LinkedIn and company sites agents.</p></div>
+    <div class="page-header"><h2>Search Preferences</h2><p>${ANDROID ? 'Used by the Reed and company sites agents.' : 'Used by the Reed, LinkedIn and company sites agents.'}</p></div>
     <div class="card"><div class="tracd-grid">
       <div class="field"><label>Job titles to search (one per line)</label><textarea id="s-terms" class="tracd" rows="5" placeholder="e.g. IT Support Analyst">${esc((profile.searchTerms || []).join('\n'))}</textarea></div>
       <div class="field"><label>Skip jobs with these words in the title (one per line)</label><textarea id="s-exclude" class="tracd" rows="5" placeholder="e.g. Senior">${esc((profile.excludeKeywords || []).join('\n'))}</textarea></div>
@@ -575,7 +603,7 @@ VIEWS.license = async function renderLicense() {
     } catch (e) { setSt('#lic-st', 'Could not reach Job-AI. Check your connection.', true); }
   });
   $('#lic-remove') && $('#lic-remove').addEventListener('click', async () => {
-    if (!confirm('Remove the licence key from this browser? The agents stop until you add it again.')) return;
+    if (!confirm(`Remove the licence key from this ${ANDROID ? 'phone' : 'browser'}? The agents stop until you add it again.`)) return;
     Object.values(agents).forEach((a) => a.stop());
     await store.set('license', { key: '' }); globalThis.__jobaiLicense = '';
     renderLicense();
@@ -696,10 +724,10 @@ VIEWS['trac-details'] = async function renderTrac() {
 const TOUR_STEPS = [
   { view: 'cvs', title: 'Step 1: Upload your CV', tip: 'Start here. We read your CV and fill in your name, contact details, experience and the job titles to search for. Upload it as a Word document (.docx) for the best results. PDF also works. Before each application, the AI rewrites your summary and bullet points to match that specific job.', action: 'Click "Add CV" and choose your CV. It is read on this device and never uploaded.' },
   { view: 'personal', title: 'Step 2: Check your details', tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this page is, the fewer forms the agents leave blank.', action: 'If you uploaded your CV, most of this is already filled in. Check it, complete anything missing and click Save.' },
-  { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want to apply for, for example "IT Support Analyst". The Reed, LinkedIn and company sites agents all use these terms.', action: 'Add at least one job title, set your work type, then click Save.' },
+  { view: 'search', title: 'Step 3: Search preferences', tip: `Add the job titles you want to apply for, for example "IT Support Analyst". The Reed${ANDROID ? '' : ', LinkedIn'} and company sites agents all use these terms.`, action: 'Add at least one job title, set your work type, then click Save.' },
   { view: 'license', title: 'Step 4: Activate your license', tip: 'Enter the license key from your welcome email. The AI that tailors your CV runs on our cloud, so there is nothing extra to install.', action: 'Paste your license key into the box and click Activate.' },
-  { view: 'dashboard', title: 'Step 5: Sign in to your job sites', tip: 'The agents work inside this Chrome, using the accounts you are already signed in to. They never see your password.', action: 'Click "Sign in to Reed" or "Sign in to LinkedIn" on an agent card, sign in as normal, then come back to this tab. The company sites agent needs no sign in.' },
-  { view: 'dashboard', title: 'All set: start applying', tip: 'Click Start applying and each agent opens its own minimised Chrome window and works inside it: searching, tailoring your CV and applying to matching jobs.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
+  { view: 'dashboard', title: 'Step 5: Sign in to your job sites', tip: ANDROID ? 'Sign in once inside Job-AI and the agents use that account. They never see your password.' : 'The agents work inside this Chrome, using the accounts you are already signed in to. They never see your password.', action: ANDROID ? 'Tap "Sign in to Reed" or "Sign in to Trac" on an agent card, sign in as normal, then tap Done. The company sites agent needs no sign in.' : 'Click "Sign in to Reed" or "Sign in to LinkedIn" on an agent card, sign in as normal, then come back to this tab. The company sites agent needs no sign in.' },
+  { view: 'dashboard', title: 'All set: start applying', tip: ANDROID ? 'Tap Start applying and the agents work in the background: searching, tailoring your CV and applying to matching jobs. You can lock your phone; keep it charging.' : 'Click Start applying and each agent opens its own minimised Chrome window and works inside it: searching, tailoring your CV and applying to matching jobs.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
   { view: 'trac-details', title: 'NHS jobs: the Trac Agent', tip: 'NHS jobs use a separate system called Trac with much longer forms, so the NHS agent has its own page: employment history, references, education and the monitoring questions.', action: 'Open "NHS / Trac details" and fill it in once, or click "Upload completed Trac PDF" to fill it from an old application. Then sign in to Trac with the button on the NHS agent card.' },
 ];
 function startTour() {
@@ -729,11 +757,11 @@ async function initOnboarding() {
   overlay.className = 'welcome-overlay';
   overlay.innerHTML = `<div class="welcome-modal"><div class="welcome-logo"></div>
     <h2>Welcome to Job-AI</h2>
-    <p>Your automated job application assistant, right inside Chrome. Set it up once and the agents search, tailor your CV, and apply to jobs for you.</p>
+    <p>Your automated job application assistant, right ${ANDROID ? 'on your phone' : 'inside Chrome'}. Set it up once and the agents search, tailor your CV, and apply to jobs for you.</p>
     <div class="welcome-features">
-      <div class="welcome-feature"><strong>4 Agents</strong><span>NHS (Trac), Reed, LinkedIn and company career sites</span></div>
+      <div class="welcome-feature"><strong>${ANDROID ? '3 Agents' : '4 Agents'}</strong><span>${ANDROID ? 'NHS (Trac), Reed and company career sites' : 'NHS (Trac), Reed, LinkedIn and company career sites'}</span></div>
       <div class="welcome-feature"><strong>AI CV Tailoring</strong><span>Every CV is rewritten to match the job before it is sent</span></div>
-      <div class="welcome-feature"><strong>Private</strong><span>Your details and CV stay in this browser, on this device</span></div>
+      <div class="welcome-feature"><strong>Private</strong><span>${ANDROID ? 'Your details and CV stay on this phone' : 'Your details and CV stay in this browser, on this device'}</span></div>
       <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
     </div>
     <div class="welcome-actions"><button class="primary" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div></div>`;
@@ -778,7 +806,7 @@ async function initOnboarding() {
     const queue = {}; for (const j of all) queue[j.status] = (queue[j.status] || 0) + 1;
     const reasons = {}; for (const j of all) if (j.status === 'skipped' && j.reason) reasons[j.reason] = (reasons[j.reason] || 0) + 1;
     return {
-      client: 'chrome_extension',
+      client: ANDROID ? 'android_app' : 'chrome_extension',
       license: { status: license.status || 'unknown', plan: license.status === 'active' ? 'paid' : 'trial', expires_at: license.expiresAt || null },
       agents: Object.fromEntries(Object.entries(agents).map(([k, a]) => [k, a.running ? 'running' : 'stopped'])),
       connected_accounts: {},

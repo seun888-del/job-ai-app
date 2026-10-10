@@ -38,7 +38,6 @@ public class MainActivity extends Activity {
 
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
-    if (Build.VERSION.SDK_INT >= 33) requestPermissions(new String[] { "android.permission.POST_NOTIFICATIONS" }, 1);
     getWindow().setStatusBarColor(SURFACE_ALT);
     getWindow().setNavigationBarColor(BG);
     getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
@@ -131,6 +130,27 @@ public class MainActivity extends Activity {
 
   void detachViews() { hostFrame.removeAllViews(); tabFrame.removeAllViews(); }
 
+  // Permission buttons on the dashboard's phone setup card.
+  void askNotifications() {
+    boolean asked = getPreferences(MODE_PRIVATE).getBoolean("askedNotif", false);
+    if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED
+        && (!asked || shouldShowRequestPermissionRationale("android.permission.POST_NOTIFICATIONS"))) {
+      getPreferences(MODE_PRIVATE).edit().putBoolean("askedNotif", true).apply();
+      requestPermissions(new String[] { "android.permission.POST_NOTIFICATIONS" }, 1);
+      return;
+    }
+    // Already refused once: Android won't ask again, so open the app's notification settings.
+    startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()));
+  }
+
+  void askBattery() {
+    try {
+      startActivity(new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));
+    } catch (Exception e) {
+      startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+    }
+  }
+
   boolean pickFile(ValueCallback<Uri[]> cb, WebChromeClient.FileChooserParams p) {
     if (fileCb != null) fileCb.onReceiveValue(null);
     fileCb = cb;
@@ -161,6 +181,13 @@ public class MainActivity extends Activity {
     super.onStart();
     JobAIService s = JobAIService.instance;
     if (s != null && s.host != null && s.activity == this) s.attach(this);
+  }
+
+  // Back from a permission prompt or Android's settings: let the dashboard refresh its setup card.
+  @Override protected void onResume() {
+    super.onResume();
+    JobAIService s = JobAIService.instance;
+    if (s != null && s.host != null) s.host.evaluateJavascript("document.dispatchEvent(new Event('jobai-resume'))", null);
   }
 
   @Override protected void onStop() {

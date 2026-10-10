@@ -244,6 +244,12 @@
   };
   // Backend: requests from the app are tagged as the Android app.
   globalThis.__jobaiClient = 'android';
+  // Phone permissions for the dashboard's setup card, and "Job-AI needs you" notifications.
+  globalThis.__jobaiPhone = {
+    state: () => call('phoneState'),
+    ask: (what) => call(what === 'battery' ? 'askBattery' : 'askNotifications'),
+  };
+  globalThis.__jobaiNotify = (text) => call('notify', { text: String(text || '') }).catch(() => {});
   // Keep the "Job-AI" notification in step with the agents: it shows their latest log line.
   let lastStatus = '';
   ev.storageChanged.addListener((changes) => {
