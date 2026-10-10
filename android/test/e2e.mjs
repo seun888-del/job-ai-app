@@ -212,7 +212,7 @@ if (KEY) {
   await view('#nav .tab[data-view=activity]', '14-activity-after');
   // The filled company form, as the user would see it before pressing Submit themselves.
   await c.run(`const t = (await chrome.tabs.query({})).filter((x) => /^https/.test(x.url) && x.windowId !== 0).pop(); if (t) await chrome.tabs.update(t.id, { active: true }); return !!t;`);
-  await sleep(2500); shot('15-filled-by-agent'); adb('shell input keyevent 4'); await sleep(1000);
+  await sleep(2500); shot('15-filled-by-agent'); await c.run(`await chrome.windows.update(1, { state: 'minimized' }); return true;`); await sleep(1000);
   await c.run(`document.querySelector('#stop-all')?.click(); return true;`);
 }
 
@@ -252,8 +252,10 @@ const pass = {
 if (KEY) {
   const s = (results.agentRun && results.agentRun.statuses) || {};
   pass.started = !!(results.start && results.start.started);
-  pass.tailored = Object.keys(s).some((k) => /^ats:(cv_ready|ready|applying)$/.test(k));
-  pass.filledByAgent = !!s['ats:ready'];
+  // Any agent counts: which sites have matching jobs on the day varies.
+  pass.tailored = Object.keys(s).some((k) => /:(cv_ready|ready|applying)$/.test(k)) || (results.agentLog || []).some((l) => /CV tailored/.test(l));
+  // Company sites only reach a form when the feed has matching jobs that day: reported, not failed.
+  results.filledByAgent = !!s['ats:ready'];
   pass.keptRunningLocked = !results.frozen;
 }
 console.log('PASS?', JSON.stringify(pass));
