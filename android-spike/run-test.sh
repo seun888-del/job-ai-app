@@ -16,11 +16,13 @@ adb logcat -c
 adb logcat -s JobAISpike:I ActivityManager:W > $OUT/logcat.txt 2>&1 &
 adb install -r android-spike/app/build/outputs/apk/debug/app-debug.apk
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
-adb shell am start -n $PKG/.MainActivity
-sleep 5
-adb shell am start-foreground-service -n $PKG/.AgentService
+adb shell am start -n $PKG/.MainActivity --ez autostart true
+sleep 60
+# Fail fast if the agent did not start or never loaded a page.
+if ! grep -q "SERVICE START" $OUT/logcat.txt; then note "FAIL: agent service did not start"; exit 1; fi
 note "PHASE 1: screen on, charging"
-watch_for 3
+watch_for 2
+if ! grep -q "search found" $OUT/logcat.txt; then note "FAIL: no search completed in 3 min"; grep JobAISpike $OUT/logcat.txt | tail -20; exit 1; fi
 
 note "PHASE 2: screen OFF, battery, deep Doze, NOT exempt"
 adb shell dumpsys battery unplug
@@ -37,4 +39,5 @@ watch_for 20
 
 note "END"
 adb shell run-as $PKG cat files/spike.log > $OUT/spike.log || true
+grep JobAISpike $OUT/logcat.txt | sed 's/^.*JobAISpike: //' > $OUT/agent.log
 adb shell dumpsys battery reset

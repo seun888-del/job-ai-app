@@ -49,6 +49,8 @@ public class MainActivity extends Activity {
     col.addView(sv, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
     setContentView(col);
     h.post(refresh);
+    // Test harness: `am start ... --ez autostart true` starts the agent like the Start button.
+    if (getIntent().getBooleanExtra("autostart", false)) startForegroundService(new Intent(this, AgentService.class));
   }
 
   final Runnable refresh = new Runnable() {
