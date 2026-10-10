@@ -112,6 +112,9 @@ public class JobAIService extends Service {
     for (Tab t : tabs.values()) t.wv.destroy();
     tabs.clear();
     if (host != null) host.destroy();
+    if (parkWin != null) parkWin.dismiss();
+    if (parkDisplay != null) parkDisplay.release();
+    if (parkReader != null) parkReader.close();
     if (wake != null && wake.isHeld()) wake.release();
     io.shutdownNow();
     super.onDestroy();
@@ -311,6 +314,7 @@ public class JobAIService extends Service {
     if (tabs.remove(t.id) == null) return;
     if (shown == t) hide();
     t.wv.stopLoading();
+    MainActivity.detachFromParent(t.wv);
     main.post(t.wv::destroy);
     if (notify) try { event(new JSONObject().put("type", "tabRemoved").put("id", t.id)); } catch (Exception ignored) {}
   }
@@ -327,7 +331,7 @@ public class JobAIService extends Service {
     getSystemService(NotificationManager.class).cancel(2);
     if (t == null) return;
     if (t.closeOnHide) { closeTab(t, true); return; }
-    t.ctx.setBaseContext(this); layoutHidden(t.wv);
+    parkView(t.wv, t.ctx);
   }
 
   // An agent needs the user (a site asks them to sign in) while the app is in the background.
@@ -347,32 +351,62 @@ public class JobAIService extends Service {
     a.attachHost(host);
     if (shown != null) a.showTab(shown);
   }
-  // UI not on screen: take the pages off it but keep them "visible" to Chrome (see MainActivity.onStop).
+  // ── Off-screen parking ───────────────────────────────────────────────────────
+  // A page that has been on screen and is then hidden gets frozen by the web engine after about
+  // 5 minutes, which would stop the agents. So whenever the app's screen goes away, its pages move
+  // to a window on the app's own private virtual display: still "on screen" as far as the engine
+  // knows, invisible to the user, no permission needed. They move back when the app opens.
+  android.hardware.display.VirtualDisplay parkDisplay;
+  android.media.ImageReader parkReader;
+  android.app.Presentation parkWin;
+  android.widget.FrameLayout parkRoot;
+
+  boolean ensureParking() {
+    if (parkWin != null) return true;
+    try {
+      android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+      int w = Math.max(dm.widthPixels, 720), h = Math.max(dm.heightPixels, 1280);
+      parkReader = android.media.ImageReader.newInstance(w, h, android.graphics.PixelFormat.RGBA_8888, 2);
+      parkReader.setOnImageAvailableListener(r -> { android.media.Image i = r.acquireLatestImage(); if (i != null) i.close(); }, main);
+      parkDisplay = getSystemService(android.hardware.display.DisplayManager.class).createVirtualDisplay("jobai-park", w, h, dm.densityDpi,
+        parkReader.getSurface(), android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY);
+      parkWin = new android.app.Presentation(this, parkDisplay.getDisplay());
+      parkRoot = new android.widget.FrameLayout(parkWin.getContext());
+      parkWin.setContentView(parkRoot);
+      parkWin.show();
+      return true;
+    } catch (Exception e) {
+      Log.e(TAG, "parking display unavailable", e);
+      parkWin = null;
+      return false;
+    }
+  }
+
+  void parkView(WebView wv, MutableContextWrapper ctx) {
+    if (ensureParking()) {
+      ctx.setBaseContext(parkWin.getContext());
+      MainActivity.detachFromParent(wv);
+      parkRoot.addView(wv, new android.widget.FrameLayout.LayoutParams(-1, -1));
+    } else {
+      MainActivity.detachFromParent(wv);
+      ctx.setBaseContext(this);
+    }
+  }
+
   void park() {
     if (activity == null) return;
     activity.detachViews();
-    hostCtx.setBaseContext(this);
-    keepAwake(host);
-    if (shown != null) { shown.ctx.setBaseContext(this); layoutHidden(shown.wv); keepAwake(shown.wv); }
-  }
-
-  static void keepAwake(WebView wv) {
-    int w = wv.getWidth(), h = wv.getHeight();
-    wv.dispatchWindowVisibilityChanged(View.VISIBLE);
-    wv.setVisibility(View.VISIBLE);
-    if (w > 0 && h > 0) {
-      wv.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
-      wv.layout(0, 0, w, h);
-    }
+    parkView(host, hostCtx);
+    Log.i(TAG, "pages parked " + (parkWin != null ? "on the private display" : "off screen (no private display)"));
+    if (shown != null) parkView(shown.wv, shown.ctx);
   }
 
   void detach(MainActivity a) {
     if (activity != a) return;
     a.detachViews();
     activity = null;
-    hostCtx.setBaseContext(this);
-    keepAwake(host);
-    if (shown != null) { shown.ctx.setBaseContext(this); layoutHidden(shown.wv); keepAwake(shown.wv); }
+    parkView(host, hostCtx);
+    if (shown != null) parkView(shown.wv, shown.ctx);
   }
 
   // ── fetch() to other sites, done natively (no CORS; shares the WebViews' cookies) ──

@@ -174,7 +174,7 @@ if (KEY) {
     await T.loadConfig();
     document.querySelector('#nav .tab[data-view=license]')?.click();
     document.querySelector('#nav .tab[data-view=dashboard]').click();
-    await new Promise((r) => setTimeout(r, 1500));
+    for (let i = 0; i < 30 && !(document.querySelector('#start-all') && !document.querySelector('#start-all').disabled); i++) await new Promise((r) => setTimeout(r, 500));
     const btn = document.querySelector('#start-all');
     if (!btn || btn.disabled) return { started: false, why: btn ? 'Start button disabled' : 'no Start button', licMsg };
     btn.click();
