@@ -4,6 +4,7 @@
 import cfg from '../shims/config.js';
 import * as store from '../lib/store.js';
 import { Page } from '../driver/page.js';
+import { stopOnWindowClose } from './base.js';
 
 const trac = require('../../../bot/modules/trac_source');
 const salary = require('../../../bot/modules/salary_filter');
@@ -41,10 +42,12 @@ export class TracAgent {
     if (this.running) return;
     this.running = true; this.onChange();
     this.log(`Starting (${(await this.autoSubmit()) ? 'Submit for me is ON' : 'you submit applications yourself'}).`);
+    let unwatch = () => {};
     try {
       // One background window for the agent's pages, so your own tabs are never touched.
       const win = await chrome.windows.create({ url: 'about:blank', focused: false, state: 'minimized' }).catch(() => null);
       this.windowId = win && win.id;
+      unwatch = stopOnWindowClose(this);
       this.page = await Page.open('about:blank', { windowId: this.windowId });
       while (this.running) {
         const cycleEnd = Date.now() + 10 * 60 * 1000;
@@ -66,6 +69,7 @@ export class TracAgent {
     } catch (e) {
       this.log('Stopped: ' + e.message);
     } finally {
+      unwatch();
       this.running = false;
       if (this.windowId) await chrome.windows.remove(this.windowId).catch(() => {});
       this.page = null; this.windowId = null;

@@ -18,6 +18,17 @@ export function detectWorkType(d) {
   return 'onsite';
 }
 
+// Closing an agent's browser window stops that agent, same as closing the app's browser.
+export function stopOnWindowClose(agent) {
+  const onRemoved = (id) => {
+    if (id !== agent.windowId) return;
+    agent.windowId = null;
+    if (agent.running) { agent.running = false; agent.log('Browser window closed. Agent stopped.'); agent.onChange(); }
+  };
+  chrome.windows.onRemoved.addListener(onRemoved);
+  return () => chrome.windows.onRemoved.removeListener(onRemoved);
+}
+
 export class SiteAgent {
   constructor({ source, label, onChange = () => {} }) { this.source = source; this.label = label; this.onChange = onChange; this.running = false; this.page = null; this.windowId = null; }
   log(m) { store.log(`[${this.label}] ${m}`); }
@@ -30,9 +41,7 @@ export class SiteAgent {
     this.running = true; this.onChange();
     this.log('Starting.');
     try {
-      const win = await chrome.windows.create({ url: 'about:blank', focused: false, state: 'minimized' }).catch(() => null);
-      this.windowId = win && win.id;
-      this.page = await Page.open('about:blank', { windowId: this.windowId });
+      if (!this.lazyWindow) await this.ensurePage();
       while (this.running) {
         const roundEnd = Date.now() + ROUND_MS;
         const ok = await this.signIn().catch((e) => { this.log('Sign-in check failed: ' + e.message); return false; });
@@ -47,11 +56,24 @@ export class SiteAgent {
     } catch (e) {
       this.log('Stopped: ' + e.message);
     } finally {
+      if (this._unwatch) this._unwatch();
+      this._unwatch = null;
       this.running = false;
       if (this.windowId) await chrome.windows.remove(this.windowId).catch(() => {});
       this.page = null; this.windowId = null;
       this.onChange();
     }
+  }
+  // The agent's own minimised window, opened on first use.
+  async ensurePage() {
+    if (this.page && !this.page.isClosed()) return this.page;
+    if (!this.windowId) {
+      const win = await chrome.windows.create({ url: 'about:blank', focused: false, state: 'minimized' }).catch(() => null);
+      this.windowId = win && win.id;
+      if (!this._unwatch) this._unwatch = stopOnWindowClose(this);
+    }
+    this.page = await Page.open('about:blank', { windowId: this.windowId });
+    return this.page;
   }
   stop() { if (this.running) { this.running = false; this.log('Stopping after the current step.'); this.onChange(); } }
   async wait(until) { while (this.running && Date.now() < until) await sleep(1000); }

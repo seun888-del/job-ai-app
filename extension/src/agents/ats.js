@@ -63,7 +63,7 @@ async function formState(page) {
 }
 
 export class AtsAgent extends SiteAgent {
-  constructor(opts) { super({ ...opts, source: 'ats', label: 'Company sites' }); this.minWords = 60; }
+  constructor(opts) { super({ ...opts, source: 'ats', label: 'Company sites' }); this.minWords = 60; this.lazyWindow = true; }
 
   async search() {
     if (!(cfg.JOB_SEARCHES || []).length) { this.log('Add search terms on the Setup page to find jobs.'); return; }
@@ -110,6 +110,7 @@ export class AtsAgent extends SiteAgent {
       return { error: `${ats} did not accept the application (${r.reason}${r.status ? ' ' + r.status : ''})` };
     }
     if (submit) {
+      await this.ensurePage();
       await this.page.goto(job.url);
       await sleep(1500 + Math.random() * 1500);
       if (await blocked(this.page)) return 'Site asked for a verification check';

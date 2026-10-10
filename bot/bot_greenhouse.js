@@ -234,7 +234,7 @@ async function phase1_sourceAndQueue(page) {
 }
 
 // ── Phase 2: apply cv_ready jobs ───────────────────────────────────────────
-async function phase2_applyReadyCVs(context, page) {
+async function phase2_applyReadyCVs(browser) {
   console.log('\n══════════════════════════════════════════════════════');
   console.log('  [Auto-Apply] Phase 2 — waiting for Scorer agent...');
   console.log('══════════════════════════════════════════════════════');
@@ -328,6 +328,7 @@ async function phase2_applyReadyCVs(context, page) {
           if (!r.ok && !r.dryRun) console.log(`  [Auto-Apply] HTTP submit not accepted (${r.reason}${r.status ? ' ' + r.status : ''})`);
           result = r.submitted ? true : (r.dryRun ? 'dry_run' : false);
         } else {
+          const page = await browser.page();
           await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
           await DELAY(1500 + Math.random() * 1500);
           result = await atsFiller.fillExternalForm(page, job, job.cvPath, ats, { submit: SUBMIT });
@@ -348,11 +349,11 @@ async function phase2_applyReadyCVs(context, page) {
           console.log(`  [Auto-Apply] ✗ Apply failed [${ats}]: ${job.title}`);
         }
       } catch (err) {
+        if (err.launchFailed) { queue.update(job.jobId, { status: 'cv_ready' }); throw err; }
         const isPageClosed = /Target page.*closed|context.*closed|browser.*closed|page.*closed/i.test(err.message);
         if (isPageClosed) {
           queue.update(job.jobId, { status: 'cv_ready', error: null });
-          await page.close().catch(() => {});
-          page = await context.newPage(); // throws if the context is dead → caught by main()
+          await browser.newPage(); // throws if the context is dead → caught by main()
         } else {
           queue.update(job.jobId, { status: 'apply_failed', error: err.message });
           logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
@@ -415,27 +416,35 @@ async function main() {
   const stuck = queue.getByStatus('applying').filter(j => j.source === SOURCE);
   for (const j of stuck) queue.update(j.jobId, { status: 'cv_ready' });
 
+  // The browser opens only when a job needs a form filled. Sourcing uses the feed
+  // and plain HTTP, and Recruitee applies over HTTP, so most runs never open one.
   let context = null, page = null, guard = null, chromeProc = null;
-  if (HEADLESS_ONLY) {
-    // No browser at all: source + apply over pure HTTP (Recruitee). Browser-only
-    // ATSes (SmartRecruiters etc.) are skipped in phase 2. This is the macOS path.
-    console.log('  [Auto-Apply] Headless mode — no browser. Applies HTTP-only ATSes (e.g. Recruitee); browser-required jobs are skipped.');
-  } else {
-    try {
-      ({ context, page, proc: chromeProc } = await launchBrowser());
-      guard = watchForManualClose(context, 'Auto-Apply');
-    } catch (err) {
-      if (BROWSER_CLOSED_RE.test(err.message || '')) { console.log('  [Auto-Apply] Browser closed — agent stopped.'); process.exit(0); }
-      console.error('  [Auto-Apply] Failed to launch browser: ' + err.message);
-      process.exit(1);
-    }
-  }
+  if (HEADLESS_ONLY) console.log('  [Auto-Apply] Headless mode — no browser. Applies HTTP-only ATSes (e.g. Recruitee); browser-required jobs are skipped.');
+  const browser = {
+    async page() {
+      if (page && !page.isClosed()) return page;
+      if (!context) {
+        console.log('  [Auto-Apply] Opening the browser for a job that needs its form filled.');
+        try { ({ context, page, proc: chromeProc } = await launchBrowser()); }
+        catch (err) { err.launchFailed = true; throw err; }
+        guard = watchForManualClose(context, 'Auto-Apply');
+        return page;
+      }
+      return this.newPage();
+    },
+    async newPage() {
+      if (page) await page.close().catch(() => {});
+      page = await context.newPage();
+      return page;
+    },
+  };
 
   try {
-    await phase1_sourceAndQueue(page);
-    await phase2_applyReadyCVs(context, page);
+    await phase1_sourceAndQueue(null);
+    await phase2_applyReadyCVs(browser);
   } catch (err) {
     if (BROWSER_CLOSED_RE.test(err.message || '')) console.log('  [Auto-Apply] Browser closed — agent stopped.');
+    else if (err.launchFailed) console.error('  [Auto-Apply] Failed to launch browser: ' + err.message);
     else console.error('  [Auto-Apply] Fatal: ' + err.message);
   } finally {
     if (guard) guard.intentional = true;

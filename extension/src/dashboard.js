@@ -100,7 +100,12 @@ checkSteps();
 setInterval(checkSteps, 5 * 60 * 1000);
 
 // start() resolves when the agent has fully stopped; kept so an update can wait for it.
-function runAgent(key) { agents[key].loop = agents[key].start(); sendStep('agents_started'); }
+// A restart waits for the previous run to finish its step, so two runs never overlap.
+function runAgent(key) {
+  const a = agents[key]; const prev = a.loop;
+  a.loop = (async () => { if (prev) await prev.catch(() => {}); return a.start(); })();
+  sendStep('agents_started');
+}
 async function startAgent(key) {
   if (!(await recheckLicence())) { navigate('license'); return; }
   runAgent(key);
