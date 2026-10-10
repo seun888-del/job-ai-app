@@ -99,9 +99,12 @@ console.log('reed', JSON.stringify(results.reed));
 // NHS / Trac: search (fetch through the app) + read an advert in a tab.
 results.nhs = await c.run(`
   const T = globalThis.__jobaiTest;
-  const jobs = await T.trac.searchTrac('administrator', { pages: 1 });
+  // Same as the NHS agent: the search gets a page to load the results in.
+  const p = await T.Page.open('about:blank');
+  const jobs = await T.trac.searchTrac('administrator', { pages: 1, page: p });
   let jdWords = 0;
-  if (jobs[0]) { const p = await T.Page.open('about:blank'); const jd = await T.trac.fetchTracJD(jobs[0].url, p).catch((e) => ''); jdWords = String((jd && jd.description) || jd || '').split(/\\s+/).length; await p.close(); }
+  if (jobs[0]) { const jd = await T.trac.fetchTracJD(jobs[0].url, p).catch((e) => ''); jdWords = String((jd && jd.description) || jd || '').split(/\\s+/).length; }
+  await p.close();
   return { found: jobs.length, first: jobs[0] && jobs[0].title, jdWords };
 `);
 console.log('nhs', JSON.stringify(results.nhs));
@@ -128,14 +131,16 @@ results.ats = await c.run(`
   const ats = T.mods.ats.detectATS(job.url);
   const res = await T.mods.ats.fillExternalForm(p, job, cvPath, ats, { submit: false });
   const filled = await p.evaluate(() => Array.from(document.querySelectorAll('input[type=text],input[type=email],input[type=tel],textarea')).filter((i) => i.offsetParent && i.value).length);
-  const files = await p.evaluate(() => Array.from(document.querySelectorAll('input[type=file]')).map((f) => (f.files.length ? f.files[0].name : '')).filter(Boolean));
+  // Greenhouse swaps the file box for a chip with the file name once a CV is in.
+  const files = await p.evaluate(() => Array.from(document.querySelectorAll('input[type=file]')).map((f) => (f.files.length ? f.files[0].name : '')).filter(Boolean)
+    .concat((document.body.innerText.match(/[\\w .()-]+\\.pdf/gi) || []).map((x) => x.trim())));
   globalThis.__testTab = p;
   return { job: job.title + ' @ ' + job.company, url: job.url, ats, result: res, filledFields: filled, cvAttached: files };
 `);
 console.log('ats', JSON.stringify(results.ats));
 
 // Show the filled form full screen, as the app does when a site needs the user.
-await c.run(`const p = globalThis.__testTab; if (p) { await chrome.tabs.update(p.tabId, { active: true }); await p.evaluate(() => window.scrollTo(0, 0)); } return true;`);
+await c.run(`const p = globalThis.__testTab; if (p) { await chrome.tabs.update(p.tabId, { active: true }); await p.evaluate(() => { const i = Array.from(document.querySelectorAll('input[type=text],input[type=email]')).find((x) => x.value); if (i) i.scrollIntoView({ block: 'start' }); }); } return true;`);
 await sleep(2500);
 shot('06-filled-form');
 await c.run(`if (globalThis.__testTab) await globalThis.__testTab.evaluate(() => { const f = document.querySelector('input[type=file]'); const el = (f && f.closest('fieldset,div')) || document.querySelector('form'); if (el) el.scrollIntoView({ block: 'center' }); }); return true;`);
