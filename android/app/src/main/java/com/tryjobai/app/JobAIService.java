@@ -347,12 +347,32 @@ public class JobAIService extends Service {
     a.attachHost(host);
     if (shown != null) a.showTab(shown);
   }
+  // UI not on screen: take the pages off it but keep them "visible" to Chrome (see MainActivity.onStop).
+  void park() {
+    if (activity == null) return;
+    activity.detachViews();
+    hostCtx.setBaseContext(this);
+    keepAwake(host);
+    if (shown != null) { shown.ctx.setBaseContext(this); layoutHidden(shown.wv); keepAwake(shown.wv); }
+  }
+
+  static void keepAwake(WebView wv) {
+    int w = wv.getWidth(), h = wv.getHeight();
+    wv.dispatchWindowVisibilityChanged(View.VISIBLE);
+    wv.setVisibility(View.VISIBLE);
+    if (w > 0 && h > 0) {
+      wv.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+      wv.layout(0, 0, w, h);
+    }
+  }
+
   void detach(MainActivity a) {
     if (activity != a) return;
     a.detachViews();
     activity = null;
     hostCtx.setBaseContext(this);
-    if (shown != null) { shown.ctx.setBaseContext(this); layoutHidden(shown.wv); }
+    keepAwake(host);
+    if (shown != null) { shown.ctx.setBaseContext(this); layoutHidden(shown.wv); keepAwake(shown.wv); }
   }
 
   // ── fetch() to other sites, done natively (no CORS; shares the WebViews' cookies) ──

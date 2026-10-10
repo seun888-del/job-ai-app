@@ -161,7 +161,14 @@ if (KEY) {
   results.start = await c.run(`
     const T = globalThis.__jobaiTest;
     globalThis.__jobaiDryRun = true;
-    await T.store.set('license', { key: ${JSON.stringify(KEY)} });
+    // Activate the key on the License page, like a user.
+    document.querySelector('#setup-label').click();
+    document.querySelector('#nav-setup [data-view=license]').click();
+    await new Promise((r) => setTimeout(r, 1000));
+    document.querySelector('#lic').value = ${JSON.stringify(KEY)};
+    document.querySelector('#lic-save').click();
+    for (let i = 0; i < 40 && !/Active/.test((document.querySelector('#lic-st') || {}).textContent || ''); i++) await new Promise((r) => setTimeout(r, 500));
+    const licMsg = (document.querySelector('#lic-st') || {}).textContent || '';
     await T.store.patch('profile', { searchTerms: ['IT Support', 'Technical Support', 'Service Desk', 'Customer Support'], country: 'United Kingdom' });
     await T.store.patch('settings', { enabled: { trac: false, linkedin: false, reed: true, ats: true }, dailyCap: 5 });
     await T.loadConfig();
@@ -169,13 +176,15 @@ if (KEY) {
     document.querySelector('#nav .tab[data-view=dashboard]').click();
     await new Promise((r) => setTimeout(r, 1500));
     const btn = document.querySelector('#start-all');
-    if (!btn || btn.disabled) return { started: false, why: btn ? 'Start button disabled' : 'no Start button' };
+    if (!btn || btn.disabled) return { started: false, why: btn ? 'Start button disabled' : 'no Start button', licMsg };
     btn.click();
     await new Promise((r) => setTimeout(r, 4000));
     return { started: true, running: Object.entries(T.agents).filter(([, a]) => a.running).map(([k]) => k) };
   `);
   console.log('start', JSON.stringify(results.start));
   shot('10-agents-running');
+  // In-page timer: if the dashboard gets slowed down or frozen in the background, this falls behind.
+  await c.run(`window.__hb2 = 0; window.__hb2Start = Date.now(); setInterval(() => { window.__hb2++; }, 1000); return true;`);
   adb('shell cmd statusbar expand-notifications'); await sleep(2000); shot('11-notification'); adb('shell cmd statusbar collapse');
 
   // Lock the screen while they work, like a phone left on charge.
@@ -183,9 +192,10 @@ if (KEY) {
   const t0 = Date.now(); let st = {};
   while (Date.now() - t0 < 18 * 60 * 1000) {
     await sleep(30000);
-    st = await c.run(`const j = await globalThis.__jobaiTest.store.jobs(); const by = {}; for (const x of j) by[x.source + ':' + x.status] = (by[x.source + ':' + x.status] || 0) + 1; return by;`);
+    st = await c.run(`const j = await globalThis.__jobaiTest.store.jobs(); const by = {}; for (const x of j) by[x.source + ':' + x.status] = (by[x.source + ':' + x.status] || 0) + 1; by.__timer = window.__hb2 + '/' + Math.round((Date.now() - window.__hb2Start) / 1000) + 's'; return by;`, 90000);
     console.log(Math.round((Date.now() - t0) / 60000) + 'min', JSON.stringify(st));
     if (st && st['ats:ready']) break;
+    if (st && st.error) results.frozen = (results.frozen || 0) + 1;
   }
   results.agentRun = { minutes: Math.round((Date.now() - t0) / 60000), statuses: st };
   adb('shell input keyevent 224'); adb('shell wm dismiss-keyguard'); await sleep(2000);
@@ -235,6 +245,7 @@ if (KEY) {
   pass.started = !!(results.start && results.start.started);
   pass.tailored = Object.keys(s).some((k) => /^ats:(cv_ready|ready|applying)$/.test(k));
   pass.filledByAgent = !!s['ats:ready'];
+  pass.keptRunningLocked = !results.frozen;
 }
 console.log('PASS?', JSON.stringify(pass));
 writeFileSync(`${OUT}/pass.json`, JSON.stringify(pass));

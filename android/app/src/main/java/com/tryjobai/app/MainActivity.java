@@ -153,6 +153,22 @@ public class MainActivity extends Activity {
     moveTaskToBack(true);
   }
 
+  // Off screen (app in the background or the screen locked) the dashboard must not count as a
+  // hidden page: Chrome slows hidden pages down and freezes them after about 5 minutes, which
+  // would stop the agents. So it is taken off the screen and kept as a never-shown page, the
+  // same state the background test proved runs at full speed. It comes back on onStart.
+  @Override protected void onStart() {
+    super.onStart();
+    JobAIService s = JobAIService.instance;
+    if (s != null && s.host != null && s.activity == this) s.attach(this);
+  }
+
+  @Override protected void onStop() {
+    JobAIService s = JobAIService.instance;
+    if (s != null && s.activity == this) s.park();
+    super.onStop();
+  }
+
   @Override protected void onDestroy() {
     JobAIService s = JobAIService.instance;
     if (s != null) s.detach(this);
