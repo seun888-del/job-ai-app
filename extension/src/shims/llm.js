@@ -6,7 +6,7 @@ const key = () => globalThis.__jobaiLicense || '';
 
 // Same headers as the app: the device id lets the backend apply its one-trial-per-device rule.
 function headers(k = key()) {
-  const h = { Authorization: `Bearer ${k}`, 'X-Client': 'extension' };
+  const h = { Authorization: `Bearer ${k}`, 'X-Client': globalThis.__jobaiClient || 'extension' };
   if (globalThis.__jobaiDevice) h['X-Machine-Id'] = globalThis.__jobaiDevice;
   return h;
 }

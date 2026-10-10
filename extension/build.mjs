@@ -21,6 +21,8 @@ const out = resolve(here, 'dist');
 const watch = process.argv.includes('--watch');
 // --test: keep the test hook and source maps. Release builds (default) ship neither.
 const test = process.argv.includes('--test') || watch;
+// --android: also package the build as the Android app's web assets (android/app/src/main/assets/www).
+const android = process.argv.includes('--android');
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
@@ -111,10 +113,24 @@ const builds = [
   { ...common, format: 'iife', entryPoints: { helper: resolve(here, 'src/driver/helper.js') }, outdir: out },
 ];
 
+if (android) builds.push({ ...common, format: 'iife', entryPoints: { 'android-chrome': resolve(here, 'src/platform/android-chrome.js') }, outdir: out });
+
 if (watch) {
   for (const b of builds) (await esbuild.context(b)).watch();
   console.log('Watching…');
 } else {
   for (const b of builds) await esbuild.build(b);
   console.log('Built to', out);
+}
+
+// Android app: same files, plus the chrome.* stand-in loaded before the dashboard.
+if (android && !watch) {
+  const www = resolve(root, 'android/app/src/main/assets/www');
+  rmSync(www, { recursive: true, force: true });
+  cpSync(out, www, { recursive: true });
+  for (const f of ['background.js', 'manifest.json']) rmSync(resolve(www, f), { force: true });
+  const html = readFileSync(resolve(www, 'dashboard.html'), 'utf8');
+  writeFileSync(resolve(www, 'dashboard.html'), html.replace('<head>', '<head>\n  <script src="android-chrome.js"></script>'));
+  rmSync(resolve(out, 'android-chrome.js'), { force: true });
+  console.log('Android assets ->', www);
 }
