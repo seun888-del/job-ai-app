@@ -173,7 +173,10 @@ function resolveAnswer(label, applicant = {}, details = {}) {
   if (/^address|address 1|street/.test(l)) return fill(D.address || (A.address || '').replace(UK_POSTCODE, '').trim());
   if (/country/.test(l)) return fill(D.country || A.country || 'United Kingdom');
   if (/national insurance/.test(l)) return D.ni ? fill(D.ni) : { action: 'skip' };
-  if (/title\b/.test(l)) return D.title ? fill(D.title) : { action: 'skip' };
+  // Optional "Relevant training courses" table: we hold no course data, so leave it blank.
+  // (Checked before Title: "Course title" must never get "Mr".)
+  if (/^(course title|training provider|duration|year completed)$/.test(l)) return { action: 'skip' };
+  if (/title\b/.test(l) && !/course|job|post|role|qualification|training|programme|degree/.test(l)) return D.title ? fill(D.title) : { action: 'skip' };
 
   // ── Simple screeners we can answer from profile ──────────────────────────
   if (/full time or part time|full or part time/.test(l)) return fill((A.employmentType || []).includes('part_time') ? 'Part Time' : 'Full Time');
@@ -292,6 +295,8 @@ function repeaterAnswer(label, name, details = {}, secHint = '') {
   // Which repeating section is this field in? Prefer the page-level `secHint` (detected
   // once from all fields, so references' bare "Job title"/"Email" route correctly);
   // otherwise fall back to per-field name/label signals.
+  // Training-course rows are not education: never copy a degree's year into them.
+  if (secHint === 'train' || /training/.test(nm) || /^(course title|training provider|duration)$/.test(l)) return { action: 'skip' };
   let sec = secHint || '';
   if (!sec) {
     if (/refere|reference/.test(nm) || /refere/.test(l)) sec = 'ref';
@@ -1235,6 +1240,7 @@ async function fillPageQuestions(page, ctx, paused, pausedKeys) {
   if (/employment-(?!equality)|otheremp/.test(allNames.replace(/employmentequality/g, 'eqmon'))) secHint = 'emp';
   else if (/education-|genedu|_qualif/.test(allNames) || /qualification|place of study/.test(allLabels)) secHint = 'edu';
   else if (/_surname|_orgname|_first-name|_approachable|refere|reference/.test(allNames) || /refere/.test(allLabels)) secHint = 'ref';
+  else if (/course title|training provider/.test(allLabels)) secHint = 'train';
   let filled = 0, pausedThisPage = 0, aiAnswered = 0;
   const outliers = [];
   const unfilled = []; // DIAG: fields we did NOT fill, with enough identity to wire an answer
