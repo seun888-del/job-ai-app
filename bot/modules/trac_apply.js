@@ -813,7 +813,14 @@ async function openNextSection(page, attempted, log = () => {}) {
   const verb = { expand: 'Expanded group', incomplete: 'Reopened incomplete section', 'save-open': 'Saved open section', 'cancel-open': 'Closed open section' }[res.kind] || 'Opened section';
   log(`  [Trac] ${verb}${res.name ? ': ' + res.name : ''}.`);
   if (res.kind === 'save-open' || res.kind === 'cancel-open') { await new Promise((r) => setTimeout(r, 1800)); await handleDialog(page, log); }
-  else if (res.kind !== 'expand') await waitForSectionForm(page);
+  else if (res.kind !== 'expand' && !(await waitForSectionForm(page)) && res.key) {
+    // The click didn't open it (e.g. straight after a reload). Let it be tried again,
+    // up to twice, rather than leaving it unfilled for the whole run.
+    attempted.misses = attempted.misses || new Map();
+    const n = (attempted.misses.get(res.key) || 0) + 1;
+    attempted.misses.set(res.key, n);
+    if (n <= 2) { attempted.delete(res.key); log('  [Trac] Section did not open, will try it again.'); }
+  }
   return true;
 }
 
@@ -987,7 +994,10 @@ async function applicationStatus(page) {
   return page.evaluate(() => {
     const clean = (t) => t.replace(/assignment_turned_in|assignment_late|assignment_returned|content_paste|expand_more|expand_less/gi, ' ').replace(/\b(OK|Incomplete|Not started|Show answers|Hide answers|Filled from past application)\b/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 45);
     const rows = Array.from(document.querySelectorAll('.list-group-item[class*="fieldset-"]'));
-    const notOk = rows.filter((r) => !/fieldset-complete/.test(r.className)).map((r) => clean(r.textContent));
+    // The section's own heading when it has one: the row text also previews its answers
+    // ("Personal details Title Mr Forename ..."), which reads like a problem with "Mr".
+    const nameOf = (r) => { const h = r.querySelector('h2, h3, h4, h5, .list-group-item-heading'); const t = h && clean(h.textContent); const all = clean(r.textContent); return t && all.startsWith(t) ? t : all; };
+    const notOk = rows.filter((r) => !/fieldset-complete/.test(r.className)).map(nameOf);
     const groupsOpen = Array.from(document.querySelectorAll('.app-form-section')).filter((g) => /in progress|not started/i.test((g.textContent || '').slice(0, 40))).length;
     return { total: rows.length, ok: rows.length - notOk.length, notOk, groupsOpen };
   }).catch(() => ({ total: 0, ok: 0, notOk: [], groupsOpen: -1 }));
@@ -1861,4 +1871,4 @@ async function listTracApplications(page) {
   return { drafts, submittedTitles };
 }
 
-module.exports = { resolveAnswer, repeaterAnswer, fillApplication, ensureTracLogin, listDraftApplications, listTracApplications, _test: { fillFieldByName, parseDate, fillPageQuestions, clickNext, readQuestions } };
+module.exports = { resolveAnswer, repeaterAnswer, fillApplication, ensureTracLogin, listDraftApplications, listTracApplications, _test: { fillFieldByName, parseDate, fillPageQuestions, clickNext, readQuestions, openNextSection } };
