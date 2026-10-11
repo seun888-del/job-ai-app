@@ -1376,10 +1376,13 @@ module.exports = {
       }
       return null;
     },
-  "ff9fc25247b93": () => {
+  "f99107a5ac94b": () => {
     const clean = (t) => t.replace(/assignment_turned_in|assignment_late|assignment_returned|content_paste|expand_more|expand_less/gi, ' ').replace(/\b(OK|Incomplete|Not started|Show answers|Hide answers|Filled from past application)\b/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 45);
     const rows = Array.from(document.querySelectorAll('.list-group-item[class*="fieldset-"]'));
-    const notOk = rows.filter((r) => !/fieldset-complete/.test(r.className)).map((r) => clean(r.textContent));
+    // The section's own heading when it has one: the row text also previews its answers
+    // ("Personal details Title Mr Forename ..."), which reads like a problem with "Mr".
+    const nameOf = (r) => { const h = r.querySelector('h2, h3, h4, h5, .list-group-item-heading'); const t = h && clean(h.textContent); const all = clean(r.textContent); return t && all.startsWith(t) ? t : all; };
+    const notOk = rows.filter((r) => !/fieldset-complete/.test(r.className)).map(nameOf);
     const groupsOpen = Array.from(document.querySelectorAll('.app-form-section')).filter((g) => /in progress|not started/i.test((g.textContent || '').slice(0, 40))).length;
     return { total: rows.length, ok: rows.length - notOk.length, notOk, groupsOpen };
   },
