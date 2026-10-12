@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
   win: { action: (a) => ipcRenderer.invoke('win:action', a) },
+  remote: {
+    setPrefs: (p) => ipcRenderer.send('remote:prefs', p),
+  },
   profile: {
     get: () => ipcRenderer.invoke('profile:get'),
     save: (fields) => ipcRenderer.invoke('profile:save', fields),

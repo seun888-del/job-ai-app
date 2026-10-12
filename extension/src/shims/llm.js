@@ -92,4 +92,4 @@ async function sendSetupCode(email) {
   return { ok: r.ok, http: r.status };
 }
 
-module.exports = { claimSetup, sendSetupCode, llmChat, llmAvailable, checkLicense, askAssistant, headers, mode: 'hosted', isHosted: true };
+module.exports = { BACKEND, claimSetup, sendSetupCode, llmChat, llmAvailable, checkLicense, askAssistant, headers, mode: 'hosted', isHosted: true };

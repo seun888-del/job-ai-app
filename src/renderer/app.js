@@ -1824,6 +1824,9 @@ async function renderDashboard() {
   // Application agents shown on the dashboard (the Scorer is hidden — it auto-runs
   // alongside these and is surfaced only as the "AI tailoring" pill).
   const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !(isUS && (k === 'reed' || k === 'trac')));
+  // Tell phone control (tryjobai.com/app) which agents this dashboard shows and which are ticked.
+  const shareAgentPrefs = () => { try { window.api.remote.setPrefs({ keys: appAgentKeys, enabled: appAgentKeys.filter(k => localStorage.getItem('agent_enabled_' + k) !== '0') }); } catch (_) {} };
+  shareAgentPrefs();
   const scorerRunning = status.scorer === 'running';
   const allAppRunning = appAgentKeys.length > 0 && appAgentKeys.every(k => status[k] === 'running');
   const anyAppRunning = appAgentKeys.some(k => status[k] === 'running');
@@ -2080,6 +2083,7 @@ ${statCardsHtml(summary)}
   content.querySelectorAll('.agent-enabled').forEach(cb => {
     cb.addEventListener('change', () => {
       try { localStorage.setItem('agent_enabled_' + cb.dataset.bot, cb.checked ? '1' : '0'); } catch (_) {}
+      shareAgentPrefs();
       const state = document.getElementById('run-state-' + cb.dataset.bot);
       if (state) {
         state.className = 'agent-run-state ' + (cb.checked ? 'on' : 'off');

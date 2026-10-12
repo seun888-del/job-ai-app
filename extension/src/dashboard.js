@@ -10,7 +10,7 @@ import { LinkedInAgent } from './agents/linkedin.js';
 import { AtsAgent, feedJobs, fetchJD } from './agents/ats.js';
 import { Page } from './driver/page.js';
 
-const { checkLicense, askAssistant, claimSetup, sendSetupCode } = require('./shims/llm.js');
+const { BACKEND, headers: apiHeaders, checkLicense, askAssistant, claimSetup, sendSetupCode } = require('./shims/llm.js');
 const { importTracText } = require('../../src/services/tracImporter');
 const { readCvProfile } = require('../../src/services/cvProfile');
 
@@ -55,7 +55,7 @@ async function recheckLicence() {
 }
 
 // ── Agents ───────────────────────────────────────────────────────────────────
-const onChange = () => { if (current === 'dashboard') renderDashboard(); };
+const onChange = () => { if (current === 'dashboard') renderDashboard(); remoteNudge(); };
 const agents = {
   trac: new TracAgent({ onChange }),
   reed: new ReedAgent({ onChange }),
@@ -796,6 +796,84 @@ async function initOnboarding() {
   $('#w-skip').addEventListener('click', dismiss);
   $('#w-phone') && $('#w-phone').addEventListener('click', (e) => { e.preventDefault(); dismiss(); navigate('license'); setTimeout(() => $('#ph-code') && $('#ph-code').focus(), 300); });
 }
+
+// ── Phone control (tryjobai.com/app) ─────────────────────────────────────────
+// This browser checks in with the backend and runs what the user taps on their phone: start
+// all, stop all, or start/stop one agent, through the same licence gate as the buttons here.
+// Each check-in waits on the server for up to 20s (no timers, which Chrome slows in background
+// tabs), so a tap reaches this browser within a second or two. Not used on Android: there the
+// phone is the computer.
+const REMOTE_LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company sites' };
+let remoteCtl = null, remoteNudgeT = null;
+function remoteNudge() { clearTimeout(remoteNudgeT); remoteNudgeT = setTimeout(() => { if (remoteCtl) remoteCtl.abort(); }, 800); }
+async function remoteGate() {
+  const { license, profile, trac, settings } = await loadConfig();
+  const cv = await store.get('cv');
+  const base = licenceActive(license) && !!(cv && cv.text);
+  const search = !!((profile.searchTerms || []).length);
+  const tracOk = !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length);
+  const canRun = { trac: base && tracOk, reed: base && search, linkedin: base && search, ats: base && search };
+  const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
+  return { license, cv, canRun, enabled };
+}
+async function remoteStatus() {
+  const g = await remoteGate();
+  const all = await store.jobs();
+  const applied = await store.appliedToday(), cap = cfg.MAX_APPLICATIONS_PER_DAY;
+  const SRC = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company site' };
+  const recent = all.filter((j) => ['applied', 'apply_failed', 'ready', 'ready_to_submit'].includes(j.status))
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 12)
+    .map((j) => ({ title: j.title || '', company: j.company || '', source: SRC[j.source] || '', status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting', at: j.appliedAt || j.updatedAt || '' }));
+  const blocked = !licenceActive(g.license) ? (g.license.key ? 'Your Job-AI access has ended. Subscribe to keep applying.' : 'Activate Job-AI in Chrome first.')
+    : !(g.cv && g.cv.text) ? 'Add your CV in Job-AI first.' : applied >= cap ? `Today's limit of ${cap} applications is reached. Agents carry on tomorrow.` : '';
+  return {
+    agents: Object.keys(agents).map((k) => ({ key: k, label: REMOTE_LABELS[k], state: agents[k].running ? 'running' : 'stopped', enabled: g.enabled(k), canRun: g.canRun[k] })),
+    applied_today: applied, daily_cap: cap,
+    in_queue: all.filter((j) => ['pending', 'cv_ready', 'applying'].includes(j.status)).length,
+    failed: all.filter((j) => j.status === 'apply_failed').length,
+    needs_you: all.filter((j) => ['ready', 'ready_to_submit'].includes(j.status) || (j.status === 'skipped' && /^Draft saved on Trac/.test(j.reason || ''))).length,
+    recent, blocked,
+  };
+}
+async function remoteRun(c) {
+  const keys = c.cmd === 'start' || c.cmd === 'stop' ? [c.agent].filter((k) => agents[k]) : Object.keys(agents);
+  if (!keys.length) return { ok: false, message: 'That agent is not in this browser.' };
+  if (c.cmd === 'stop' || c.cmd === 'stop_all') { keys.forEach((k) => agents[k].stop()); setTimeout(renderDashboard, 300); return { ok: true }; }
+  if (!(await recheckLicence())) return { ok: false, message: 'Your Job-AI access has ended. Subscribe to keep applying.' };
+  if ((await store.appliedToday()) >= cfg.MAX_APPLICATIONS_PER_DAY) return { ok: false, message: `Today's limit of ${cfg.MAX_APPLICATIONS_PER_DAY} applications is already reached.` };
+  const g = await remoteGate();
+  const todo = keys.filter((k) => !agents[k].running && g.canRun[k] && (c.cmd === 'start' || g.enabled(k)));
+  if (!todo.length) return keys.some((k) => agents[k].running) ? { ok: true } : { ok: false, message: 'Finish setting up that agent in Chrome first.' };
+  todo.forEach(runAgent);
+  setTimeout(renderDashboard, 300);
+  return { ok: true };
+}
+async function remotePost(path, body, signal) {
+  const r = await fetch(BACKEND + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() }, body: JSON.stringify(body), signal: signal || AbortSignal.timeout(15000) });
+  return r.ok ? r.json() : null;
+}
+(async function remoteLoop() {
+  if (globalThis.__jobaiClient === 'android') return;
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || (/Mac/.test(navigator.userAgent) ? 'Mac' : /CrOS/.test(navigator.userAgent) ? 'Chromebook' : 'Windows');
+  const label = `Chrome on ${platform === 'macOS' ? 'Mac' : platform === 'Chrome OS' ? 'Chromebook' : platform}`;
+  const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  await pause(4000);
+  for (;;) {
+    if (!globalThis.__jobaiLicense) { await loadConfig().catch(() => {}); if (!globalThis.__jobaiLicense) { await pause(15000); continue; } }
+    remoteCtl = new AbortController();
+    const ctl = remoteCtl, t = setTimeout(() => ctl.abort(), 35000);
+    let r = null;
+    try { r = await remotePost('/v1/remote/heartbeat', { client: 'extension', label, status: await remoteStatus(), wait: 20 }, ctl.signal); }
+    catch (_) { r = ctl.signal.aborted ? {} : null; }
+    finally { clearTimeout(t); }
+    if (!r) { await pause(15000); continue; }
+    for (const c of r.commands || []) {
+      let out; try { out = await remoteRun(c); } catch (e) { out = { ok: false, message: e.message }; }
+      await remotePost('/v1/remote/ack', { id: c.id, ok: out.ok, message: out.message || '' }).catch(() => {});
+    }
+    if ((r.commands || []).length) await pause(1500);
+  }
+})();
 
 // ── Ask Job-AI assistant (same behaviour and safety rules as the app) ────────
 (function initAssistant() {

@@ -5,6 +5,10 @@ const fs = require('fs');
 const db = require('./src/db/database');
 const queueReader = require('./src/db/queueReader');
 const cvAnalyzer = require('./src/services/cvAnalyzer');
+const remoteControl = require('./src/services/remoteControl');
+ipcMain.on('remote:prefs', (event, p) => remoteControl.setPrefs(p));
+// Automated tests only (never set in the shipped app): lets a test stub the agents.
+if (process.env.JOBBOT_TEST_HOOKS === '1') globalThis.__jobaiMain = { botManager: require('./src/services/botManager') };
 const tracImporter = require('./src/services/tracImporter');
 const botManager = require('./src/services/botManager');
 const assistantState = require('./src/services/assistantState');
@@ -298,6 +302,7 @@ app.whenReady().then(async () => {
   });
   botManager.setStatusHandler((bot, status) => {
     mainWindow?.webContents.send('bot:status', { bot, status });
+    remoteControl.nudge();
     if (!Notification.isSupported()) return;
 
     // A crashed agent is worth flagging on its own — surface errors per agent.
@@ -338,6 +343,11 @@ app.whenReady().then(async () => {
   // user can see their job hunt on tryjobai.com/app. Best-effort, no-op until a
   // licence key exists.
   try { require('./src/services/companionSync').start(); } catch (_) {}
+
+  // Phone control: tryjobai.com/app shows these agents live and can start/stop them.
+  try {
+    remoteControl.start({ startBotGated, licenseLocallyValid, dailyLimit: getDailyLimit, onStarted: () => sendStep('agents_started') });
+  } catch (_) {}
 
   // Anonymous install beacon (once per install) — feeds the founder funnel stats
   sendInstallBeacon().then(checkSetupSteps);
@@ -575,6 +585,7 @@ ipcMain.handle('cvs:pickAndAdd', async (event, label) => {
   const { keywords, suggestedRoles, profile } = await cvAnalyzer.analyzeCV(file_path);
   const cv = db.addCV({ label, file_path, extracted_keywords: keywords, suggested_roles: suggestedRoles });
   checkSetupSteps();
+  remoteControl.nudge();
   return { ...cv, ...fillProfileFromCV(profile, suggestedRoles) };
 });
 
@@ -676,7 +687,8 @@ ipcMain.handle('queue:dailyApplications', (event, days) => queueReader.getDailyA
 // Daily application cap status for the "limit reached" prompt shown on Start.
 // Cap mirrors bot/config.js: paid → 25/day, trial → 5/day, further limited by
 // the user's own "max applications per day" preference. Keep 25/5 in sync.
-ipcMain.handle('bot:dailyLimit', async () => {
+ipcMain.handle('bot:dailyLimit', () => getDailyLimit());
+async function getDailyLimit() {
   const applied = await queueReader.getTodayAppliedCount();
   const lic = db.getLicense();
   const isPaid = !!(lic && lic.status === 'active');
@@ -685,7 +697,7 @@ ipcMain.handle('bot:dailyLimit', async () => {
   try { const p = db.getProfile(); if (p && Number.isFinite(p.max_applications_per_day)) chosen = p.max_applications_per_day; } catch (_) {}
   const cap = Math.min(chosen, planCap);
   return { applied, cap, isPaid, reached: applied >= cap };
-});
+}
 
 // ── License gate for the agents ───────────────────────────────────────────
 // Offline-safe local check: a valid license exists, is active/trial, and has
@@ -937,6 +949,7 @@ async function verifyLicenseKey(key) {
   });
   syncLicenseEnv(); // main-process AI now uses this license via the backend
   checkSetupSteps();
+  remoteControl.nudge();
 
   // On upgrade to a paid licence — only the trial→paid transition, never routine
   // rechecks — raise the daily application limit to the paid maximum so the user
@@ -1015,6 +1028,7 @@ ipcMain.handle('license:claimSetup', async (event, code) => {
     } catch (e) { console.error('[Setup] could not save the phone CV:', e.message); }
   }
   checkSetupSteps();
+  remoteControl.nudge();
   return { ok: lic.ok, error: lic.ok ? '' : lic.error, got, license: lic.license, usage: lic.usage };
 });
 
