@@ -1177,6 +1177,8 @@ li.active .nav-icon-check::after, li.active .nav-icon-chart::after { color: #fff
   transition: background var(--transition), transform var(--transition);
 }
 #asst-fab:hover { background: var(--primary-hover); transform: translateY(-1px); }
+/* The tour panel sits in the same corner: hide the assistant button while a tour is open. */
+body:has(#tour-panel) #asst-fab { display: none; }
 #asst-fab svg { flex-shrink: 0; }
 #asst-fab.hidden { display: none; }
 

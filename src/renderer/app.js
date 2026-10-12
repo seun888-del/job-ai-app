@@ -3219,10 +3219,18 @@ function tourNavigateTo(view) {
   return render(view).then(() => updateNavProgress());
 }
 
-function startTour() {
+// After a phone setup the pages are already filled in, so this tour is about using Job-AI.
+const USE_TOUR = (nhs) => [
+  { view: 'dashboard', title: 'Sign in to your job sites', tip: 'Your agents apply through your own Reed and LinkedIn accounts. This is the one thing to do on this computer: sign in once and you stay signed in. Job-AI never sees your password.', action: 'Click "Connect account" on the Reed and LinkedIn cards, sign in in the window that opens, then close it. The company sites agent needs no sign in.' },
+  { view: 'dashboard', title: 'Choose your agents and start', tip: 'Tick the agents you want, then press Start applying. They find jobs, tailor your CV to each one and apply, in the background.', action: 'Keep Job-AI open while they work. You can minimise it.' },
+  { view: 'tracker', title: 'See every application', tip: 'The Tracker lists every job your agents applied to. Set the stage as you hear back: phone screen, interview, offer.', action: 'Anything that needs you shows on the Dashboard.' },
+  ...(nhs ? [{ view: 'trac-details', title: 'NHS jobs', tip: 'NHS applications go through Trac. We filled in your jobs and qualifications from your CV. Trac forms also ask for your address, referees and a few declarations.', action: 'Check this page, add anything missing and click Save. Then click "Connect account" on the NHS card to sign in to Trac. Finished forms wait as "Ready to submit" unless you turn on Submit for me.' }] : []),
+  { view: 'dashboard', title: 'Control it from your phone', tip: 'Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.', action: 'On iPhone, add it to your Home Screen to get notifications. Keep this computer on while the agents work: "Keep awake while agents run" is on the Dashboard.' },
+];
+function startTour(useSteps) {
   let step = 0;
   // UK-only steps (the Universal Credit journal) are dropped for US users.
-  const steps = TOUR_STEPS.filter(s => !s.ukOnly || _isUKUser);
+  const steps = useSteps || TOUR_STEPS.filter(s => !s.ukOnly || _isUKUser);
 
   function showPanel() {
     const existing = document.getElementById('tour-panel');
@@ -3246,7 +3254,7 @@ function startTour() {
         <div class="tour-action">${s.action}</div>
         <div class="tour-nav">
           <button class="tour-skip" id="tour-skip">Skip tour</button>
-          <button class="tour-next" id="tour-next">${isLast ? 'Finish setup' : 'Next'}</button>
+          <button class="tour-next" id="tour-next">${isLast ? (useSteps ? 'Done' : 'Finish setup') : 'Next'}</button>
         </div>
       </div>
     `;
@@ -3303,7 +3311,7 @@ async function claimPhoneSetup(raw, st) {
   await refreshExpiryBanner();
   await updateNavProgress();
   showStatus(st, `Done. Licence active${got}.`, 'success');
-  return true;
+  return { nhs: !!r.nhs };
 }
 
 function initOnboarding() {
@@ -3362,7 +3370,7 @@ function initOnboarding() {
   const go = async () => {
     if (!hasCode()) { st.textContent = ''; showMail(true); return; }
     goBtn.disabled = true;
-    try { if (await claimPhoneSetup(codeIn.value, st)) setTimeout(() => { dismiss(); navigate('dashboard'); }, 1200); }
+    try { const r = await claimPhoneSetup(codeIn.value, st); if (r) setTimeout(() => { dismiss(); navigate('dashboard'); startTour(USE_TOUR(r.nhs)); }, 1200); }
     finally { goBtn.disabled = false; }
   };
   const send = async () => {

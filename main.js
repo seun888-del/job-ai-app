@@ -1030,6 +1030,29 @@ ipcMain.handle('license:claimSetup', async (event, code) => {
   if (Array.isArray(P.searchTerms) && P.searchTerms.length) db.addSearchTerms(P.searchTerms.slice(0, 40), 'user_added');
   const wt = (P.workTypePriority || []).filter((w) => ['remote', 'hybrid', 'onsite'].includes(w));
   if (wt.length) { try { db.saveSearchPreferences({ work_type_priority: wt }); } catch (_) {} }
+  // The "Questions employers ask" answers (only once the phone setup asked them).
+  if (P.answered) {
+    const ans = {
+      right_to_work_countries: P.rightToWorkCountries || 'United Kingdom', requires_sponsorship: P.requiresSponsorship ? 1 : 0,
+      availability: P.availability || 'immediately', salary_expectation: P.salaryExpectation || '', driving_licence: P.drivingLicence ? 1 : 0,
+      willing_to_relocate: P.willingToRelocate ? 1 : 0, eeo_gender: P.eeoGender || '', eeo_ethnicity: P.eeoEthnicity === 'arab' ? 'mena' : (P.eeoEthnicity || ''),
+      eeo_disability: P.eeoDisability || '',
+    };
+    try { db.saveProfile(ans); got.push('answers'); } catch (e) { console.error('[Setup] answers:', e.message); }
+  }
+  // NHS: jobs and qualifications read from the CV, referees typed on the phone. Only fills blanks.
+  if (P.wantsNhs || setup.trac) {
+    try {
+      const T = setup.trac || {};
+      let t = {}; try { t = JSON.parse(db.getProfile().trac_details || '{}') || {}; } catch (_) {}
+      const blank = (k, v) => { if (v && !t[k]) t[k] = v; };
+      blank('firstName', P.firstName); blank('lastName', P.lastName); blank('email', P.email); blank('mobile', P.phone); blank('city', P.location);
+      for (const k of ['employment', 'education', 'references']) if (Array.isArray(T[k]) && T[k].length && !(t[k] || []).length) t[k] = T[k];
+      if (!(t.searchTerms || []).length && (P.searchTerms || []).length) t.searchTerms = P.searchTerms.slice(0, 40);
+      db.saveProfile({ trac_details: JSON.stringify(t) });
+      got.push('NHS details');
+    } catch (e) { console.error('[Setup] NHS details:', e.message); }
+  }
 
   // The licence before the CV, so reading the CV for keywords can use the AI.
   const lic = await verifyLicenseKey(body.license_key);
@@ -1049,7 +1072,7 @@ ipcMain.handle('license:claimSetup', async (event, code) => {
   }
   checkSetupSteps();
   remoteControl.nudge();
-  return { ok: lic.ok, error: lic.ok ? '' : lic.error, got, license: lic.license, usage: lic.usage };
+  return { ok: lic.ok, error: lic.ok ? '' : lic.error, got: got.filter((g) => g === 'details' || g === 'CV'), license: lic.license, usage: lic.usage, nhs: !!(P.wantsNhs || setup.trac) };
 });
 
 // ── Shell ────────────────────────────────────────────────────────────────

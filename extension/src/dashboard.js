@@ -659,7 +659,26 @@ async function claimPhoneSetup(raw, say) {
       for (const k of ['firstName', 'middleName', 'lastName', 'email', 'phone', 'location', 'linkedin', 'yearsExperience']) if (P[k]) out[k] = P[k];
       if ((P.searchTerms || []).length) out.searchTerms = P.searchTerms.slice(0, 40);
       if ((P.workTypePriority || []).length) out.workTypePriority = P.workTypePriority;
+      // The "Questions employers ask" answers (only once the phone setup asked them).
+      if (P.answered) {
+        const cap = { male: 'Male', female: 'Female', nonbinary: 'Non-binary', white: 'White', mixed: 'Mixed', asian: 'Asian', black: 'Black', arab: 'Arab', other: 'Other', no: 'No', yes: 'Yes' };
+        Object.assign(out, {
+          rightToWorkCountries: P.rightToWorkCountries || 'United Kingdom', requiresSponsorship: !!P.requiresSponsorship, availability: P.availability || 'immediately',
+          salaryExpectation: P.salaryExpectation || '', drivingLicence: !!P.drivingLicence, willingToRelocate: !!P.willingToRelocate,
+          eeoGender: cap[P.eeoGender] || '', eeoEthnicity: cap[P.eeoEthnicity] || '', eeoDisability: cap[P.eeoDisability] || '',
+        });
+      }
       if (Object.keys(out).length) { await store.patch('profile', out); got.push('details'); }
+      // NHS: jobs and qualifications read from the CV, referees typed on the phone. Only fills blanks.
+      if (P.wantsNhs || r.setup.trac) {
+        const T = r.setup.trac || {}, t = { ...((await store.get('trac')) || {}) };
+        const blank = (k, v) => { if (v && !t[k]) t[k] = v; };
+        blank('firstName', P.firstName); blank('lastName', P.lastName); blank('email', P.email); blank('mobile', P.phone); blank('city', P.location);
+        for (const k of ['employment', 'education', 'references']) if (Array.isArray(T[k]) && T[k].length && !(t[k] || []).length) t[k] = T[k];
+        if (!(t.searchTerms || []).length && (P.searchTerms || []).length) t.searchTerms = P.searchTerms.slice(0, 40);
+        await store.set('trac', t);
+        await store.patch('settings', { wantsNhs: true });
+      }
     }
     if (r.setup && r.setup.cv && r.setup.cv.text) {
       const c = r.setup.cv;
@@ -787,7 +806,7 @@ VIEWS['trac-details'] = async function renderTrac() {
 };
 
 // ── Welcome + setup tour (same flow as the app, first open only) ─────────────
-const TOUR_STEPS = [
+const TOUR_STEPS_SETUP = [
   { view: 'cvs', title: 'Step 1: Upload your CV', tip: 'Start here. We read your CV and fill in your name, contact details, experience and the job titles to search for. Upload it as a Word document (.docx) for the best results. PDF also works. Before each application, the AI rewrites your summary and bullet points to match that specific job.', action: 'Click "Add CV" and choose your CV. It is read on this device and never uploaded.' },
   { view: 'personal', title: 'Step 2: Check your details', tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this page is, the fewer forms the agents leave blank.', action: 'If you uploaded your CV, most of this is already filled in. Check it, complete anything missing and click Save.' },
   { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want to apply for, for example "IT Support Analyst". The Reed, LinkedIn and company sites agents all use these terms.', action: 'Add at least one job title, set your work type, then click Save.' },
@@ -796,7 +815,16 @@ const TOUR_STEPS = [
   { view: 'dashboard', title: 'All set: start applying', tip: 'Click Start applying and each agent opens its own minimised Chrome window and works inside it: searching, tailoring your CV and applying to matching jobs.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
   { view: 'trac-details', title: 'NHS jobs: the Trac Agent', tip: 'NHS jobs use a separate system called Trac with much longer forms, so the NHS agent has its own page: employment history, references, education and the monitoring questions.', action: 'Open "NHS / Trac details" and fill it in once, or click "Upload completed Trac PDF" to fill it from an old application. Then sign in to Trac with the button on the NHS agent card.' },
 ];
-function startTour() {
+// After a phone setup the pages are already filled in, so this tour is about using Job-AI.
+const USE_TOUR = (nhs) => [
+  { view: 'dashboard', title: 'Sign in to your job sites', tip: 'Your agents apply through your own Reed and LinkedIn accounts, inside this Chrome. This is the one thing to do on this computer: sign in once and you stay signed in. They never see your password.', action: 'Click "Sign in to Reed" and "Sign in to LinkedIn" on the agent cards, sign in as normal, then come back to this tab. The company sites agent needs no sign in.' },
+  { view: 'dashboard', title: 'Choose your agents and start', tip: 'Tick the agents you want, then press Start applying. Each one works in its own minimised Chrome window: finding jobs, tailoring your CV and applying.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
+  { view: 'tracker', title: 'See every application', tip: 'The Tracker lists every job your agents found and what happened to it, with the reason for anything they skipped.', action: 'Check it any time. Anything that needs you shows at the top of the Dashboard.' },
+  ...(nhs ? [{ view: 'trac-details', title: 'NHS jobs', tip: 'NHS applications go through Trac. We filled in your jobs and qualifications from your CV. Trac forms also ask for your address, referees and a few declarations.', action: 'Check this page, add anything missing and click Save. Then sign in to Trac from the NHS agent card. Finished forms wait as "Ready to submit" unless you turn on Submit for me.' }] : []),
+  { view: 'dashboard', title: 'Control it from your phone', tip: 'Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.', action: 'On iPhone, add it to your Home Screen to get notifications. Keep this computer on and Chrome open while the agents work.' },
+];
+function startTour(steps = TOUR_STEPS_SETUP) {
+  const TOUR_STEPS = steps;
   let step = 0;
   const end = () => { const p = $('#tour-panel'); if (p) p.remove(); store.patch('settings', { tourDone: true }); navigate('dashboard'); };
   const show = async () => {
@@ -809,7 +837,7 @@ function startTour() {
     panel.innerHTML = `<div class="tour-progress"><div class="tour-progress-fill" style="width:${Math.round(((step + 1) / TOUR_STEPS.length) * 100)}%"></div></div>
       <div class="tour-body"><div class="tour-step-label">Step ${step + 1} of ${TOUR_STEPS.length}</div><div class="tour-step-title">${esc(s.title)}</div>
       <p class="tour-tip">${esc(s.tip)}</p><div class="tour-action">${esc(s.action)}</div>
-      <div class="tour-nav"><button class="tour-skip" id="tour-skip">Skip tour</button><button class="tour-next" id="tour-next">${last ? 'Finish setup' : 'Next'}</button></div></div>`;
+      <div class="tour-nav"><button class="tour-skip" id="tour-skip">Skip tour</button><button class="tour-next" id="tour-next">${last ? (steps === TOUR_STEPS_SETUP ? 'Finish setup' : 'Done') : 'Next'}</button></div></div>`;
     document.body.appendChild(panel);
     $('#tour-next').onclick = () => { if (last) end(); else { step++; show(); } };
     $('#tour-skip').onclick = end;
@@ -852,7 +880,11 @@ async function initOnboarding() {
       const b = $('#w-go'); b.disabled = true;
       const done = await claimPhoneSetup($('#w-code').value, (t, err) => setSt('#w-st', t, err));
       b.disabled = false;
-      if (done) setTimeout(() => { dismiss(); navigate('dashboard'); }, 1200);
+      if (done) setTimeout(async () => {
+        dismiss(); await navigate('dashboard');
+        const [s, t] = await Promise.all([store.get('settings'), store.get('trac')]);
+        startTour(USE_TOUR(!!(s.wantsNhs || (t && (t.employment || []).length))));
+      }, 1200);
     };
     const send = async () => {
       const em = $('#w-email').value.trim();
