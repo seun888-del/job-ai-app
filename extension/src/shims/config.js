@@ -23,7 +23,7 @@ const cfg = {
   SKIP_EXTERNAL_SITES: true,
   MAX_APPLICATIONS_PER_DAY: 25,
   PLAN_CAP: 25,
-  MIN_SCORE: 70,
+  MIN_SCORE: 0,  // same as the app: no minimum unless the user sets one (the 45% floor still applies)
   async init() {},
 
   // Map the extension's stored profile onto the field names the shared modules expect
@@ -68,7 +68,7 @@ const cfg = {
     cfg.SKIP_EXTERNAL_SITES = profile.skipExternalSites !== false;
     cfg.PLAN_CAP = license.status === 'active' ? 25 : 5;
     cfg.MAX_APPLICATIONS_PER_DAY = Math.min(Number(settings.dailyCap || 15), cfg.PLAN_CAP);
-    cfg.MIN_SCORE = Number(profile.minScore ?? 70);
+    cfg.MIN_SCORE = Number(profile.minScore) || 0;
     const full = `${first} ${last}`.trim();
     cfg.RESUME_FILENAME = full ? `${full} Resume.pdf` : 'Resume.pdf';
   },

@@ -160,6 +160,23 @@ async function resumeAfterChromeStart() {
 chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.startupOpen && c.startupOpen.newValue) resumeAfterChromeStart(); });
 setTimeout(resumeAfterChromeStart, 2000);
 
+// One time: the Search page used to fill in 70% for everyone, so a saved 70 is almost always that
+// default, not a choice. Clear it so the extension follows the app's rule (45% floor, no minimum).
+(async () => {
+  const s = await store.get('settings');
+  if (s.minScoreReset) return;
+  const p = await store.get('profile');
+  if (Number(p.minScore) === 70 || !Number(p.minScore)) {
+    if (Number(p.minScore) === 70) await store.patch('profile', { minScore: null });
+    // Jobs skipped only for missing that old 70% go back in the queue (the 45% floor still applies).
+    for (const j of await store.jobs()) {
+      if (j.status === 'skipped' && /\(you need 70%\)$/.test(j.reason || '') && Number(j.cvScore) >= 45) await store.updateJob(j.jobId, { status: 'pending', reason: '' });
+    }
+  }
+  await store.patch('settings', { minScoreReset: true });
+  loadConfig().catch(() => {});
+})();
+
 // Just updated: restart the agents that were running before it.
 (async () => {
   const { resumeAfterUpdate: r } = await chrome.storage.local.get('resumeAfterUpdate');
@@ -579,7 +596,7 @@ VIEWS.search = async function renderSearch() {
       <div class="field"><label>Job titles to search (one per line)</label><textarea id="s-terms" class="tracd" rows="5" placeholder="e.g. IT Support Analyst">${esc((profile.searchTerms || []).join('\n'))}</textarea></div>
       <div class="field"><label>Skip jobs with these words in the title (one per line)</label><textarea id="s-exclude" class="tracd" rows="5" placeholder="e.g. Senior">${esc((profile.excludeKeywords || []).join('\n'))}</textarea></div>
       <div class="field"><label>Search location</label><input id="s-where" type="text" value="${esc(profile.searchLocation || 'United Kingdom')}"></div>
-      <div class="field"><label>Minimum CV match (%)</label><input id="s-min" type="number" min="40" max="100" value="${esc(profile.minScore ?? 70)}"></div>
+      <div class="field"><label>Minimum CV match (%)</label><input id="s-min" type="number" min="45" max="100" placeholder="Any" value="${esc(profile.minScore || '')}"><small class="muted">Leave empty to apply to every job that fits your CV.</small></div>
       <div class="field"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="s-wt" value="${v}" ${(profile.workTypePriority || ['remote', 'hybrid', 'onsite']).includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
       <div class="field"><label>Contract</label><div class="tracd-sectors">${[['full_time', 'Full-time'], ['part_time', 'Part-time'], ['contract', 'Fixed-term / contract']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="s-type" value="${v}" ${(profile.employmentType || ['full_time']).includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
       <div class="field"><label>Applications a day</label><select id="s-cap">${[5, 10, 15, 20, 25].map((n) => `<option value="${n}" ${Number(settings.dailyCap || 15) === n ? 'selected' : ''} ${n > cfg.PLAN_CAP ? 'disabled' : ''}>${n}${n > cfg.PLAN_CAP ? ' (Pro)' : ''}</option>`).join('')}</select></div>
@@ -588,7 +605,7 @@ VIEWS.search = async function renderSearch() {
   $('#s-save').addEventListener('click', async () => {
     await store.patch('profile', {
       searchTerms: lines('#s-terms').slice(0, 40), excludeKeywords: lines('#s-exclude').slice(0, 80),
-      searchLocation: $('#s-where').value.trim() || 'United Kingdom', minScore: Math.max(40, Math.min(100, Number($('#s-min').value) || 70)),
+      searchLocation: $('#s-where').value.trim() || 'United Kingdom', minScore: Number($('#s-min').value) ? Math.max(45, Math.min(100, Number($('#s-min').value))) : null,
       workTypePriority: $$('.s-wt:checked').map((c) => c.value), employmentType: $$('.s-type:checked').map((c) => c.value),
     });
     await store.patch('settings', { dailyCap: Number($('#s-cap').value) });

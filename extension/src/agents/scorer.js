@@ -56,12 +56,12 @@ export async function scoreJob(job, log) {
   if (!cv || !cv.text) { log('Add your CV on the Setup page first.'); return; }
   if (!job.description || job.description.trim().length < 30) { await store.updateJob(job.jobId, { status: 'skipped', reason: 'No job description' }); return; }
   const why = preFilter(job);
-  if (why) { await store.updateJob(job.jobId, { status: 'skipped', reason: why }); return; }
+  if (why) { await store.updateJob(job.jobId, { status: 'skipped', reason: why }); log(`Skipped: ${String(job.title || '').split('\n')[0].trim()} (${why})`); return; }
 
   const jobTitle = String(job.title || '').split('\n')[0].trim();
   try {
     const rel = await isRelevantRole({ jobTitle, jdText: job.description, targetRoles: cfg.JOB_SEARCHES });
-    if (!rel.relevant) { await store.updateJob(job.jobId, { status: 'skipped', reason: `Off-target role: ${rel.reason}` }); return; }
+    if (!rel.relevant) { await store.updateJob(job.jobId, { status: 'skipped', reason: `Off-target role: ${rel.reason}` }); log(`Skipped: ${jobTitle} (not the kind of role you search for)`); return; }
   } catch (_) { /* fail open */ }
 
   await store.updateJob(job.jobId, { status: 'processing' });
@@ -71,8 +71,17 @@ export async function scoreJob(job, log) {
   try { ({ score, missingKeywords: missing, allKeywords: all } = await cvScorer.scoreCV(raw, job.description)); }
   catch (e) { log('Scoring failed (' + e.message + '), will retry later.'); await store.updateJob(job.jobId, { status: 'pending' }); return; }
   let cvText = raw;
-  if (score >= QUICK_FAIL && score < BOOST_TARGET && missing.length) { cvText = boostCVText(raw, missing); score = cvScorer.rescoreCV(cvText, all).score; }
-  if (score < cfg.MIN_SCORE) { await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `CV scored ${score}% (you need ${cfg.MIN_SCORE}%)` }); return; }
+  // Same rule as the app's Scorer: under QUICK_FAIL the job is not a fit (no keyword boost), above it
+  // the missing keywords are added and the job goes ahead unless the user set a higher minimum.
+  if (score < QUICK_FAIL) {
+    await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `Not a close enough match (${score}%)` });
+    log(`Skipped: ${jobTitle} (not a close enough match, ${score}%)`); return;
+  }
+  if (score < BOOST_TARGET && missing.length) { cvText = boostCVText(raw, missing); score = cvScorer.rescoreCV(cvText, all).score; }
+  if (score < cfg.MIN_SCORE) {
+    await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `CV scored ${score}% (you set ${cfg.MIN_SCORE}%)` });
+    log(`Skipped: ${jobTitle} (CV scored ${score}%, your minimum is ${cfg.MIN_SCORE}%)`); return;
+  }
 
   // Tailored CV in the app's fixed layout.
   const paths = buildPaths('/jobai/output/saved_cvs', '/jobai/output', cfg.RESUME_FILENAME, jobTitle, job.company, score);
