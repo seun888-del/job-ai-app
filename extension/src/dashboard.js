@@ -438,6 +438,7 @@ function appRow(a, i) {
 setInterval(() => { if (current === 'dashboard' && !document.hidden) renderDashboard(); }, 5000);
 
 // ── Tracker ──────────────────────────────────────────────────────────────────
+const STAGE = { phone_screen: ['Phone screen', 'badge-info'], interview: ['Interview', 'badge-info'], offer: ['Offer', 'badge-success'], rejected: ['Rejected', 'badge-muted'], withdrawn: ['Withdrawn', 'badge-muted'] };
 const STATUS = { applied: ['Applied', 'badge-success'], apply_failed: ['Failed', 'badge-danger'], skipped: ['Skipped', 'badge-muted'], pending: ['Found', 'badge-info'], cv_ready: ['CV ready', 'badge-info'], applying: ['Applying', 'badge-info'], ready: ['Waiting for you', 'badge-warning'], ready_to_submit: ['Ready to submit', 'badge-success'] };
 const SOURCE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company site' };
 let trackerFilter = 'all';
@@ -450,7 +451,7 @@ VIEWS.tracker = async function renderTracker() {
     <div class="ext-inline" style="margin-bottom:12px">${[['all', 'All'], ['applied', 'Applied'], ['open', 'In progress'], ['skipped', 'Skipped']].map(([k, l]) => `<button class="${f === k ? 'primary' : 'secondary'} trk-f" data-f="${k}">${l}</button>`).join('')}</div>
     ${shown.length ? `<div class="card card-wide"><div class="table-scroll"><table class="data-table tracker-table">
       <thead><tr><th>Job</th><th>Company</th><th>Site</th><th>Status</th><th>Updated</th></tr></thead>
-      <tbody>${shown.slice(0, 300).map((j) => { const [l, c] = STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.draftUrl || j.url); return `<tr>
+      <tbody>${shown.slice(0, 300).map((j) => { const [l, c] = (j.status === 'applied' && STAGE[j.stage]) || STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.draftUrl || j.url); return `<tr>
         <td class="tracker-title" title="${esc(j.title)}">${u ? `<a class="tracker-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>` : esc(j.title)}</td>
         <td>${esc(j.company || '')}</td><td>${esc(SOURCE[j.source] || j.source || '')}</td>
         <td><span class="badge ${c}" title="${esc(j.reason || '')}">${esc(l)}</span></td>
@@ -604,12 +605,20 @@ function wirePhoneSetup(rerender) {
     catch (_) { setSt('#ph-mail-st', 'Could not reach Job-AI. Check your connection.', true); }
   });
   $('#ph-go').addEventListener('click', async () => {
-    const code = $('#ph-code').value.replace(/\D/g, '');
-    if (code.length !== 6) { setSt('#ph-st', 'The code is 6 numbers.', true); return; }
-    setSt('#ph-st', 'Bringing in your setup…');
+    if (await claimPhoneSetup($('#ph-code').value, (t, err) => setSt('#ph-st', t, err))) setTimeout(() => navigate('dashboard'), 1500);
+  });
+}
+
+// Bring in what the user set up on their phone (tryjobai.com/start): licence, details and CV.
+// say(text, isError) shows progress. Returns true when the licence is active.
+async function claimPhoneSetup(raw, say) {
+  {
+    const code = String(raw || '').replace(/\D/g, '');
+    if (code.length !== 6) { say('The code is 6 numbers.', true); return false; }
+    say('Bringing in your setup…');
     let r;
-    try { r = await claimSetup(code); } catch (_) { setSt('#ph-st', 'Could not reach Job-AI. Check your connection.', true); return; }
-    if (!r.ok) { setSt('#ph-st', r.http === 404 ? 'That code is wrong or has run out. Get a new one on your phone.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not use the code (' + r.http + ').', true); return; }
+    try { r = await claimSetup(code); } catch (_) { say('Could not reach Job-AI. Check your connection.', true); return false; }
+    if (!r.ok) { say(r.http === 404 ? 'That code is wrong or has run out. Get a new one on your phone.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not use the code (' + r.http + ').', true); return false; }
     // Details and CV first: they are the user's own and the server has now deleted its copy.
     const got = [];
     if (r.setup && r.setup.profile) {
@@ -628,10 +637,10 @@ function wirePhoneSetup(rerender) {
     if (lic.ok) await store.set('license', { key: r.key, status: lic.licenseStatus || 'active', expiresAt: lic.expires_at, checkedAt: Date.now() });
     globalThis.__jobaiLicense = lic.ok ? r.key : globalThis.__jobaiLicense;
     await loadConfig(); checkSteps();
-    if (!lic.ok) { setSt('#ph-st', (got.length ? `Your ${got.join(' and ')} came in, but ` : '') + (lic.error === 'device_trial_used' ? 'this computer has already used a free trial.' : 'the licence could not be activated.'), true); return; }
-    setSt('#ph-st', `✓ Done. Licence active${got.length ? ', and your ' + got.join(' and ') + ' are in' : ''}.`);
-    setTimeout(() => navigate('dashboard'), 1500);
-  });
+    if (!lic.ok) { say((got.length ? `Your ${got.join(' and ')} came in, but ` : '') + (lic.error === 'device_trial_used' ? 'this computer has already used a free trial.' : 'the licence could not be activated.'), true); return false; }
+    say(`✓ Done. Licence active${got.length ? ', and your ' + got.join(' and ') + ' are in' : ''}.`);
+    return true;
+  }
 }
 
 // ── Setup: NHS / Trac details ────────────────────────────────────────────────
@@ -788,13 +797,28 @@ async function initOnboarding() {
       <div class="welcome-feature"><strong>Private</strong><span>Your details and CV stay in this browser, on this device</span></div>
       <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
     </div>
-    <div class="welcome-actions"><button class="primary" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div>
-    ${globalThis.__jobaiClient === 'android' ? '' : '<p style="margin-top:14px;font-size:14px">Set up on your phone already? <a href="#" id="w-phone" class="tracker-link">Bring in my phone setup</a></p>'}</div>`;
+    ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
+      <strong style="display:block;margin-bottom:4px">Set up on your phone?</strong>
+      <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin-bottom:10px">Type the 6-digit code from your phone. Your CV, details and licence come straight in.</span>
+      <div style="display:flex;gap:8px"><input id="w-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w-go">Connect</button></div>
+      <div class="status-msg" id="w-st" style="margin-top:8px"></div></div>
+      <p style="margin:14px 0 8px;font-size:14px;color:var(--text-muted,#4a453b)">New to Job-AI? Set up here instead:</p>`}
+    <div class="welcome-actions"><button class="${globalThis.__jobaiClient === 'android' ? 'primary' : 'secondary'}" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div></div>`;
   document.body.appendChild(overlay);
   const dismiss = () => { overlay.remove(); store.patch('settings', { welcomeSeen: true }); };
   $('#w-tour').addEventListener('click', () => { dismiss(); startTour(); });
   $('#w-skip').addEventListener('click', dismiss);
-  $('#w-phone') && $('#w-phone').addEventListener('click', (e) => { e.preventDefault(); dismiss(); navigate('license'); setTimeout(() => $('#ph-code') && $('#ph-code').focus(), 300); });
+  if ($('#w-code')) {
+    const go = async () => {
+      const b = $('#w-go'); b.disabled = true;
+      const done = await claimPhoneSetup($('#w-code').value, (t, err) => setSt('#w-st', t, err));
+      b.disabled = false;
+      if (done) setTimeout(() => { dismiss(); navigate('dashboard'); }, 1200);
+    };
+    $('#w-go').addEventListener('click', go);
+    $('#w-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    setTimeout(() => $('#w-code') && $('#w-code').focus(), 100);
+  }
 }
 
 // ── Phone control (tryjobai.com/app) ─────────────────────────────────────────
@@ -803,6 +827,8 @@ async function initOnboarding() {
 // Each check-in waits on the server for up to 20s (no timers, which Chrome slows in background
 // tabs), so a tap reaches this browser within a second or two. Not used on Android: there the
 // phone is the computer.
+// It also shares what needs the user, the applications list and the search settings (only when
+// they change), so the phone can submit a ready NHS form, set a stage, or change settings.
 const REMOTE_LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company sites' };
 let remoteCtl = null, remoteNudgeT = null;
 function remoteNudge() { clearTimeout(remoteNudgeT); remoteNudgeT = setTimeout(() => { if (remoteCtl) remoteCtl.abort(); }, 800); }
@@ -835,7 +861,70 @@ async function remoteStatus() {
     recent, blocked,
   };
 }
+const REMOTE_SITE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company site' };
+const REMOTE_STAGES = ['applied', 'phone_screen', 'interview', 'offer', 'rejected', 'withdrawn'];
+const TRAC_LIST = 'https://apps.trac.jobs/applicationlist';
+async function remoteExtra() {
+  const { profile, settings } = await loadConfig();
+  const all = await store.jobs();
+  const newest = (a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt));
+  const inbox = [];
+  for (const j of all.filter((x) => x.source === 'trac' && (x.status === 'ready_to_submit' || (x.status === 'skipped' && /^Draft saved on Trac/.test(x.reason || '')))).sort(newest)) {
+    const ready = j.status === 'ready_to_submit', ai = /asks about AI use/.test(j.reason || '');
+    const missing = String(j.reason || '').replace(/^Draft saved on Trac\.?\s*Needs you:\s*/i, '').replace(/ This form asks about AI use.*$/, '').replace(/\.$/, '');
+    inbox.push({
+      id: j.jobId, kind: ready ? 'nhs_ready' : 'nhs_needs', title: String(j.title || '').split(' Band ')[0], company: j.company || 'NHS',
+      note: ready ? (ai ? 'This form asks about AI use, so submit it yourself on Trac.' : 'Every section is complete. Read it, then submit.') : `Still needed: ${missing || 'check the draft'}. Fix it on Trac and Job-AI finishes the rest.`,
+      url: /^https:\/\/apps\.trac\.jobs\//.test(j.draftUrl || '') ? j.draftUrl : TRAC_LIST, statement: ready ? (j.coverLetter || '') : '',
+      ai_blocked: ready && ai, submitting: ready && !!j.submitApproved, at: j.updatedAt || '',
+    });
+  }
+  for (const j of all.filter((x) => x.status === 'ready').sort(newest)) {
+    inbox.push({ id: j.jobId, kind: 'waiting', title: j.title || '', company: j.company || '', note: 'The form is filled in and open in Chrome on your computer. Check it there and press Submit.', url: safeUrl(j.url) || '', at: j.updatedAt || '' });
+  }
+  const tracker = all.filter((j) => j.status === 'applied').sort((a, b) => String(b.appliedAt || b.updatedAt).localeCompare(String(a.appliedAt || a.updatedAt))).slice(0, 150)
+    .map((j) => ({ id: j.jobId, title: j.title || '', company: j.company || '', source: REMOTE_SITE[j.source] || '', at: j.appliedAt || j.updatedAt || '', stage: REMOTE_STAGES.includes(j.stage) ? j.stage : 'applied', url: safeUrl(j.url) || '' }));
+  const settingsOut = { terms: profile.searchTerms || [], work_types: profile.workTypePriority || ['remote', 'hybrid', 'onsite'], location: profile.searchLocation || '', nhs_submit: !!(settings.autoSubmit && settings.autoSubmit.trac), has_nhs: true };
+  return { inbox, tracker, stages: true, settings: settingsOut };
+}
+let remoteExtraSent = '', remoteExtraAt = 0, remoteExtraBuilt = 0;
+async function remoteSyncExtra(force) {
+  if (!force && Date.now() - remoteExtraBuilt < 15000) return;
+  remoteExtraBuilt = Date.now();
+  const extra = await remoteExtra();
+  const json = JSON.stringify(extra);
+  if (!force && json === remoteExtraSent && Date.now() - remoteExtraAt < 15 * 60 * 1000) return;
+  const r = await remotePost('/v1/remote/sync', { client: 'extension', extra }).catch(() => null);
+  if (r && r.ok) { remoteExtraSent = json; remoteExtraAt = Date.now(); }
+}
+function remoteRefreshView() { if (['dashboard', 'search', 'tracker'].includes(current) && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) VIEWS[current](); }
 async function remoteRun(c) {
+  const p = c.payload || {};
+  if (c.cmd === 'set_settings') {
+    const terms = (p.terms || []).map((t) => String(t).trim()).filter(Boolean).slice(0, 40);
+    if (!terms.length) return { ok: false, message: 'Add at least one job title.' };
+    const wt = (p.work_types || []).filter((w) => ['remote', 'hybrid', 'onsite'].includes(w));
+    await store.patch('profile', { searchTerms: terms, ...(wt.length ? { workTypePriority: wt } : {}), ...(p.location ? { searchLocation: String(p.location).slice(0, 80) } : {}) });
+    if (typeof p.nhs_submit === 'boolean') { const s = await store.get('settings'); await store.patch('settings', { autoSubmit: { ...(s.autoSubmit || {}), trac: p.nhs_submit } }); }
+    await loadConfig(); remoteRefreshView();
+    return { ok: true };
+  }
+  if (c.cmd === 'set_stage') {
+    if (!REMOTE_STAGES.includes(p.stage)) return { ok: false, message: 'Unknown stage.' };
+    if (!(await store.hasJob(p.job_id))) return { ok: false, message: 'That application is not in this browser.' };
+    await store.updateJob(p.job_id, { stage: p.stage }); remoteRefreshView();
+    return { ok: true };
+  }
+  if (c.cmd === 'submit_nhs') {
+    const j = (await store.jobs()).find((x) => x.jobId === p.job_id);
+    if (!j || j.source !== 'trac' || j.status !== 'ready_to_submit' || /asks about AI use/.test(j.reason || '')) return { ok: false, message: 'That application is no longer ready to submit.' };
+    await store.updateJob(j.jobId, { submitApproved: true });
+    if (!agents.trac.running) {
+      if (!(await recheckLicence())) return { ok: false, message: 'Your Job-AI access has ended. Subscribe to keep applying.' };
+      runAgent('trac'); setTimeout(renderDashboard, 300);
+    }
+    return { ok: true };
+  }
   const keys = c.cmd === 'start' || c.cmd === 'stop' ? [c.agent].filter((k) => agents[k]) : Object.keys(agents);
   if (!keys.length) return { ok: false, message: 'That agent is not in this browser.' };
   if (c.cmd === 'stop' || c.cmd === 'stop_all') { keys.forEach((k) => agents[k].stop()); setTimeout(renderDashboard, 300); return { ok: true }; }
@@ -871,6 +960,7 @@ async function remotePost(path, body, signal) {
       let out; try { out = await remoteRun(c); } catch (e) { out = { ok: false, message: e.message }; }
       await remotePost('/v1/remote/ack', { id: c.id, ok: out.ok, message: out.message || '' }).catch(() => {});
     }
+    await remoteSyncExtra((r.commands || []).length > 0).catch(() => {});
     if ((r.commands || []).length) await pause(1500);
   }
 })();

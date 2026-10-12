@@ -346,7 +346,8 @@ app.whenReady().then(async () => {
 
   // Phone control: tryjobai.com/app shows these agents live and can start/stop them.
   try {
-    remoteControl.start({ startBotGated, licenseLocallyValid, dailyLimit: getDailyLimit, onStarted: () => sendStep('agents_started') });
+    remoteControl.start({ startBotGated, licenseLocallyValid, dailyLimit: getDailyLimit, onStarted: () => sendStep('agents_started'),
+      onSettingsChanged: () => { try { mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send('remote:changed'); } catch (_) {} } });
   } catch (_) {}
 
   // Anonymous install beacon (once per install) — feeds the founder funnel stats

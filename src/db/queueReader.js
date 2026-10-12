@@ -354,4 +354,42 @@ function getTracApplications() {
   });
 }
 
-module.exports = { init, getQueueSummary, getTracApplications, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };
+// NHS applications the user approved from their phone (tryjobai.com/app). The Trac agent
+// submits them on its next step and removes each id once it has tried (see bot_trac.js).
+const APPROVED_KEY = 'trac_submit_ok';
+function getTracApproved() {
+  return withQueueDb(db => {
+    try { const r = all(db, 'SELECT value FROM meta WHERE key = ?', [APPROVED_KEY]); return JSON.parse((r[0] && r[0].value) || '[]'); } catch (_) { return []; }
+  }, []);
+}
+// Only a Trac job that is ready to submit and doesn't ask about AI use can be approved.
+async function approveTracSubmit(jobId) {
+  if (!dbPath || !fs.existsSync(dbPath) || !jobId) return false;
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(readDbFile(dbPath));
+  try {
+    const job = all(db, "SELECT reason FROM queue WHERE job_id = ? AND source = 'trac' AND status = 'ready_to_submit'", [String(jobId)])[0];
+    if (!job || /asks about AI use/.test(job.reason || '')) return false;
+    db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
+    let ids = []; try { ids = JSON.parse((all(db, 'SELECT value FROM meta WHERE key = ?', [APPROVED_KEY])[0] || {}).value || '[]'); } catch (_) {}
+    if (!ids.includes(String(jobId))) ids.push(String(jobId));
+    db.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [APPROVED_KEY, JSON.stringify(ids.slice(-50))]);
+    writeDbFile(dbPath, Buffer.from(db.export()));
+    return true;
+  } finally {
+    db.close();
+  }
+}
+
+// Accounts the user must sign in to again: the newest such skip per site, from the last 3 days.
+function getReconnectNeeded() {
+  return withQueueDb(db => {
+    try {
+      return all(db, `SELECT source, MAX(updated_at) AS updated_at FROM queue WHERE status = 'skipped' AND updated_at >= datetime('now', '-3 days')
+        AND (reason LIKE '%reconnect%' OR reason LIKE '%login needed%' OR reason LIKE '%sign in%' OR reason LIKE '%session%') AND reason NOT LIKE 'Draft saved on Trac%'
+        GROUP BY source`);
+    } catch (_) { return []; }
+  }, []);
+}
+
+module.exports = { init, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };

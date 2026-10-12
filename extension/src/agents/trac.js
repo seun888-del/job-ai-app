@@ -60,6 +60,7 @@ export class TracAgent {
         if (signedIn && this.windowId) chrome.windows.update(this.windowId, { state: 'minimized' }).catch(() => {});
         if (!signedIn) { this.log('Not signed in to Trac. Sign in in the Job-AI window, then it carries on.'); await this.wait(cycleEnd); continue; }
         if (globalThis.__jobaiStep) globalThis.__jobaiStep('site_connected');
+        await this.submitApproved().catch((e) => this.log('Submit error: ' + e.message));
         await this.resumeDrafts().catch((e) => this.log('Drafts error: ' + e.message));
         if (!this.running) break;
         await this.applyReady().catch((e) => this.log('Apply error: ' + e.message));
@@ -77,7 +78,36 @@ export class TracAgent {
     }
   }
   stop() { if (this.running) { this.running = false; this.log('Stopping after the current step.'); this.onChange(); } }
-  async wait(until) { while (this.running && Date.now() < until) await sleep(1000); }
+  // Between rounds, a form approved on the phone is submitted within a few seconds.
+  async wait(until) {
+    let chk = 0;
+    while (this.running && Date.now() < until) {
+      if (Date.now() - chk > 5000) { chk = Date.now(); if ((await store.jobs()).some((j) => j.submitApproved && j.source === SOURCE)) await this.submitApproved().catch((e) => this.log('Submit error: ' + e.message)); }
+      await sleep(1000);
+    }
+  }
+
+  // Applications the user approved on their phone (tryjobai.com/app): submitted now, even with
+  // "Submit for me" off, under the same rules: only when Trac shows every section complete, and
+  // never a form that asks about AI use. A job with no draft link yet is left for resumeDrafts.
+  async submitApproved() {
+    const all = await store.jobs();
+    for (const j of all.filter((x) => x.submitApproved && x.status !== 'ready_to_submit')) await store.updateJob(j.jobId, { submitApproved: false });
+    const todo = all.filter((j) => j.submitApproved && j.status === 'ready_to_submit' && j.source === SOURCE && j.draftUrl);
+    if (!todo.length) return;
+    if (!(await ensureTracLogin(this.page, (m) => this.log(m)))) { this.log('Sign in to Trac so it can submit the applications you approved.'); return; }
+    for (const job of todo) {
+      if (!this.running) return;
+      const aiBlocked = /asks about AI use/.test(job.reason || '');
+      this.log(`Submitting (you approved it on your phone): ${job.title}`);
+      const r = await fillApplication(this.page, { job: { ...job, url: job.draftUrl }, resume: true, applicant: cfg.APPLICANT, details: cfg.TRAC_DETAILS, supportingStatement: job.coverLetter || '', submit: true, blockSubmit: aiBlocked, log: (m) => this.log(m) });
+      if (r.result === 'needs_login') return;
+      await store.updateJob(job.jobId, { submitApproved: false });
+      await this.record(job, { ...r, draftUrl: r.draftUrl || job.draftUrl }, aiBlocked);
+      if (r.result === 'dry_run') this.log('Not submitted: Trac does not show every section complete yet.');
+      await sleep(3000);
+    }
+  }
 
   // 1. Search HealthJobsUK for the NHS terms and read each new advert.
   async search() {
@@ -172,10 +202,12 @@ export class TracAgent {
       if (!owner) continue; // not one of ours
       if (/^Vacancy closed/.test(owner.reason || '')) continue;
       const aiBlocked = /asks about AI use/.test(owner.reason || '');
-      if (owner.status === 'ready_to_submit' && (!(await this.autoSubmit()) || aiBlocked)) { if (!owner.draftUrl) await store.updateJob(owner.jobId, { draftUrl: d.url }); continue; }
+      const approved = !!owner.submitApproved;
+      if (owner.status === 'ready_to_submit' && ((!(await this.autoSubmit()) && !approved) || aiBlocked)) { if (!owner.draftUrl) await store.updateJob(owner.jobId, { draftUrl: d.url }); continue; }
       if (!['ready_to_submit', 'skipped', 'cv_ready'].includes(owner.status)) continue;
       this.log(`Finishing draft: ${d.title}`);
-      const r = await fillApplication(this.page, { job: { ...owner, url: d.url }, resume: true, applicant: cfg.APPLICANT, details: cfg.TRAC_DETAILS, supportingStatement: owner.coverLetter || '', submit: await this.autoSubmit(), blockSubmit: aiBlocked, log: (m) => this.log(m) });
+      const r = await fillApplication(this.page, { job: { ...owner, url: d.url }, resume: true, applicant: cfg.APPLICANT, details: cfg.TRAC_DETAILS, supportingStatement: owner.coverLetter || '', submit: (await this.autoSubmit()) || approved, blockSubmit: aiBlocked, log: (m) => this.log(m) });
+      if (approved && r.result !== 'needs_login') await store.updateJob(owner.jobId, { submitApproved: false });
       await this.record(owner, { ...r, draftUrl: r.draftUrl || d.url }, aiBlocked);
       if (r.result === 'needs_login') return;
       await sleep(4000 + Math.random() * 3000);

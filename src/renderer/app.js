@@ -184,6 +184,12 @@ async function attachAutofill() {
   }
 }
 
+// Settings or a stage changed from the phone (tryjobai.com/app): show it if that page is open
+// (unless the user is typing on it right now).
+if (window.api.remote && window.api.remote.onChanged) window.api.remote.onChanged(() => {
+  if (['search', 'tracker', 'trac-details'].includes(_currentView) && !(document.activeElement && content.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) render(_currentView);
+});
+
 async function render(view) {
   let fn;
   switch (view) {
@@ -1194,21 +1200,10 @@ async function renderLicense() {
     showStatus(st, r.ok ? 'If that email has Job-AI, a code is on its way. Type it above.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not send. Check your connection and try again.', r.ok ? 'success' : 'error');
   });
   document.getElementById('phone_claim').addEventListener('click', async () => {
-    const btn = document.getElementById('phone_claim'), st = document.getElementById('phone_status');
-    const code = document.getElementById('phone_code').value.replace(/\D/g, '');
-    if (code.length !== 6) { showStatus(st, 'The code is 6 numbers.', 'error'); return; }
-    btn.disabled = true; st.className = 'status-msg'; st.textContent = 'Bringing in your setup...';
+    const btn = document.getElementById('phone_claim');
+    btn.disabled = true;
     try {
-      const r = await window.api.license.claimSetup(code);
-      if (r.error === 'bad_code' || r.error === 'http_404') { showStatus(st, 'That code is wrong or has run out. Get a new one on your phone.', 'error'); return; }
-      if (r.error === 'network_error') { showStatus(st, 'Could not reach Job-AI. Check your connection.', 'error'); return; }
-      const got = (r.got || []).length ? ', and your ' + r.got.join(' and ') + ' are in' : '';
-      if (!r.ok) { showStatus(st, (r.got || []).length ? `Your ${r.got.join(' and ')} came in, but the licence could not be activated (${LICENSE_ERRORS[r.error] || r.error}).` : (LICENSE_ERRORS[r.error] || `Error: ${r.error}`), 'error'); return; }
-      dashboardHasLicense = licenseIsActive(r.license);
-      await refreshExpiryBanner();
-      await updateNavProgress();
-      showStatus(st, `Done. Licence active${got}.`, 'success');
-      setTimeout(() => navigate('dashboard'), 1500);
+      if (await claimPhoneSetup(document.getElementById('phone_code').value, document.getElementById('phone_status'))) setTimeout(() => navigate('dashboard'), 1500);
     } finally { btn.disabled = false; }
   });
 
@@ -3272,6 +3267,24 @@ function startTour() {
   goToStep();
 }
 
+// Bring in what the user set up on their phone (tryjobai.com/start): licence, details and CV.
+// Progress goes in the status element st. Returns true when the licence is active.
+async function claimPhoneSetup(raw, st) {
+  const code = String(raw || '').replace(/\D/g, '');
+  if (code.length !== 6) { showStatus(st, 'The code is 6 numbers.', 'error'); return false; }
+  st.className = 'status-msg'; st.textContent = 'Bringing in your setup...';
+  const r = await window.api.license.claimSetup(code);
+  if (r.error === 'bad_code' || r.error === 'http_404') { showStatus(st, 'That code is wrong or has run out. Get a new one on your phone.', 'error'); return false; }
+  if (r.error === 'network_error') { showStatus(st, 'Could not reach Job-AI. Check your connection.', 'error'); return false; }
+  const got = (r.got || []).length ? ', and your ' + r.got.join(' and ') + ' are in' : '';
+  if (!r.ok) { showStatus(st, (r.got || []).length ? `Your ${r.got.join(' and ')} came in, but the licence could not be activated (${LICENSE_ERRORS[r.error] || r.error}).` : (LICENSE_ERRORS[r.error] || `Error: ${r.error}`), 'error'); return false; }
+  dashboardHasLicense = licenseIsActive(r.license);
+  await refreshExpiryBanner();
+  await updateNavProgress();
+  showStatus(st, `Done. Licence active${got}.`, 'success');
+  return true;
+}
+
 function initOnboarding() {
   if (localStorage.getItem('welcome_seen')) return;
 
@@ -3283,7 +3296,7 @@ function initOnboarding() {
   // Create buttons with handlers attached directly to the element reference —
   // avoids any getElementById/querySelector lookup after DOM insertion.
   const tourBtn = document.createElement('button');
-  tourBtn.className = 'primary';
+  tourBtn.className = 'secondary';
   tourBtn.innerHTML = 'Take the setup tour &rarr;';
   tourBtn.addEventListener('click', () => { dismiss(); startTour(); });
 
@@ -3310,7 +3323,29 @@ function initOnboarding() {
       <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
     </div>
   `;
+  // Set up on the phone already? The code comes first: it brings in the CV, details and licence,
+  // so there is nothing to tour. Setting up here is the second choice.
+  const phone = document.createElement('div');
+  phone.style.cssText = 'text-align:left;background:#fbf9f4;border:1px solid #e6e1d6;border-radius:9px;padding:16px;margin:18px 0 6px';
+  phone.innerHTML = `<strong style="display:block;margin-bottom:4px">Set up on your phone?</strong>
+    <span style="display:block;font-size:13.5px;color:#4a453b;margin-bottom:10px">Type the 6-digit code from your phone. Your CV, details and licence come straight in.</span>
+    <div style="display:flex;gap:8px"><input id="w_code" inputmode="numeric" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w_go">Connect</button></div>
+    <div class="status-msg" id="w_status" style="margin-top:8px"></div>`;
+  const codeIn = phone.querySelector('#w_code'), goBtn = phone.querySelector('#w_go');
+  const go = async () => {
+    goBtn.disabled = true;
+    try { if (await claimPhoneSetup(codeIn.value, phone.querySelector('#w_status'))) setTimeout(() => { dismiss(); navigate('dashboard'); }, 1200); }
+    finally { goBtn.disabled = false; }
+  };
+  goBtn.addEventListener('click', go);
+  codeIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  const or = document.createElement('p');
+  or.style.cssText = 'margin:14px 0 8px;font-size:14px;color:#4a453b';
+  or.textContent = 'New to Job-AI? Set up here instead:';
+  modal.appendChild(phone);
+  modal.appendChild(or);
   modal.appendChild(actions);
+  setTimeout(() => codeIn.focus(), 100);
 
   const overlay = document.createElement('div');
   overlay.className = 'welcome-overlay';

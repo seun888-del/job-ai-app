@@ -46,6 +46,59 @@ async function fillWhileScorerWaits(page, opts) {
 // change applies on the next round. Applications that ask about AI use are never auto-submitted.
 const autoSubmit = () => process.env.JOBBOT_TRAC_SUBMIT === '1' || ((cfg.TRAC_DETAILS || {}).autoSubmit === true);
 const AI_NOTE = ' This form asks about AI use, so you submit it yourself.';
+// Applications the user approved from their phone (tryjobai.com/app; the app writes the list).
+// Submitted even with "Submit for me" off, under the same rules: only when Trac shows every
+// section complete, and never a form that asks about AI use.
+const approvedIds = () => { try { return JSON.parse(queue.getMeta('trac_submit_ok') || '[]'); } catch (_) { return []; } };
+const isApproved = (id) => approvedIds().includes(id);
+const dropApproved = (id) => { try { queue.setMeta('trac_submit_ok', JSON.stringify(approvedIds().filter((x) => x !== id))); } catch (_) {} };
+
+function recordFilled(job, { result, paused = [], status, aiQuestion }, aiBlocked, draftUrl) {
+  if (result === 'applied') {
+    queue.update(job.jobId, { status: 'applied', reason: 'Submitted on Trac', ...(draftUrl ? { draftUrl } : {}) }); queue.markApplied(job.jobId);
+    logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLIED', 'Trac');
+    console.log(`  [Trac Agent] ✓ Submitted: ${job.title}`);
+  } else if (result === 'dry_run') {
+    const missing = [...new Set([...(status && status.notOk ? status.notOk : []), ...paused.map((p) => p.field)])].filter(Boolean);
+    const complete = status && status.total && !status.notOk.length && status.groupsOpen === 0;
+    const note = complete ? 'Every section complete. Open it on Trac and press Submit.' : `Draft saved on Trac. Needs you: ${missing.slice(0, 6).join('; ') || 'check the draft'}${missing.length > 6 ? ` (+${missing.length - 6} more)` : ''}.`;
+    queue.update(job.jobId, { status: complete ? 'ready_to_submit' : 'skipped', reason: note + ((aiQuestion || aiBlocked) ? AI_NOTE : ''), ...(draftUrl ? { draftUrl } : {}) });
+    if (complete) queue.markCapCounted(job.jobId);
+    console.log(`  [Trac Agent] ${complete ? '✓ Ready to submit' : '⚠ Needs your input'}: ${job.title}. ${note}`);
+  } else if (result === 'closed') {
+    queue.update(job.jobId, { status: 'skipped', reason: 'Vacancy closed before it was submitted' });
+  }
+}
+
+// Submit what the user approved on their phone, straight away (not on the next 10-minute round).
+// A job with no draft link yet is left for resumeDrafts, which finds it in the Trac list.
+async function submitApproved(page) {
+  const ids = approvedIds();
+  if (!ids.length) return;
+  const jobs = queue.read();
+  for (const id of ids) if (!jobs.some((j) => j.jobId === id && j.status === 'ready_to_submit')) dropApproved(id);
+  const todo = jobs.filter((j) => ids.includes(j.jobId) && j.status === 'ready_to_submit' && j.source === SOURCE && j.draftUrl);
+  if (!todo.length) return;
+  if (!(await ensureTracLogin(page, console.log))) { console.log('  [Trac Agent] Sign in to Trac so it can submit the applications you approved.'); return; }
+  for (const job of todo) {
+    const aiBlocked = /asks about AI use/.test(job.reason || '');
+    console.log(`
+  [Trac Agent] ── Submitting (you approved it on your phone): ${job.title}`);
+    try {
+      const r = await fillWhileScorerWaits(page, { job: { ...job, url: job.draftUrl }, resume: true, applicant: cfg.APPLICANT || {}, details: cfg.TRAC_DETAILS || {},
+        supportingStatement: job.coverLetter || '', submit: true, blockSubmit: aiBlocked, log: console.log });
+      if (r.result === 'needs_login') return;
+      dropApproved(job.jobId);
+      recordFilled(job, r, aiBlocked, job.draftUrl);
+      if (r.result === 'dry_run') console.log('  [Trac Agent] Not submitted: Trac does not show every section complete yet.');
+    } catch (e) {
+      if (BROWSER_CLOSED_RE.test(e.message || '')) throw e;
+      dropApproved(job.jobId);
+      console.log(`  [Trac Agent] Could not submit ${job.title}: ${e.message}`);
+    }
+    await DELAY(3000);
+  }
+}
 
 let _spawnedChrome = null;
 for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { try { _spawnedChrome && _spawnedChrome.kill(); } catch (_) {} });
@@ -194,11 +247,13 @@ async function resumeDrafts(page) {
       // Already confirmed complete: nothing to do until you submit it on Trac.
       if (owner && /^Vacancy closed/.test(owner.reason || '')) { console.log('  [Trac Agent] Vacancy closed, skipping.'); continue; }
       const aiBlocked = !!(owner && /asks about AI use/.test(owner.reason || ''));
-      if (owner && owner.status === 'ready_to_submit' && (!autoSubmit() || aiBlocked)) { if (!owner.draftUrl && d.url) queue.update(owner.jobId, { draftUrl: d.url }); console.log('  [Trac Agent] Already complete, waiting for you to submit it on Trac.'); continue; }
+      const approved = !!(owner && isApproved(owner.jobId));
+      if (owner && owner.status === 'ready_to_submit' && ((!autoSubmit() && !approved) || aiBlocked)) { if (!owner.draftUrl && d.url) queue.update(owner.jobId, { draftUrl: d.url }); console.log('  [Trac Agent] Already complete, waiting for you to submit it on Trac.'); continue; }
       const { result, paused = [], status, aiQuestion } = await fillWhileScorerWaits(page, {
         job: owner ? { ...owner, url: d.url } : d, resume: true, applicant: cfg.APPLICANT || {}, details: cfg.TRAC_DETAILS || {},
-        supportingStatement: (owner && owner.coverLetter) || '', submit: autoSubmit(), blockSubmit: aiBlocked, log: console.log,
+        supportingStatement: (owner && owner.coverLetter) || '', submit: autoSubmit() || approved, blockSubmit: aiBlocked, log: console.log,
       });
+      if (approved && result !== 'needs_login') dropApproved(owner.jobId);
       console.log(`  [Trac Agent] Draft ${d.id} → ${result}`);
       // No queue record (e.g. the queue was cleared): record the draft so it isn't re-checked
       // every round and the search never queues the same role again.
@@ -252,6 +307,7 @@ async function phase2(page, until = Infinity) {
 
   let idle = 0;
   while (Date.now() < until) {
+    await submitApproved(page);
     const ready = queue.getByStatus('cv_ready').filter((j) => j.source === SOURCE);
     for (const job of ready) {
       if (queue.countAppliedToday() >= cfg.MAX_APPLICATIONS_PER_DAY) {
@@ -334,6 +390,7 @@ async function main() {
       // Pick up anything changed in the app since the last cycle (search terms, NHS
       // details such as referee dates) without needing a restart.
       await cfg.init().catch(() => {});
+      await submitApproved(page);
       await phase1(page);
       await resumeDrafts(page);
       await phase2(page, Date.now() + CYCLE_MS);

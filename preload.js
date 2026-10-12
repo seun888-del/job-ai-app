@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('api', {
   win: { action: (a) => ipcRenderer.invoke('win:action', a) },
   remote: {
     setPrefs: (p) => ipcRenderer.send('remote:prefs', p),
+    onChanged: (cb) => ipcRenderer.on('remote:changed', () => cb()),
   },
   profile: {
     get: () => ipcRenderer.invoke('profile:get'),

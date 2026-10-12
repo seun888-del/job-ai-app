@@ -7,6 +7,10 @@
 // Each check-in waits on the server for up to 20 seconds, so a tap on the phone reaches
 // this computer within a second or two. A local change (agent started or stopped) ends the
 // wait early and sends the new status. Best-effort and silent: failures never disturb the app.
+//
+// Phase 3: it also shares what needs the user (NHS forms ready or to finish, accounts to sign in
+// to again), the applications list with its stages, and the search settings, sent only when
+// they change. The phone can then submit a ready NHS form, set a stage, or change settings.
 
 const { JOBBOT_BACKEND_URL } = require('../config');
 const db = require('../db/database');
@@ -14,11 +18,16 @@ const queueReader = require('../db/queueReader');
 const botManager = require('./botManager');
 const { machineId } = require('./machineId');
 
-const WAIT_S = 20, RETRY_MS = 15000;
+const WAIT_S = 20, RETRY_MS = 15000, EXTRA_MIN_MS = 15000, EXTRA_RESEND_MS = 15 * 60 * 1000;
 const LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', greenhouse: 'Company sites' };
 // What the dashboard shows (and which boxes are ticked); the renderer keeps this current.
 let prefs = { keys: ['trac', 'reed', 'linkedin', 'greenhouse'], enabled: null };
-let deps = null, running = false, waitCtl = null, nudgeTimer = null;
+let deps = null, running = false, waitCtl = null, nudgeTimer = null, extraSent = '', extraSentAt = 0, extraBuiltAt = 0;
+const TRAC_APPS_URL = 'https://apps.trac.jobs/applicationlist';
+const SITE = { reed: 'Reed', linkedin: 'LinkedIn', trac: 'NHS', greenhouse: 'Company site', ats: 'Company site', indeed: 'Indeed' };
+const STAGES = ['applied', 'phone_screen', 'interview', 'offer', 'rejected', 'withdrawn'];
+const cleanTitle = (t) => (String(t || '').split('\n').map((x) => x.trim()).find(Boolean) || '').replace(/\s+with verification$/i, '');
+const toIso = (v) => { if (!v) return ''; const d = new Date(String(v).replace(' ', 'T') + (/[zZ+]/.test(String(v)) || String(v).length <= 10 ? '' : 'Z')); return isNaN(d) ? '' : d.toISOString(); };
 
 function setPrefs(p) {
   if (!p || !Array.isArray(p.keys)) return;
@@ -53,7 +62,89 @@ async function buildStatus() {
   };
 }
 
+function tracDetails() { try { return JSON.parse(db.getProfile().trac_details || '{}') || {}; } catch (_) { return {}; } }
+
+async function buildExtra() {
+  const approved = (await queueReader.getTracApproved()) || [];
+  const inbox = ((await queueReader.getTracApplications()) || []).map((a) => {
+    const ready = a.status === 'ready_to_submit', ai = /asks about AI use/.test(a.reason || '');
+    const missing = String(a.reason || '').replace(/^Draft saved on Trac\.?\s*Needs you:\s*/i, '').replace(/ This form asks about AI use.*$/, '').replace(/\.$/, '');
+    return {
+      id: a.job_id, kind: ready ? 'nhs_ready' : 'nhs_needs', title: String(a.title || '').split(' Band ')[0], company: a.company || 'NHS',
+      note: ready ? (ai ? 'This form asks about AI use, so submit it yourself on Trac.' : 'Every section is complete. Read it, then submit.') : `Still needed: ${missing || 'check the draft'}. Fix it on Trac and Job-AI finishes the rest.`,
+      url: /^https:\/\/apps\.trac\.jobs\//.test(a.draft_url || '') ? a.draft_url : TRAC_APPS_URL,
+      statement: ready ? (a.cover_letter || '') : '', ai_blocked: ready && ai, submitting: ready && approved.includes(a.job_id), at: toIso(a.updated_at),
+    };
+  });
+  for (const r of (await queueReader.getReconnectNeeded()) || []) {
+    const site = SITE[r.source] || r.source || 'a job site';
+    inbox.push({ id: 'reconnect_' + (r.source || 'site'), kind: 'reconnect', title: `Sign in to ${site} again`, company: '', note: `On your computer, open Job-AI and press Sign in on the ${site} card. Your agents carry on after.`, at: toIso(r.updated_at) });
+  }
+  // The applications list: the same rows as the Interview Tracker page.
+  try { for (const j of (await queueReader.getAppliedJobsForSync()) || []) db.syncTrackerEntry(j); } catch (_) {}
+  let tracker = [];
+  try {
+    tracker = db.getTracker().slice(0, 150).map((t) => ({ id: t.job_id, title: cleanTitle(t.title), company: t.company || '', source: SITE[t.source] || t.source || '', at: toIso(t.applied_at), stage: STAGES.includes(t.stage) ? t.stage : 'applied', url: t.url || '' }));
+  } catch (_) {}
+  let settings = null;
+  try {
+    const sp = db.getSearchPreferences();
+    settings = { terms: db.getSearchTerms(true).map((x) => x.term), work_types: sp.work_type_priority || [], location: sp.location || '', nhs_submit: tracDetails().autoSubmit === true, has_nhs: prefs.keys.includes('trac') };
+  } catch (_) {}
+  return { inbox, tracker, stages: true, settings };
+}
+
+// Send the inbox, applications and settings when they change (and every 15 minutes anyway).
+async function syncExtra(key, force) {
+  if (!force && Date.now() - extraBuiltAt < EXTRA_MIN_MS) return;
+  extraBuiltAt = Date.now();
+  const extra = await buildExtra();
+  const json = JSON.stringify(extra);
+  if (!force && json === extraSent && Date.now() - extraSentAt < EXTRA_RESEND_MS) return;
+  const r = await post('/v1/remote/sync', key, { client: 'app', extra }).catch(() => null);
+  if (r && r.ok) { extraSent = json; extraSentAt = Date.now(); }
+}
+
+function applySettings(p) {
+  const want = (p.terms || []).map((t) => String(t).trim()).filter(Boolean).slice(0, 40);
+  if (!want.length) return { ok: false, message: 'Add at least one job title.' };
+  const lower = new Set(want.map((t) => t.toLowerCase()));
+  for (const t of db.getSearchTerms(true)) if (!lower.has(String(t.term).toLowerCase())) db.setSearchTermActive(t.id, false);
+  db.addSearchTerms(want, 'user_added');
+  const wt = (p.work_types || []).filter((w) => ['remote', 'hybrid', 'onsite'].includes(w));
+  const fields = {};
+  if (wt.length) fields.work_type_priority = wt;
+  if (p.location) fields.location = String(p.location).slice(0, 80);
+  if (Object.keys(fields).length) db.saveSearchPreferences(fields);
+  if (prefs.keys.includes('trac') && typeof p.nhs_submit === 'boolean') {
+    const t = tracDetails();
+    if ((t.autoSubmit === true) !== p.nhs_submit) { t.autoSubmit = p.nhs_submit; db.saveProfile({ trac_details: JSON.stringify(t) }); }
+  }
+  deps.onSettingsChanged && deps.onSettingsChanged();
+  return { ok: true };
+}
+
 async function run(cmd) {
+  if (cmd.cmd === 'set_settings') return applySettings(cmd.payload || {});
+  if (cmd.cmd === 'set_stage') {
+    const p = cmd.payload || {};
+    if (!STAGES.includes(p.stage)) return { ok: false, message: 'Unknown stage.' };
+    const row = db.getTracker().find((t) => t.job_id === p.job_id);
+    if (!row) return { ok: false, message: 'That application is not on this computer.' };
+    db.updateTrackerEntry(row.id, { stage: p.stage });
+    deps.onSettingsChanged && deps.onSettingsChanged();
+    return { ok: true };
+  }
+  if (cmd.cmd === 'submit_nhs') {
+    const id = String((cmd.payload || {}).job_id || '');
+    if (!(await queueReader.approveTracSubmit(id))) return { ok: false, message: 'That application is no longer ready to submit.' };
+    const st = botManager.getStatus() || {};
+    if (!isOn(st.trac)) {
+      try { await deps.startBotGated('trac'); deps.onStarted && deps.onStarted(); }
+      catch (e) { return { ok: false, message: `Approved, but the NHS agent could not start: ${e.message}`.slice(0, 190) }; }
+    }
+    return { ok: true };
+  }
   const keys = cmd.cmd === 'start' || cmd.cmd === 'stop' ? [cmd.agent].filter((k) => prefs.keys.includes(k)) : prefs.keys;
   if (!keys.length) return { ok: false, message: 'That agent is not on this computer.' };
   if (cmd.cmd === 'stop' || cmd.cmd === 'stop_all') {
@@ -100,6 +191,7 @@ async function loop() {
       let out; try { out = await run(c); } catch (e) { out = { ok: false, message: e.message }; }
       await post('/v1/remote/ack', lic.license_key, { id: c.id, ok: out.ok, message: out.message || '' }).catch(() => {});
     }
+    await syncExtra(lic.license_key, (r.commands || []).length > 0).catch(() => {});
     if ((r.commands || []).length) await sleep(1500); // let the agents report their new state
   }
 }
@@ -117,4 +209,4 @@ function start(d) {
   setTimeout(loop, 5000);
 }
 
-module.exports = { start, nudge, setPrefs, _test: { buildStatus, run } };
+module.exports = { start, nudge, setPrefs, _test: { buildStatus, buildExtra, run } };
