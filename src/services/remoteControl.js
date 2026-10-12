@@ -38,6 +38,7 @@ const isOn = (st) => st === 'running';
 
 async function buildStatus() {
   const st = botManager.getStatus() || {};
+  if (deps.computer) deps.computer.update(st); // keep-awake follows the agents even if a status event was missed
   const lic = db.getLicense();
   const licensed = deps.licenseLocallyValid(lic);
   const limit = await deps.dailyLimit().catch(() => null);
@@ -54,6 +55,7 @@ async function buildStatus() {
     : !hasCv ? 'Add your CV on your computer first.'
     : limit && limit.reached ? `Today's limit of ${limit.cap} applications is reached. Agents carry on tomorrow.` : '';
   return {
+    awake: !!(deps.computer && deps.computer.isAwakeHeld()),
     agents: prefs.keys.map((k) => ({ key: k, label: LABELS[k], state: st[k] === 'error' ? 'error' : isOn(st[k]) ? 'running' : 'stopped', enabled: isEnabled(k), canRun: licensed && hasCv && (k !== 'trac' || hasTrac) })),
     applied_today: limit ? limit.applied : 0, daily_cap: limit ? limit.cap : 0,
     in_queue: (m.pending || 0) + (m.cv_ready || 0), failed: m.apply_failed || 0,
@@ -90,6 +92,7 @@ async function buildExtra() {
   try {
     const sp = db.getSearchPreferences();
     settings = { terms: db.getSearchTerms(true).map((x) => x.term), work_types: sp.work_type_priority || [], location: sp.location || '', nhs_submit: tracDetails().autoSubmit === true, has_nhs: prefs.keys.includes('trac') };
+    if (deps.computer) { const c = deps.computer.get(); settings.computer = { keep_awake: c.keepAwake, open_at_login: c.openAtLogin, startup: 'computer' }; }
   } catch (_) {}
   return { inbox, tracker, stages: true, settings };
 }
@@ -126,6 +129,13 @@ function applySettings(p) {
 
 async function run(cmd) {
   if (cmd.cmd === 'set_settings') return applySettings(cmd.payload || {});
+  if (cmd.cmd === 'set_computer') {
+    if (!deps.computer) return { ok: false, message: 'Update Job-AI on this computer first.' };
+    const p = cmd.payload || {};
+    deps.computer.set({ keepAwake: p.keep_awake, openAtLogin: p.open_at_login });
+    deps.onSettingsChanged && deps.onSettingsChanged();
+    return { ok: true };
+  }
   if (cmd.cmd === 'set_stage') {
     const p = cmd.payload || {};
     if (!STAGES.includes(p.stage)) return { ok: false, message: 'Unknown stage.' };

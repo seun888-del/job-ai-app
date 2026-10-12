@@ -6,7 +6,10 @@ const db = require('./src/db/database');
 const queueReader = require('./src/db/queueReader');
 const cvAnalyzer = require('./src/services/cvAnalyzer');
 const remoteControl = require('./src/services/remoteControl');
+const computerPrefs = require('./src/services/computerPrefs');
 ipcMain.on('remote:prefs', (event, p) => remoteControl.setPrefs(p));
+ipcMain.handle('computer:get', () => computerPrefs.get());
+ipcMain.handle('computer:set', (event, p) => { const r = computerPrefs.set(p || {}); remoteControl.nudge(); return r; });
 // Automated tests only (never set in the shipped app): lets a test stub the agents.
 if (process.env.JOBBOT_TEST_HOOKS === '1') globalThis.__jobaiMain = { botManager: require('./src/services/botManager') };
 const tracImporter = require('./src/services/tracImporter');
@@ -179,8 +182,21 @@ app.whenReady().then(async () => {
   await db.init(app.getPath('userData'));
   syncLicenseEnv(); // route main-process AI (CV analysis) through the licensed backend
   queueReader.init(app.getPath('userData'));
+  computerPrefs.init();
   createWindow();
   autostartAgents();
+  // Opened by the computer starting up: stay out of the way, and carry on with the agents
+  // that were running when it shut down (same licence gate as the Start button).
+  if (computerPrefs.openedAtLogin()) {
+    try { mainWindow.minimize(); } catch (_) {}
+    const again = computerPrefs.resumeList();
+    if (again.length) setTimeout(async () => {
+      for (const n of again) { try { await startBotGated(n); } catch (e) { console.log(`[login] could not start ${n}: ${e.message}`); if (e.code === 'license_required') break; } }
+      remoteControl.nudge();
+    }, 15000);
+  }
+  try { require('electron').powerMonitor.on('shutdown', () => computerPrefs.markQuitting()); } catch (_) {}
+  mainWindow.on('session-end', () => computerPrefs.markQuitting());
   refreshLicense('startup'); // recover a reinstated/renewed licence on relaunch, no re-paste
 
   const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent', greenhouse: 'Auto-Apply Agent', uc: 'Universal Credit Agent' };
@@ -302,6 +318,7 @@ app.whenReady().then(async () => {
   });
   botManager.setStatusHandler((bot, status) => {
     mainWindow?.webContents.send('bot:status', { bot, status });
+    computerPrefs.update(botManager.getStatus());
     remoteControl.nudge();
     if (!Notification.isSupported()) return;
 
@@ -347,6 +364,7 @@ app.whenReady().then(async () => {
   // Phone control: tryjobai.com/app shows these agents live and can start/stop them.
   try {
     remoteControl.start({ startBotGated, licenseLocallyValid, dailyLimit: getDailyLimit, onStarted: () => sendStep('agents_started'),
+      computer: computerPrefs,
       onSettingsChanged: () => { try { mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send('remote:changed'); } catch (_) {} } });
   } catch (_) {}
 
@@ -384,6 +402,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  computerPrefs.markQuitting();
   botManager.stopAll();
 });
 

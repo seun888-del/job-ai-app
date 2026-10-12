@@ -184,9 +184,27 @@ async function attachAutofill() {
   }
 }
 
+// "This computer" card on the dashboard: keep awake while agents run, open at login.
+// Also changeable from the phone, so the boxes are refreshed when that happens.
+function computerCardHtml() {
+  const row = (id, title, note) => `<label class="checkbox-label" style="align-items:flex-start;margin:0 0 12px"><input type="checkbox" id="${id}"><span><strong>${title}</strong><br><small style="color:#6b6456">${note}</small></span></label>`;
+  return row('pc_awake', 'Keep awake while agents run', 'Your computer will not go to sleep mid-application. A closed laptop lid still sleeps.')
+    + row('pc_login', 'Open when this computer starts', 'Job-AI opens in the background and carries on applying.');
+}
+async function wireComputerCard() {
+  const a = document.getElementById('pc_awake'), l = document.getElementById('pc_login');
+  if (!a || !l || !window.api.computer) return;
+  const c = await window.api.computer.get();
+  a.checked = c.keepAwake; l.checked = c.openAtLogin;
+  if (a._wired) return; a._wired = l._wired = true;
+  a.addEventListener('change', () => window.api.computer.set({ keepAwake: a.checked }));
+  l.addEventListener('change', () => window.api.computer.set({ openAtLogin: l.checked }));
+}
+
 // Settings or a stage changed from the phone (tryjobai.com/app): show it if that page is open
 // (unless the user is typing on it right now).
 if (window.api.remote && window.api.remote.onChanged) window.api.remote.onChanged(() => {
+  wireComputerCard();
   if (['search', 'tracker', 'trac-details'].includes(_currentView) && !(document.activeElement && content.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) render(_currentView);
 });
 
@@ -1935,6 +1953,8 @@ ${statCardsHtml(summary)}
         <div class="card dash-applications-card">
           ${buildApplicationsGraph(dailyApps)}
         </div>
+        <div class="dash-col-title" style="margin-top:18px">This computer</div>
+        <div class="card computer-card">${computerCardHtml()}</div>
       </div>
     </div>
 
@@ -1995,6 +2015,7 @@ ${statCardsHtml(summary)}
   `;
 
   renderNhsApps();
+  wireComputerCard();
   const tracAutoBox = document.getElementById('trac-auto-submit');
   if (tracAutoBox) tracAutoBox.addEventListener('change', async () => {
     const on = tracAutoBox.checked;

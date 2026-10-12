@@ -55,7 +55,7 @@ async function recheckLicence() {
 }
 
 // ── Agents ───────────────────────────────────────────────────────────────────
-const onChange = () => { if (current === 'dashboard') renderDashboard(); remoteNudge(); };
+const onChange = () => { if (current === 'dashboard') renderDashboard(); remoteNudge(); computerSync(); };
 const agents = {
   trac: new TracAgent({ onChange }),
   reed: new ReedAgent({ onChange }),
@@ -132,6 +132,33 @@ async function applyPendingUpdate() {
 }
 chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.updatePending && c.updatePending.newValue) applyPendingUpdate(); });
 applyPendingUpdate();
+
+// ── This computer: keep awake while agents run, open when Chrome starts ──────────
+// Keep awake is on unless the user turns it off. The agents running right now are remembered
+// (closing the tab or Chrome keeps the list), so a Chrome start can carry on with them.
+let awakeHeld = false, lastRunning = null;
+async function computerSync() {
+  const s = await store.get('settings');
+  const running = Object.keys(agents).filter((k) => agents[k].running);
+  const want = running.length > 0 && s.keepAwake !== false;
+  if (want !== awakeHeld && chrome.power) { awakeHeld = want; if (want) chrome.power.requestKeepAwake('system'); else chrome.power.releaseKeepAwake(); }
+  if (!updating && running.join() !== lastRunning) { lastRunning = running.join(); await chrome.storage.local.set({ runningAgents: running }); }
+}
+let startupResumed = false;
+async function resumeAfterChromeStart() {
+  const { startupOpen, runningAgents } = await chrome.storage.local.get(['startupOpen', 'runningAgents']);
+  if (!startupOpen || startupResumed) return;
+  startupResumed = true;
+  await chrome.storage.local.remove('startupOpen');
+  if (Date.now() - startupOpen > 10 * 60 * 1000 || !(runningAgents || []).length || anyRunning()) return;
+  if (!(await recheckLicence())) return;
+  runningAgents.filter((k) => agents[k]).forEach(runAgent);
+  store.log('Chrome started: your agents carry on.');
+  setTimeout(renderDashboard, 300);
+}
+// Chrome may restore this tab before it says it has started, so also listen for the signal.
+chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.startupOpen && c.startupOpen.newValue) resumeAfterChromeStart(); });
+setTimeout(resumeAfterChromeStart, 2000);
 
 // Just updated: restart the agents that were running before it.
 (async () => {
@@ -391,6 +418,11 @@ VIEWS.dashboard = async function renderDashboardView() {
         <div class="dash-col-side">
           <div class="dash-col-title">Applications (last 14 days)</div>
           <div class="card dash-applications-card">${buildApplicationsGraph(all)}</div>
+          <div class="dash-col-title" style="margin-top:18px">This computer</div>
+          <div class="card computer-card">
+            <label class="checkbox-label" style="align-items:flex-start;margin:0 0 12px"><input type="checkbox" class="pc" data-k="keepAwake" ${settings.keepAwake !== false ? 'checked' : ''}><span><strong>Keep awake while agents run</strong><br><small class="muted">Your computer will not go to sleep mid-application. A closed laptop lid still sleeps.</small></span></label>
+            <label class="checkbox-label" style="align-items:flex-start;margin:0"><input type="checkbox" class="pc" data-k="openOnStartup" ${settings.openOnStartup ? 'checked' : ''}><span><strong>Open when Chrome starts</strong><br><small class="muted">Job-AI opens in a pinned tab and carries on applying.</small></span></label>
+          </div>
         </div>
       </div>`;
 
@@ -412,6 +444,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       s.autoSubmit = { ...(s.autoSubmit || {}), trac: on };
       await store.set('settings', s); renderDashboard();
     }));
+    $$('.pc').forEach((el) => el.addEventListener('change', async (e) => { await store.patch('settings', { [e.target.dataset.k]: e.target.checked }); computerSync(); remoteNudge(); }));
     $$('.agent-enabled').forEach((el) => el.addEventListener('change', async (e) => {
       const s = await store.get('settings');
       s.enabled = { ...(s.enabled || {}), [e.target.dataset.bot]: e.target.checked };
@@ -853,6 +886,7 @@ async function remoteStatus() {
   const blocked = !licenceActive(g.license) ? (g.license.key ? 'Your Job-AI access has ended. Subscribe to keep applying.' : 'Activate Job-AI in Chrome first.')
     : !(g.cv && g.cv.text) ? 'Add your CV in Job-AI first.' : applied >= cap ? `Today's limit of ${cap} applications is reached. Agents carry on tomorrow.` : '';
   return {
+    awake: awakeHeld,
     agents: Object.keys(agents).map((k) => ({ key: k, label: REMOTE_LABELS[k], state: agents[k].running ? 'running' : 'stopped', enabled: g.enabled(k), canRun: g.canRun[k] })),
     applied_today: applied, daily_cap: cap,
     in_queue: all.filter((j) => ['pending', 'cv_ready', 'applying'].includes(j.status)).length,
@@ -884,7 +918,8 @@ async function remoteExtra() {
   }
   const tracker = all.filter((j) => j.status === 'applied').sort((a, b) => String(b.appliedAt || b.updatedAt).localeCompare(String(a.appliedAt || a.updatedAt))).slice(0, 150)
     .map((j) => ({ id: j.jobId, title: j.title || '', company: j.company || '', source: REMOTE_SITE[j.source] || '', at: j.appliedAt || j.updatedAt || '', stage: REMOTE_STAGES.includes(j.stage) ? j.stage : 'applied', url: safeUrl(j.url) || '' }));
-  const settingsOut = { terms: profile.searchTerms || [], work_types: profile.workTypePriority || ['remote', 'hybrid', 'onsite'], location: profile.searchLocation || '', nhs_submit: !!(settings.autoSubmit && settings.autoSubmit.trac), has_nhs: true };
+  const settingsOut = { terms: profile.searchTerms || [], work_types: profile.workTypePriority || ['remote', 'hybrid', 'onsite'], location: profile.searchLocation || '', nhs_submit: !!(settings.autoSubmit && settings.autoSubmit.trac), has_nhs: true,
+    computer: { keep_awake: settings.keepAwake !== false, open_at_login: !!settings.openOnStartup, startup: 'chrome' } };
   return { inbox, tracker, stages: true, settings: settingsOut };
 }
 let remoteExtraSent = '', remoteExtraAt = 0, remoteExtraBuilt = 0;
@@ -907,6 +942,13 @@ async function remoteRun(c) {
     await store.patch('profile', { searchTerms: terms, ...(wt.length ? { workTypePriority: wt } : {}), ...(p.location ? { searchLocation: String(p.location).slice(0, 80) } : {}) });
     if (typeof p.nhs_submit === 'boolean') { const s = await store.get('settings'); await store.patch('settings', { autoSubmit: { ...(s.autoSubmit || {}), trac: p.nhs_submit } }); }
     await loadConfig(); remoteRefreshView();
+    return { ok: true };
+  }
+  if (c.cmd === 'set_computer') {
+    const fields = {};
+    if (typeof p.keep_awake === 'boolean') fields.keepAwake = p.keep_awake;
+    if (typeof p.open_at_login === 'boolean') fields.openOnStartup = p.open_at_login;
+    await store.patch('settings', fields); await computerSync(); remoteRefreshView();
     return { ok: true };
   }
   if (c.cmd === 'set_stage') {

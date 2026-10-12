@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('api', {
     setPrefs: (p) => ipcRenderer.send('remote:prefs', p),
     onChanged: (cb) => ipcRenderer.on('remote:changed', () => cb()),
   },
+  computer: {
+    get: () => ipcRenderer.invoke('computer:get'),
+    set: (p) => ipcRenderer.invoke('computer:set', p),
+  },
   profile: {
     get: () => ipcRenderer.invoke('profile:get'),
     save: (fields) => ipcRenderer.invoke('profile:save', fields),
