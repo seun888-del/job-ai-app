@@ -43,6 +43,9 @@ export class SiteAgent {
     try {
       if (!this.lazyWindow) await this.ensurePage();
       while (this.running) {
+        const off = cfg.outsideSchedule();
+        if (off) { if (this._offMsg !== off) this.log(off); this._offMsg = off; await this.wait(Date.now() + 5 * 60 * 1000); continue; }
+        this._offMsg = '';
         const roundEnd = Date.now() + ROUND_MS;
         const ok = await this.signIn().catch((e) => { this.log('Sign-in check failed: ' + e.message); return false; });
         if (!ok) { this.log(`Not signed in. Sign in to ${this.label} in Chrome, then it carries on.`); await this.wait(Date.now() + 2 * 60 * 1000); continue; }

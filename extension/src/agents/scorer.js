@@ -51,9 +51,17 @@ function preFilter(job) {
   return '';
 }
 
-export async function scoreJob(job, log) {
+// Every CV the user added (several, like the app), or the single one older versions kept.
+async function allCvs() {
+  const list = await store.get('cvs');
+  if (Array.isArray(list) && list.some((c) => c && c.text)) return list.filter((c) => c && c.text);
   const cv = await store.get('cv');
-  if (!cv || !cv.text) { log('Add your CV on the Setup page first.'); return; }
+  return cv && cv.text ? [cv] : [];
+}
+
+export async function scoreJob(job, log) {
+  const cvs = await allCvs();
+  if (!cvs.length) { log('Add your CV on the Setup page first.'); return; }
   if (!job.description || job.description.trim().length < 30) { await store.updateJob(job.jobId, { status: 'skipped', reason: 'No job description' }); return; }
   const why = preFilter(job);
   if (why) { await store.updateJob(job.jobId, { status: 'skipped', reason: why }); log(`Skipped: ${String(job.title || '').split('\n')[0].trim()} (${why})`); return; }
@@ -65,19 +73,25 @@ export async function scoreJob(job, log) {
   } catch (_) { /* fail open */ }
 
   await store.updateJob(job.jobId, { status: 'processing' });
-  log(`Scoring: ${jobTitle} @ ${job.company}`);
-  const raw = cleanText(cv.text);
-  let score, missing = [], all = [];
-  try { ({ score, missingKeywords: missing, allKeywords: all } = await cvScorer.scoreCV(raw, job.description)); }
-  catch (e) { log('Scoring failed (' + e.message + '), will retry later.'); await store.updateJob(job.jobId, { status: 'pending' }); return; }
-  let cvText = raw;
-  // Same rule as the app's Scorer: under QUICK_FAIL the job is not a fit (no keyword boost), above it
-  // the missing keywords are added and the job goes ahead unless the user set a higher minimum.
+  log(`Scoring: ${jobTitle} @ ${job.company}${cvs.length > 1 ? ` (${cvs.length} CVs)` : ''}`);
+  // Same rule as the app's Scorer, for each CV: under QUICK_FAIL that CV is not a fit (no keyword
+  // boost); above it the missing keywords are added. The best CV is used for this job.
+  let best = null;
+  for (const c of cvs) {
+    const raw = cleanText(c.text);
+    let r;
+    try { r = await cvScorer.scoreCV(raw, job.description); }
+    catch (e) { log('Scoring failed (' + e.message + '), will retry later.'); await store.updateJob(job.jobId, { status: 'pending' }); return; }
+    let score = r.score, text = raw;
+    if (score >= QUICK_FAIL && score < BOOST_TARGET && (r.missingKeywords || []).length) { text = boostCVText(raw, r.missingKeywords); score = cvScorer.rescoreCV(text, r.allKeywords).score; }
+    if (!best || score > best.score) best = { cv: c, raw, cvText: text, score, missing: r.missingKeywords || [] };
+  }
+  const cv = best.cv, raw = best.raw, cvText0 = best.cvText, missing = best.missing;
+  let score = best.score, cvText = cvText0;
   if (score < QUICK_FAIL) {
     await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `Not a close enough match (${score}%)` });
     log(`Skipped: ${jobTitle} (not a close enough match, ${score}%)`); return;
   }
-  if (score < BOOST_TARGET && missing.length) { cvText = boostCVText(raw, missing); score = cvScorer.rescoreCV(cvText, all).score; }
   if (score < cfg.MIN_SCORE) {
     await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `CV scored ${score}% (you set ${cfg.MIN_SCORE}%)` });
     log(`Skipped: ${jobTitle} (CV scored ${score}%, your minimum is ${cfg.MIN_SCORE}%)`); return;
@@ -109,6 +123,8 @@ export async function scoreJob(job, log) {
 
   let coverLetter = null;
   try { coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, cvText); } catch (_) {}
-  await store.updateJob(job.jobId, { status: 'cv_ready', cvPath: paths.saved, cvScore: score, cvName: cv.name, ...(coverLetter ? { coverLetter } : {}) });
-  log(`✓ CV tailored (${score}%): ${jobTitle}`);
+  // "Review before applying" (Search preferences): hold it for the user, as the app does.
+  const review = !!((await store.get('settings')) || {}).reviewBeforeApply;
+  await store.updateJob(job.jobId, { status: review ? 'awaiting_review' : 'cv_ready', cvPath: paths.saved, cvScore: score, cvName: cv.label || cv.name, ...(coverLetter ? { coverLetter } : {}) });
+  log(review ? `✓ CV tailored (${score}%), waiting for your review: ${jobTitle}` : `✓ CV tailored (${score}%): ${jobTitle}`);
 }

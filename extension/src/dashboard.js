@@ -9,6 +9,7 @@ import { ReedAgent } from './agents/reed.js';
 import { LinkedInAgent } from './agents/linkedin.js';
 import { AtsAgent, feedJobs, fetchJD } from './agents/ats.js';
 import { Page } from './driver/page.js';
+import { scoreJob } from './agents/scorer.js';
 
 const { BACKEND, headers: apiHeaders, checkLicense, askAssistant, claimSetup, sendSetupCode } = require('./shims/llm.js');
 const { importTracText } = require('../../src/services/tracImporter');
@@ -244,13 +245,22 @@ $$('#nav .tab, #nav-setup .setup-item').forEach((b) => b.addEventListener('click
 $('#setup-label').addEventListener('click', (e) => { e.stopPropagation(); $('#setup-menu').classList.toggle('open'); });
 $('#setup-pop').addEventListener('click', () => $('#setup-menu').classList.remove('open'));
 document.addEventListener('click', () => $('#setup-menu').classList.remove('open'));
-$('#tn-help').addEventListener('click', () => startTour());
+$('#tn-help').addEventListener('click', () => navigate('help'));
 const setSt = (id, msg, err) => { const el = $(id); if (!el) return; el.textContent = msg; el.style.color = err ? 'var(--danger)' : 'var(--text-muted)'; };
 
 // Pick a CV, save it, and let the AI fill any blank profile fields (never overwriting what the
 // user typed) plus the search terms if there are none yet. done(msg) runs once it's saved.
 const CV_FIELDS = [['firstName', 'First name'], ['middleName', null], ['lastName', 'Last name'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location'], ['linkedin', 'LinkedIn'], ['yearsExperience', 'Years of experience']];
-async function fillFromCv(text) {
+// Several CVs, like the app: the scorer tries each one and uses the best for every job. 'cv' stays
+// the first one, which older code and the phone setup use.
+async function getCvs() {
+  const list = await store.get('cvs');
+  if (Array.isArray(list) && list.some((c) => c && c.text)) return list.filter((c) => c && c.text);
+  const cv = await store.get('cv');
+  return cv && cv.text ? [{ id: 'cv1', label: 'Main CV', ...cv }] : [];
+}
+async function saveCvs(list) { await store.set('cvs', list); await store.set('cv', list[0] || null); }
+async function fillFromCv(text, cvId) {
   const r = await readCvProfile(text);
   const { profile: P } = await loadConfig();
   const out = {}, filled = [];
@@ -259,10 +269,13 @@ async function fillFromCv(text) {
   if (r.roles.length && !(P.searchTerms || []).length) { out.searchTerms = r.roles; termsAdded = r.roles.length; }
   if (Object.keys(out).length) { await store.patch('profile', out); await loadConfig(); }
   // Same as the app's CVs page: the job titles this CV fits, and its keywords, shown with the CV.
-  await store.patch('cv', { roles: r.roles || [], keywords: r.keywords || [] });
+  const list = await getCvs();
+  const i = Math.max(0, list.findIndex((c) => c.id === cvId));
+  if (list[i]) { list[i] = { ...list[i], roles: r.roles || [], keywords: r.keywords || [] }; await saveCvs(list); }
   return { filled, termsAdded, roles: r.roles || [] };
 }
-function pickCv(stSel, done) {
+// mode 'add' adds another CV (CVs page); otherwise the first CV is replaced.
+function pickCv(stSel, done, mode, label) {
   const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.pdf,.doc,.docx' });
   input.addEventListener('change', async () => {
     const f = input.files[0]; if (!f) return;
@@ -272,11 +285,14 @@ function pickCv(stSel, done) {
       const buf = await f.arrayBuffer();
       const text = await extractText(f);
       if (text.replace(/\s/g, '').length < 200) throw new Error('No readable text found. Is it a scanned image?');
-      await store.set('cv', { name: f.name, type: f.type, text, dataB64: toBase64(buf) });
+      const list = await getCvs();
+      const entry = { id: 'cv' + Date.now(), label: (label || '').trim() || (list.length && mode === 'add' ? f.name.replace(/\.[^.]+$/, '') : 'Main CV'), name: f.name, type: f.type, text, dataB64: toBase64(buf) };
+      if (mode === 'add') list.push(entry); else list[0] = { ...entry, label: (list[0] && list[0].label) || entry.label };
+      await saveCvs(list);
       checkSteps();
       let msg = 'Using: ' + f.name;
       try {
-        const r = await fillFromCv(text);
+        const r = await fillFromCv(text, mode === 'add' ? entry.id : (list[0] && list[0].id));
         const parts = [];
         if (r.filled.length) parts.push(`Filled in from your CV: ${r.filled.join(', ')}.`);
         if (r.termsAdded) parts.push(`Added ${r.termsAdded} job titles to search for.`);
@@ -296,23 +312,23 @@ const cvToPersonal = (msg) => navigate('personal').then(() => {
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 function gsMark(ok, n) { return ok ? '<span class="gs-step gs-step-done">✓</span>' : `<span class="gs-step gs-step-num">${n}</span>`; }
-function buildApplicationsGraph(all) {
+function buildApplicationsGraph(all, N = 14) {
   const applied = all.filter((j) => j.status === 'applied' && j.appliedAt);
   if (!applied.length) return '<div class="graph-empty">No applications recorded yet</div>';
   const W = 560, H = 80, PAD = 4, LABEL_TOP = 12, AXIS_BOTTOM = 16;
   const days = [];
-  for (let i = 13; i >= 0; i--) {
+  for (let i = N - 1; i >= 0; i--) {
     const d = new Date(Date.now() - i * 86400000); const key = d.toISOString().slice(0, 10);
     days.push({ key, count: applied.filter((j) => String(j.appliedAt).startsWith(key)).length, label: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) });
   }
   const maxCount = Math.max(...days.map((d) => d.count), 1);
-  const barW = Math.floor((W - PAD * 2) / 14);
+  const barW = Math.floor((W - PAD * 2) / N);
   const bars = days.map((d, i) => {
     const barH = Math.max(2, Math.round((d.count / maxCount) * (H - LABEL_TOP - AXIS_BOTTOM)));
     const x = PAD + i * barW; const y = H - AXIS_BOTTOM - barH;
-    return `<rect x="${x}" y="${y}" width="${barW - 2}" height="${barH}" class="graph-bar${i === 13 ? ' graph-bar-today' : ''}" rx="2"><title>${d.label}: ${d.count} application${d.count !== 1 ? 's' : ''}</title></rect>${d.count > 0 ? `<text x="${x + (barW - 2) / 2}" y="${y - 2}" class="graph-label" text-anchor="middle">${d.count}</text>` : ''}`;
+    return `<rect x="${x}" y="${y}" width="${barW - 2}" height="${barH}" class="graph-bar${i === N - 1 ? ' graph-bar-today' : ''}" rx="2"><title>${d.label}: ${d.count} application${d.count !== 1 ? 's' : ''}</title></rect>${d.count > 0 ? `<text x="${x + (barW - 2) / 2}" y="${y - 2}" class="graph-label" text-anchor="middle">${d.count}</text>` : ''}`;
   });
-  const labels = [0, 6, 13].map((i) => `<text x="${PAD + i * barW + (barW - 2) / 2}" y="${H}" class="graph-date" text-anchor="middle">${days[i].label}</text>`);
+  const labels = [0, Math.floor((N - 1) / 2), N - 1].map((i) => `<text x="${PAD + i * barW + (barW - 2) / 2}" y="${H}" class="graph-date" text-anchor="middle">${days[i].label}</text>`);
   return `<svg viewBox="0 0 ${W} ${H + 4}" class="applications-graph" xmlns="http://www.w3.org/2000/svg">${bars.join('')}${labels.join('')}</svg>`;
 }
 
@@ -330,6 +346,10 @@ VIEWS.dashboard = async function renderDashboardView() {
     const applied = all.filter((j) => j.status === 'applied');
     const failed = all.filter((j) => j.status === 'apply_failed');
     const inQueue = all.filter((j) => ['pending', 'cv_ready', 'applying'].includes(j.status));
+    const tailoring = all.some((j) => j.status === 'processing');
+    const reviewing = all.filter((j) => j.status === 'awaiting_review');
+    const ucOn = (profile.country || 'United Kingdom') === 'United Kingdom';
+    const ucPending = all.filter((j) => j.status === 'applied' && !j.ucLoggedAt);
     const hasLicence = licenceActive(license);
     const setupDone = {
       personal: !!(profile.firstName && profile.lastName && profile.email && profile.phone),
@@ -380,6 +400,7 @@ VIEWS.dashboard = async function renderDashboardView() {
           <p class="dash-sub">${running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Monitor agent activity and track your application progress.'}</p>
         </div>
         <div class="dash-cta">
+          <span class="scorer-pill${tailoring ? ' scorer-pill-active' : ''}" title="The AI tailors your CV while the agents work, so you don't start it yourself.">${tailoring ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
           <button class="secondary stop-all-btn" id="stop-all" ${running ? '' : 'disabled'}>Stop</button>
           <button class="primary start-applying-btn" id="start-all" ${Object.keys(canRun).some((k) => canRun[k] && enabled(k)) ? '' : 'disabled'}>▶ Start applying</button>
         </div>
@@ -445,9 +466,22 @@ VIEWS.dashboard = async function renderDashboardView() {
           </div>
         </div>
       </div>
-      ${recentHtml(all)}`;
+      ${reviewing.length ? `<div class="card card-wide"><h3 style="margin:0 0 4px">Review before applying</h3>
+        <p class="nhs-apps-hint">Check each tailored CV and cover letter, then approve it to apply or skip it.</p>
+        <div class="table-scroll"><table class="data-table"><thead><tr><th>Job</th><th>Company</th><th>Match</th><th></th><th></th></tr></thead><tbody>
+        ${reviewing.map((j) => `<tr><td>${esc(j.title)}</td><td>${esc(j.company || '')}</td><td>${esc(j.cvScore != null ? j.cvScore + '%' : '')}</td><td class="row-actions">${docButtons(j)}</td>
+          <td><div class="ext-inline"><button class="primary rv-ok" data-id="${esc(j.jobId)}">Approve</button><button class="secondary rv-skip" data-id="${esc(j.jobId)}">Skip</button></div></td></tr>`).join('')}
+        </tbody></table></div></div>` : ''}
+      ${ucOn ? `<div class="card bot-card uc-card"><div class="bot-card-header"><strong>📋 Universal Credit journal</strong></div>
+        <p style="font-size:13px;color:var(--text-muted);margin:6px 0 12px">Keeps a running log of every job Job-AI has applied to, each with the real date, ready to add to your Universal Credit "log your work search" journal. ${ucPending.length ? `<strong>${ucPending.length}</strong> application${ucPending.length === 1 ? '' : 's'} ready to log.` : 'Your journal is up to date.'}</p>
+        <div class="bot-card-actions"><button class="primary" id="uc-copy" ${ucPending.length ? '' : 'disabled'}>View / copy my work search log</button></div></div>` : ''}
+      ${recentHtml(all, settings.recentClearedAt)}`;
 
     $$('.start').forEach((b) => b.addEventListener('click', () => startAgent(b.dataset.bot)));
+    $$('.rv-ok').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'cv_ready' }); renderDashboard(); }));
+    $$('.rv-skip').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'skipped', reason: 'Skipped in review' }); renderDashboard(); }));
+    $('#uc-copy')?.addEventListener('click', () => showUcLog(ucPending));
+    $('#recent-clear')?.addEventListener('click', async () => { await store.patch('settings', { recentClearedAt: new Date().toISOString() }); renderDashboard(); });
     $$('.stop').forEach((b) => b.addEventListener('click', () => { agents[b.dataset.bot].stop(); renderDashboard(); }));
     $('#start-all').addEventListener('click', async () => {
       if (!(await recheckLicence())) { navigate('license'); return; }
@@ -481,9 +515,9 @@ function renderDashboard() { return VIEWS.dashboard(); }
 // ── Recent activity: the tailored CV and cover letter behind each application (same as the app) ──
 const RECENT = ['applied', 'apply_failed', 'ready', 'ready_to_submit', 'cv_ready', 'applying'];
 const docButtons = (j) => `${j.cvPath ? `<button class="view-cv-btn" data-id="${esc(j.jobId)}" title="View CV" aria-label="View CV"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}${j.coverLetter ? `<button class="view-cl-btn" data-id="${esc(j.jobId)}" title="View cover letter" aria-label="View cover letter"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg></button>` : ''}`;
-function recentHtml(all) {
-  const rows = all.filter((j) => RECENT.includes(j.status)).sort((a, b) => String(b.appliedAt || b.updatedAt).localeCompare(String(a.appliedAt || a.updatedAt))).slice(0, 15);
-  return `<div class="card card-wide"><h3 style="margin:0 0 6px">Recent activity</h3>
+function recentHtml(all, clearedAt) {
+  const rows = all.filter((j) => RECENT.includes(j.status) && (!clearedAt || String(j.appliedAt || j.updatedAt) > clearedAt)).sort((a, b) => String(b.appliedAt || b.updatedAt).localeCompare(String(a.appliedAt || a.updatedAt))).slice(0, 15);
+  return `<div class="card card-wide"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px"><h3 style="margin:0">Recent activity</h3><button id="recent-clear" class="secondary" style="font-size:12px;padding:5px 12px" ${rows.length ? '' : 'disabled'}>Clear</button></div>
     ${rows.length ? `<div class="table-scroll"><table class="data-table"><thead><tr><th>Title</th><th>Company</th><th>Status</th><th>CV used</th><th>Updated</th><th></th></tr></thead><tbody>
     ${rows.map((j) => { const [l, c] = STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.url); return `<tr>
       <td>${u ? `<a class="tracker-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>` : esc(j.title)}</td><td>${esc(j.company || '')}</td>
@@ -522,6 +556,117 @@ document.addEventListener('click', (e) => {
   openDoc(b.classList.contains('view-cv-btn') ? 'cv' : 'cl', b.dataset.id);
 });
 
+// ── Universal Credit work search log (the app's assisted flow: copy it into your own journal) ──
+function showUcLog(list) {
+  const fmt = (s) => { const d = String(s || '').slice(0, 10).split('-'); return d.length === 3 ? `${d[2]}/${d[1]}/${d[0]}` : ''; };
+  const lines = list.map((j) => `${j.title} at ${j.company || 'Unknown employer'} (applied ${fmt(j.appliedAt || j.updatedAt)})`);
+  const text = lines.length ? 'Job search log\n\n' + lines.map((l) => '- ' + l).join('\n') : 'Nothing to log right now. Your journal is up to date.';
+  let o = $('#uc-modal');
+  if (!o) {
+    o = document.createElement('div'); o.id = 'uc-modal';
+    o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
+    o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:640px;width:100%;max-height:82vh;border-radius:12px;display:flex;flex-direction:column;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border,#e6e1d6)"><div><b>Your Universal Credit work search log</b><div id="uc-sub" class="muted" style="font-size:12px"></div></div><button id="uc-x" class="secondary">Close</button></div>
+      <div id="uc-body" style="padding:20px;overflow:auto;white-space:pre-wrap;line-height:1.55;font-size:13.5px"></div>
+      <div style="padding:12px 20px;border-top:1px solid var(--border,#e6e1d6);display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+        <span class="muted" style="font-size:12px;flex:1;min-width:180px">Add these to your journal, then click Mark as logged so they don't show again.</span>
+        <div class="ext-inline"><button id="uc-mark" class="secondary">Mark as logged</button><button id="uc-cp" class="primary">Copy</button></div></div></div>`;
+    document.body.appendChild(o);
+    o.addEventListener('click', (e) => { if (e.target === o || e.target.id === 'uc-x') o.style.display = 'none'; });
+  }
+  $('#uc-sub').textContent = lines.length ? `${lines.length} application${lines.length === 1 ? '' : 's'} ready to add` : '';
+  $('#uc-body').textContent = text;
+  $('#uc-cp').onclick = (e) => navigator.clipboard.writeText(text).then(() => { e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1500); }).catch(() => {});
+  $('#uc-mark').disabled = !lines.length;
+  $('#uc-mark').onclick = async () => { const at = new Date().toISOString(); for (const j of list) await store.updateJob(j.jobId, { ucLoggedAt: at }); o.style.display = 'none'; renderDashboard(); };
+  o.style.display = 'flex';
+}
+
+// ── Analytics (same sections as the app) ──
+VIEWS.analytics = async function renderAnalytics() {
+  const all = await store.jobs();
+  const applied = all.filter((j) => j.status === 'applied'), skipped = all.filter((j) => j.status === 'skipped'), failed = all.filter((j) => j.status === 'apply_failed');
+  const count = (list, key) => Object.entries(list.reduce((m, j) => { const k = key(j); if (k) m[k] = (m[k] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]);
+  const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company sites' };
+  const bySource = count(applied, (j) => LABEL[j.source] || j.source), byCv = count(applied, (j) => j.cvName || 'Unknown');
+  const skipReasons = count(skipped, (j) => String(j.reason || '').replace(/\s*\(\d+%\)$/, '').replace(/\d+%/g, 'N%')).slice(0, 10);
+  const companies = count(applied, (j) => j.company).slice(0, 10), titles = count(applied, (j) => j.title).slice(0, 10);
+  const daysActive = new Set(applied.map((j) => String(j.appliedAt || '').slice(0, 10)).filter(Boolean)).size || 1;
+  const skipRate = applied.length + skipped.length ? Math.round(skipped.length / (applied.length + skipped.length) * 100) : 0;
+  const bars = (rows, color) => rows.length ? rows.map(([k, n]) => `<div class="analytics-bar-row"><span class="analytics-bar-label">${esc(k)}</span><div class="analytics-bar-track"><div class="analytics-bar-fill" style="width:${Math.round(n / rows[0][1] * 100)}%;background:${color}"></div></div><span class="analytics-bar-count">${n}</span></div>`).join('') : '<div class="empty-state">No data yet</div>';
+  const table = (rows, h) => `<table class="data-table"><thead><tr><th>${h}</th><th>Applications</th></tr></thead><tbody>${rows.length ? rows.map(([k, n]) => `<tr><td>${esc(k)}</td><td>${n}</td></tr>`).join('') : '<tr><td colspan="2"><div class="empty-state">No data yet</div></td></tr>'}</tbody></table>`;
+  content.innerHTML = `
+    <div class="page-header"><h2>Analytics</h2><p>Application performance and patterns over time.</p></div>
+    <div class="summary-grid analytics-summary">
+      <div class="summary-card applied"><div class="num">${applied.length}</div><div class="label">Total applied</div></div>
+      <div class="summary-card pending"><div class="num">${(applied.length / daysActive).toFixed(1)}</div><div class="label">Avg / active day</div></div>
+      <div class="summary-card cv_ready"><div class="num num-sm">${esc((bySource[0] || ['-'])[0])}</div><div class="label">Top source</div></div>
+      <div class="summary-card skipped"><div class="num">${skipRate}%</div><div class="label">Skip rate</div></div>
+      <div class="summary-card apply_failed"><div class="num">${failed.length}</div><div class="label">Failed</div></div>
+    </div>
+    <div class="dash-col-title analytics-graph-title">Applications (last 30 days)</div>
+    <div class="card card-wide">${buildApplicationsGraph(all, 30)}</div>
+    <div class="analytics-grid">
+      <div class="card"><h3>By site</h3>${bars(bySource, '#2563eb')}</div>
+      <div class="card"><h3>By CV</h3>${bars(byCv, '#2563eb')}</div>
+      <div class="card"><h3>Why jobs were skipped</h3>${bars(skipReasons, '#94a3b8')}</div>
+    </div>
+    <div class="analytics-tables">
+      <div class="card"><h3>Top companies applied to</h3>${table(companies, 'Company')}</div>
+      <div class="card"><h3>Top job titles applied to</h3>${table(titles, 'Title')}</div>
+    </div>`;
+};
+
+// ── Help & FAQs (the app's, for the extension) ──
+const FAQS = [
+  ['How do I get started?', 'Open Setup (top right) and fill in Personal Details, CVs, Search Preferences and License. Set up on your phone? Then it is already done: type the 6-digit code on the License page. Next, sign in to Reed and LinkedIn using the buttons on the agent cards, and press Start applying. The "How to start applying" checklist on the Dashboard shows anything still missing.'],
+  ['Which job sites does Job-AI use?', 'Reed, LinkedIn, NHS jobs (through Trac) and company career sites. Each has its own agent card on the Dashboard.'],
+  ['How do I sign in to my job sites?', 'Click "Sign in to Reed" or "Sign in to LinkedIn" on the agent card and sign in as normal in this Chrome. The agents use that sign-in. Job-AI never sees your password. If a site signs you out, sign in again the same way.'],
+  ['What do the agents do?', 'Each agent searches its site for your job titles, skips jobs that do not fit, tailors your CV and cover letter to each job that does, and applies. They work in their own minimised Chrome windows, so leave those windows alone and keep this Job-AI tab open.'],
+  ['Why are some jobs showing as skipped?', 'Jobs are skipped when they do not fit what you asked for: the wrong work type or level, below your salary, an external application site, or a CV match under 45% (or under your own minimum if you set one). The Activity tab and the Tracker show the reason for each one.'],
+  ['The agent says "Not signed in". What do I do?', 'Your session for that site has ended. Click the Sign in button on that agent card, sign in, and the agent carries on by itself.'],
+  ['How do I add more CVs?', 'Open Setup, then CVs, and use "Add another CV". With more than one, the agents use the best fit for each job.'],
+  ['What is the minimum match score?', 'How closely your CV must match a job before Job-AI applies. Leave it empty (Any) and it applies to every job that fits your CV, like the desktop app. Set a number in Search Preferences to be pickier.'],
+  ['The agents are running but no jobs are being found. Why?', 'Every matching job may already have been handled. Add more job titles in Search Preferences, widen the work types, or allow older job postings.'],
+  ['Can I check each application before it is sent?', 'Yes. Turn on "Review before applying" in Search Preferences. Each tailored CV and cover letter then waits on the Dashboard for you to approve or skip.'],
+  ['Can I control Job-AI from my phone?', 'Yes. Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.'],
+  ['Is my data stored online?', 'Your details, CVs and job list stay in this Chrome on this device. To let you control Job-AI from your phone, a short summary (job titles, companies, stages) is kept on our server. Your passwords are never seen or stored.'],
+  ['How do I cancel or manage my subscription?', 'Open the License page and click "Manage or cancel subscription". That opens Stripe\'s secure page.'],
+];
+VIEWS.help = async function renderHelp() {
+  content.innerHTML = `
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2>Help &amp; FAQs</h2><p>Answers to common questions about setting up and running Job-AI.</p></div><button class="secondary" id="help-tour">Take the tour</button></div>
+    <div class="help-faq">${FAQS.map(([q, a], i) => `<div class="faq-item" id="faq-${i}"><button class="faq-question" data-i="${i}"><span>${esc(q)}</span><span class="faq-chevron">›</span></button><div class="faq-answer">${esc(a)}</div></div>`).join('')}</div>
+    <div class="help-contact"><p>Still need help? Email us at <a href="mailto:jobaisupport@gmail.com">jobaisupport@gmail.com</a> and we'll get back to you.</p></div>`;
+  $$('.faq-question').forEach((b) => b.addEventListener('click', () => $('#faq-' + b.dataset.i).classList.toggle('open')));
+  $('#help-tour').addEventListener('click', () => startTour());
+};
+
+// ── Daily summary email (as the app: once a day after 6pm, when something happened) ──
+async function maybeSendDailySummary() {
+  try {
+    const now = new Date(), today = now.toISOString().slice(0, 10);
+    if (now.getHours() < 18) return;
+    const s = await store.get('settings');
+    if (s.summarySent === today) return;
+    const lic = await store.get('license');
+    if (!licenceActive(lic)) return;
+    const all = await store.jobs();
+    const on = (j, k) => String(j[k] || j.updatedAt || '').slice(0, 10) === today;
+    const pick = (j) => ({ title: j.title || '', company: j.company || '' });
+    const applied = all.filter((j) => j.status === 'applied' && on(j, 'appliedAt')).map(pick);
+    const failed = all.filter((j) => j.status === 'apply_failed' && on(j, 'updatedAt')).map(pick);
+    if (!applied.length && !failed.length) return;
+    const skipped = all.filter((j) => j.status === 'skipped' && on(j, 'updatedAt')).map(pick);
+    const pending = all.filter((j) => ['pending', 'cv_ready'].includes(j.status)).length;
+    const tc = {}; for (const j of applied) { const t = j.title.split(' ').slice(0, 4).join(' '); if (t) tc[t] = (tc[t] || 0) + 1; }
+    const topTitles = Object.entries(tc).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t]) => t);
+    const r = await fetch(BACKEND + '/api/daily-summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ license_key: lic.key, date: today, applied, skipped, failed, pending, topTitles }), signal: AbortSignal.timeout(20000) });
+    if (r.ok) await store.patch('settings', { summarySent: today });
+  } catch (_) { /* tries again in a while */ }
+}
+if (globalThis.__jobaiClient !== 'android') { setTimeout(maybeSendDailySummary, 60000); setInterval(maybeSendDailySummary, 15 * 60 * 1000); }
+
 function appRow(a, i) {
   const ok = a.status === 'ready_to_submit';
   const missing = ok ? '' : String(a.reason || '').replace(/^Draft saved on Trac\.?\s*Needs you:\s*/i, '').replace(/\.$/, '');
@@ -536,26 +681,36 @@ function appRow(a, i) {
 setInterval(() => { if (current === 'dashboard' && !document.hidden) renderDashboard(); }, 5000);
 
 // ── Tracker ──────────────────────────────────────────────────────────────────
+const STAGE_LIST = [['applied', 'Applied'], ['phone_screen', 'Phone screen'], ['interview', 'Interview'], ['offer', 'Offer'], ['rejected', 'Rejected'], ['withdrawn', 'Withdrawn']];
 const STAGE = { phone_screen: ['Phone screen', 'badge-info'], interview: ['Interview', 'badge-info'], offer: ['Offer', 'badge-success'], rejected: ['Rejected', 'badge-muted'], withdrawn: ['Withdrawn', 'badge-muted'] };
-const STATUS = { applied: ['Applied', 'badge-success'], apply_failed: ['Failed', 'badge-danger'], skipped: ['Skipped', 'badge-muted'], pending: ['Found', 'badge-info'], cv_ready: ['CV ready', 'badge-info'], applying: ['Applying', 'badge-info'], ready: ['Waiting for you', 'badge-warning'], ready_to_submit: ['Ready to submit', 'badge-success'] };
+const STATUS = { awaiting_review: ['Waiting for your review', 'badge-warning'], processing: ['Tailoring CV', 'badge-info'], applied: ['Applied', 'badge-success'], apply_failed: ['Failed', 'badge-danger'], skipped: ['Skipped', 'badge-muted'], pending: ['Found', 'badge-info'], cv_ready: ['CV ready', 'badge-info'], applying: ['Applying', 'badge-info'], ready: ['Waiting for you', 'badge-warning'], ready_to_submit: ['Ready to submit', 'badge-success'] };
 const SOURCE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company site' };
 let trackerFilter = 'all';
 VIEWS.tracker = async function renderTracker() {
   const all = (await store.jobs()).slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   const f = trackerFilter;
-  const shown = all.filter((j) => f === 'all' || (f === 'applied' ? j.status === 'applied' : f === 'skipped' ? j.status === 'skipped' : !['applied', 'skipped'].includes(j.status)));
+  const shown = all.filter((j) => !j.trackerHidden && (f === 'all' || (f === 'applied' ? j.status === 'applied' : f === 'skipped' ? j.status === 'skipped' : !['applied', 'skipped'].includes(j.status))));
   content.innerHTML = `
     <div class="page-header"><h2>Tracker</h2><p>Every job your agents found, and what happened to it.</p></div>
     <div class="ext-inline" style="margin-bottom:12px">${[['all', 'All'], ['applied', 'Applied'], ['open', 'In progress'], ['skipped', 'Skipped']].map(([k, l]) => `<button class="${f === k ? 'primary' : 'secondary'} trk-f" data-f="${k}">${l}</button>`).join('')}</div>
     ${shown.length ? `<div class="card card-wide"><div class="table-scroll"><table class="data-table tracker-table">
-      <thead><tr><th>Job</th><th>Company</th><th>Site</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+      <thead><tr><th>Job</th><th>Company</th><th>Site</th><th>Status</th><th>Notes</th><th>Updated</th><th></th></tr></thead>
       <tbody>${shown.slice(0, 300).map((j) => { const [l, c] = (j.status === 'applied' && STAGE[j.stage]) || STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.draftUrl || j.url); return `<tr>
         <td class="tracker-title" title="${esc(j.title)}">${u ? `<a class="tracker-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>` : esc(j.title)}</td>
         <td>${esc(j.company || '')}</td><td>${esc(SOURCE[j.source] || j.source || '')}</td>
-        <td><span class="badge ${c}" title="${esc(j.reason || '')}">${esc(l)}</span></td>
-        <td>${esc(j.updatedAt ? new Date(j.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '')}</td><td class="row-actions">${docButtons(j)}</td></tr>`; }).join('')}</tbody>
+        <td>${j.status === 'applied' ? `<select class="tracker-stage-select trk-stage" data-id="${esc(j.jobId)}" aria-label="Stage">${STAGE_LIST.map(([v, t]) => `<option value="${v}" ${(j.stage || 'applied') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : `<span class="badge ${c}" title="${esc(j.reason || '')}">${esc(l)}</span>`}</td>
+        <td>${j.status === 'applied' ? `<textarea class="tracker-notes-input trk-notes" data-id="${esc(j.jobId)}" rows="1" placeholder="Add notes...">${esc(j.notes || '')}</textarea>` : ''}</td>
+        <td>${esc(j.updatedAt ? new Date(j.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '')}</td><td class="row-actions">${docButtons(j)}<button class="tracker-delete-btn trk-del" data-id="${esc(j.jobId)}" title="Remove from Tracker" aria-label="Remove from Tracker">×</button></td></tr>`; }).join('')}</tbody>
     </table></div></div>` : '<div class="card"><div class="empty-state">No applications tracked yet. Jobs appear here once the agents start working.</div></div>'}`;
   $$('.trk-f').forEach((b) => b.addEventListener('click', () => { trackerFilter = b.dataset.f; renderTracker(); }));
+  $$('.trk-stage').forEach((el) => el.addEventListener('change', () => store.updateJob(el.dataset.id, { stage: el.value }).then(remoteNudge)));
+  $$('.trk-notes').forEach((el) => {
+    const grow = () => { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px'; }; grow();
+    el.addEventListener('input', grow);
+    el.addEventListener('blur', () => store.updateJob(el.dataset.id, { notes: el.value.slice(0, 2000) }));
+  });
+  // Hidden from the Tracker only: the job stays known so it is never applied to twice.
+  $$('.trk-del').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { trackerHidden: true }); renderTracker(); }));
 };
 
 // ── Activity ─────────────────────────────────────────────────────────────────
@@ -578,11 +733,12 @@ VIEWS.personal = async function renderPersonal() {
     ${P.firstName && P.lastName && P.email && P.phone ? '' : `<div class="card"><h3>Fill this in from your CV</h3><p class="muted">Upload your CV and we'll add your name, contact details and experience for you.</p>
       <div class="ext-inline"><button class="primary" id="cv-fill">Upload CV</button><span class="status-msg" id="cv-fill-st"></span></div></div>`}
     <div class="card"><h3>About you</h3><div class="tracd-grid">
-      ${f('firstName', 'First name')}${f('lastName', 'Last name')}${f('email', 'Email', 'email')}${f('phone', 'Phone', 'tel')}
-      ${f('location', 'City / town')}${f('linkedin', 'LinkedIn profile URL', 'url', 'https://www.linkedin.com/in/...')}
+      ${f('firstName', 'First name')}${f('middleName', 'Middle name(s)')}${f('lastName', 'Last name')}${f('email', 'Email', 'email')}${f('phone', 'Phone', 'tel')}
+      ${f('address', 'Address')}${f('location', 'City / town')}${f('country', 'Country', 'text', 'United Kingdom')}${f('linkedin', 'LinkedIn profile URL', 'url', 'https://www.linkedin.com/in/...')}
     </div></div>
     <div class="card"><h3>Application answers</h3><p class="muted">How the agents answer common questions on job forms.</p><div class="tracd-grid">
       ${f('yearsExperience', 'Years of experience', 'number')}
+      <div class="field"><label>Experience level</label><select class="p-sel" data-k="experienceLevel">${[['', 'Any level'], ['entry', 'Entry level'], ['junior', 'Junior'], ['mid', 'Mid level'], ['senior', 'Senior'], ['lead', 'Lead'], ['director', 'Director'], ['executive', 'Executive']].map(([v, l]) => `<option value="${v}" ${(P.experienceLevel || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><small class="muted">Skips jobs clearly too senior or too junior for you.</small></div>
       ${f('rightToWorkCountries', 'Countries you can work in', 'text', 'United Kingdom')}
       <div class="field"><label>Notice period</label><select id="p-avail">${[['immediately', 'Immediately'], ['1week', '1 week'], ['2weeks', '2 weeks'], ['1month', '1 month'], ['3months', '3 months']].map(([v, l]) => `<option value="${v}" ${(P.availability || 'immediately') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       ${f('salaryExpectation', 'Minimum salary (£ a year)', 'text', 'e.g. 28000')}
@@ -608,44 +764,71 @@ VIEWS.personal = async function renderPersonal() {
 
 // ── Setup: CVs ───────────────────────────────────────────────────────────────
 VIEWS.cvs = async function renderCVs() {
-  const cv = await store.get('cv');
+  const cvs = await getCvs();
   content.innerHTML = `
-    <div class="page-header"><h2>CVs</h2><p>Your CV is read on this device and never uploaded. Before each application the AI tailors a copy to that job.</p></div>
-    <div class="card"><h3>Your CV</h3><p class="muted">Word (.docx) is read most accurately. PDF also works.</p>
-      <div class="ext-inline"><button class="primary" id="cv-pick">${cv && cv.text ? 'Replace CV' : 'Add CV'}</button><span class="status-msg" id="cv-st">${cv && cv.text ? 'Using: ' + esc(cv.name) : 'No CV yet'}</span></div>
-      ${cv && cv.text && (cv.roles || []).length ? `<div class="cv-card-section">
+    <div class="page-header"><h2>Your CVs</h2><p>Your CVs are read on this device and never uploaded. Add more than one and the agents use the best fit for each job.</p></div>
+    ${cvs.map((cv, i) => `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div><div class="cv-card-title">${esc(cv.label || 'CV')}</div><div class="cv-card-file">${esc(cv.name || '')}</div></div>
+        <div class="ext-inline">${i === 0 ? '<button class="secondary cv-replace">Replace</button>' : ''}<button class="secondary cv-remove" data-i="${i}" style="color:#c0392b;border-color:#c0392b">Remove</button></div>
+      </div>
+      ${(cv.roles || []).length ? `<div class="cv-card-section">
         <strong>Suggested roles</strong>
         <div class="tag-list">${cv.roles.map((r) => `<div class="tag">${esc(r)}</div>`).join('')}</div>
         <p class="cv-suggest-hint">Add these to your search so the agents look for them on Reed, LinkedIn and company sites.</p>
-        <div class="ext-inline"><button class="primary" id="cv-add-terms">＋ Add these as search terms</button><span class="status-msg" id="cv-terms-st"></span></div></div>` : ''}
-      ${cv && cv.text && (cv.keywords || []).length ? `<div class="cv-card-section"><strong>Extracted keywords</strong>
+        <div class="ext-inline"><button class="primary cv-add-terms" data-i="${i}">＋ Add these as search terms</button><span class="status-msg cv-terms-st" data-i="${i}"></span></div></div>` : ''}
+      ${(cv.keywords || []).length ? `<div class="cv-card-section"><strong>Extracted keywords</strong>
         <div class="tag-list">${cv.keywords.map((k) => `<div class="tag">${esc(k)}</div>`).join('')}</div></div>` : ''}
-      ${cv && cv.text && !cv.roles ? '<p class="muted" style="margin-top:12px">Replace your CV to see the job titles it fits.</p>' : ''}
-    </div>`;
-  $('#cv-pick').addEventListener('click', () => pickCv('#cv-st', (msg) => VIEWS.cvs().then(() => setSt('#cv-st', msg))));
-  $('#cv-add-terms')?.addEventListener('click', async () => {
-    const { profile } = await loadConfig();
+      ${!cv.roles ? '<p class="muted" style="margin-top:12px">Replace this CV to see the job titles it fits.</p>' : ''}
+    </div>`).join('') || '<div class="card"><div class="empty-state">No CVs added yet. Add a Word document (.docx) for the best results.</div></div>'}
+    <div class="card"><h3>${cvs.length ? 'Add another CV' : 'Add a CV'}</h3>
+      <p class="muted" style="margin-top:0">Word (.docx) is read most accurately. PDF also works.</p>
+      <div class="field" style="max-width:420px"><label>Label for this CV</label><input id="cv-label" placeholder="e.g. IT Support &amp; Service Desk"></div>
+      <div class="ext-inline"><button class="primary" id="cv-pick">Choose file and add</button><span class="status-msg" id="cv-st"></span></div></div>`;
+  const again = (msg) => VIEWS.cvs().then(() => setSt('#cv-st', msg));
+  $('#cv-pick').addEventListener('click', () => pickCv('#cv-st', again, cvs.length ? 'add' : 'replace', $('#cv-label').value));
+  $('.cv-replace')?.addEventListener('click', () => pickCv('#cv-st', again, 'replace'));
+  $$('.cv-remove').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Remove this CV from Job-AI?')) return;
+    const list = await getCvs(); list.splice(Number(b.dataset.i), 1); await saveCvs(list); VIEWS.cvs();
+  }));
+  $$('.cv-add-terms').forEach((b) => b.addEventListener('click', async () => {
+    const cv = cvs[Number(b.dataset.i)]; const { profile } = await loadConfig();
     const have = profile.searchTerms || [], lower = new Set(have.map((t) => t.toLowerCase()));
     const add = (cv.roles || []).filter((r) => !lower.has(r.toLowerCase()));
     if (add.length) { await store.patch('profile', { searchTerms: [...have, ...add].slice(0, 40) }); await loadConfig(); }
-    setSt('#cv-terms-st', add.length ? `✓ Added ${add.length} to your search. See Search preferences.` : 'These are already in your search.');
-  });
+    setSt(`.cv-terms-st[data-i="${b.dataset.i}"]`, add.length ? `✓ Added ${add.length} to your search. See Search preferences.` : 'These are already in your search.');
+  }));
 };
 
 // ── Setup: Search preferences ────────────────────────────────────────────────
 VIEWS.search = async function renderSearch() {
   const { profile, settings } = await loadConfig();
+  const sched = settings.schedule || {};
   content.innerHTML = `
     <div class="page-header"><h2>Search Preferences</h2><p>Used by the Reed, LinkedIn and company sites agents.</p></div>
     <div class="card"><div class="tracd-grid">
       <div class="field"><label>Job titles to search (one per line)</label><textarea id="s-terms" class="tracd" rows="5" placeholder="e.g. IT Support Analyst">${esc((profile.searchTerms || []).join('\n'))}</textarea></div>
       <div class="field"><label>Skip jobs with these words in the title (one per line)</label><textarea id="s-exclude" class="tracd" rows="5" placeholder="e.g. Senior">${esc((profile.excludeKeywords || []).join('\n'))}</textarea></div>
+      <div class="field"><label>Blocked companies (one per line)</label><textarea id="s-block" class="tracd" rows="5" placeholder="e.g. Agency name">${esc((profile.blockedCompanies || []).join('\n'))}</textarea></div>
       <div class="field"><label>Search location</label><input id="s-where" type="text" value="${esc(profile.searchLocation || 'United Kingdom')}"></div>
+      <div class="field"><label>Maximum job posting age</label><select id="s-age">${[['r86400', 'Past 24 hours'], ['r604800', 'Past week'], ['r1209600', 'Past 2 weeks'], ['r2592000', 'Past month']].map(([v, l]) => `<option value="${v}" ${(profile.jobAge || 'r1209600') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label>Minimum CV match (%)</label><input id="s-min" type="number" min="45" max="100" placeholder="Any" value="${esc(profile.minScore || '')}"><small class="muted">Leave empty to apply to every job that fits your CV.</small></div>
       <div class="field"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="s-wt" value="${v}" ${(profile.workTypePriority || ['remote', 'hybrid', 'onsite']).includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
       <div class="field"><label>Contract</label><div class="tracd-sectors">${[['full_time', 'Full-time'], ['part_time', 'Part-time'], ['contract', 'Fixed-term / contract']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="s-type" value="${v}" ${(profile.employmentType || ['full_time']).includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
       <div class="field"><label>Applications a day</label><select id="s-cap">${[5, 10, 15, 20, 25].map((n) => `<option value="${n}" ${Number(settings.dailyCap || 15) === n ? 'selected' : ''} ${n > cfg.PLAN_CAP ? 'disabled' : ''}>${n}${n > cfg.PLAN_CAP ? ' (Pro)' : ''}</option>`).join('')}</select></div>
     </div></div>
+    <div class="card"><h3>Agent schedule</h3><p class="muted" style="margin-top:0">Only search and apply on these days and hours. Off means any time.</p>
+      <label class="checkbox-label"><input type="checkbox" id="s-sched" ${sched.enabled ? 'checked' : ''}> Enable schedule</label>
+      <div class="tracd-grid" style="margin-top:10px">
+        <div class="field"><label>Start time</label><select id="s-from">${[...Array(24).keys()].map((h) => `<option value="${h}" ${Number(sched.start ?? 9) === h ? 'selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('')}</select></div>
+        <div class="field"><label>End time</label><select id="s-to">${[...Array(24).keys()].map((h) => h + 1).map((h) => `<option value="${h}" ${Number(sched.end ?? 18) === h ? 'selected' : ''}>${String(h % 24).padStart(2, '0')}:00</option>`).join('')}</select></div>
+      </div>
+      <div class="field"><label>Active days</label><div class="tracd-sectors">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<label class="sector-chip"><input type="checkbox" class="s-day" value="${d}" ${(sched.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']).includes(d) ? 'checked' : ''}><span>${d}</span></label>`).join('')}</div></div>
+    </div>
+    <div class="card"><h3>Review before applying</h3>
+      <label class="checkbox-label" style="align-items:flex-start"><input type="checkbox" id="s-review" ${settings.reviewBeforeApply ? 'checked' : ''}><span>Let me review each tailored CV and cover letter before it applies<br><small class="muted">Each one waits on the Dashboard for you to approve or skip.</small></span></label>
+    </div>
     ${saveBar('s-save')}`;
   $('#s-save').addEventListener('click', async () => {
     await store.patch('profile', {
@@ -653,7 +836,9 @@ VIEWS.search = async function renderSearch() {
       searchLocation: $('#s-where').value.trim() || 'United Kingdom', minScore: Number($('#s-min').value) ? Math.max(45, Math.min(100, Number($('#s-min').value))) : null,
       workTypePriority: $$('.s-wt:checked').map((c) => c.value), employmentType: $$('.s-type:checked').map((c) => c.value),
     });
-    await store.patch('settings', { dailyCap: Number($('#s-cap').value) });
+    await store.patch('profile', { blockedCompanies: lines('#s-block').slice(0, 100), jobAge: $('#s-age').value });
+    await store.patch('settings', { dailyCap: Number($('#s-cap').value), reviewBeforeApply: $('#s-review').checked,
+      schedule: { enabled: $('#s-sched').checked, start: Number($('#s-from').value), end: Number($('#s-to').value), days: $$('.s-day:checked').map((c) => c.value) } });
     await loadConfig();
     setSt('#s-save-st', '✓ Saved.');
   });
@@ -672,8 +857,11 @@ VIEWS.license = async function renderLicense() {
       ${license.expiresAt ? `<div class="stat-row"><span class="stat-label">${active ? 'Renews / ends' : 'Ended'}</span><span class="stat-value">${esc(new Date(license.expiresAt).toLocaleDateString('en-GB'))}</span></div>` : ''}` : ''}
       <div class="field" style="max-width:460px;margin-top:12px"><label>${license.key ? 'Replace key' : 'License key'}</label><input id="lic" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key"></div>
       <div class="ext-inline"><button class="primary" id="lic-save">Activate</button>${license.key ? '<button class="secondary" id="lic-remove">Remove key</button>' : ''}<span class="status-msg" id="lic-st"></span></div>
-      <p class="muted" style="margin-top:12px">No key yet? <a class="tracker-link" href="https://www.tryjobai.com/trial" target="_blank" rel="noopener noreferrer">Start a free trial</a></p>
+      <p class="muted" style="margin-top:12px">No key yet? <a class="tracker-link" href="https://tryjobai.com/start" target="_blank" rel="noopener noreferrer">Get started free</a></p>
     </div>
+    ${license.key ? `<div class="card"><h3 style="margin:0 0 6px">Subscription</h3>
+      <p class="muted" style="margin:0 0 12px">Update your payment details, view invoices, or cancel your subscription in Stripe's secure portal.</p>
+      <div class="ext-inline"><button class="secondary" id="manage-sub">Manage or cancel subscription →</button><span class="status-msg" id="manage-st"></span></div></div>` : ''}
     ${globalThis.__jobaiClient === 'android' ? '' : `<div class="card" id="phone-card">
       <h3 style="margin:0 0 6px">Set up from my phone</h3>
       <p class="muted">Set up on your phone at tryjobai.com/start? Type the 6-digit code it shows. Your licence, CV and details come straight in.</p>
@@ -683,6 +871,17 @@ VIEWS.license = async function renderLicense() {
       <div id="ph-mail" hidden><div class="field" style="max-width:320px"><label>Your email</label><input id="ph-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
       <div class="ext-inline"><button class="secondary" id="ph-send">Send code</button><span class="status-msg" id="ph-mail-st"></span></div></div>
     </div>`}`;
+  // Same as the app: open Stripe's billing portal for this licence.
+  $('#manage-sub')?.addEventListener('click', async () => {
+    const b = $('#manage-sub'); b.disabled = true; setSt('#manage-st', 'Opening secure billing portal…');
+    try {
+      const r = await fetch(BACKEND + '/billing-portal', { method: 'POST', headers: { Authorization: 'Bearer ' + license.key, Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.url) { openTab(j.url); setSt('#manage-st', 'Opened in a new tab. Manage or cancel there.'); }
+      else setSt('#manage-st', j.error === 'no_subscription' ? 'No paid subscription is linked to this licence (trials have nothing to cancel).' : 'Could not open the billing portal. Please try again.', true);
+    } catch (_) { setSt('#manage-st', 'Could not reach the server. Check your connection and try again.', true); }
+    b.disabled = false;
+  });
   $('#lic-save').addEventListener('click', async () => {
     const k = $('#lic').value.trim();
     if (!/^[A-Za-z0-9_-]{8,200}$/.test(k)) { setSt('#lic-st', 'That does not look like a Job-AI key.', true); return; }
@@ -766,6 +965,7 @@ async function claimPhoneSetup(raw, say) {
     }
     if (r.setup && r.setup.cv && r.setup.cv.text) {
       const c = r.setup.cv;
+      await store.set('cvs', [{ id: 'cv' + Date.now(), label: 'Main CV', name: c.name, type: c.type, text: c.text, dataB64: c.dataB64, ...(Array.isArray(c.roles) ? { roles: c.roles.slice(0, 8), keywords: (c.keywords || []).slice(0, 25) } : {}) }]);
       await store.set('cv', { name: c.name, type: c.type, text: c.text, dataB64: c.dataB64, ...(Array.isArray(c.roles) ? { roles: c.roles.slice(0, 8), keywords: (c.keywords || []).slice(0, 25) } : {}) });
       got.push('CV');
     }
@@ -803,7 +1003,7 @@ const SELECTS = [
   ['welsh', 'Can you speak, read or write Welsh?', ['', 'No', 'Yes']],
   ['careLeaver', 'Have you ever been in care (care leaver)?', ['', 'No', 'Yes', 'Prefer not to say']],
 ];
-const TEXTS = [['firstName', 'Forename'], ['middleName', 'Middle name(s)'], ['lastName', 'Surname'], ['email', 'Email'], ['mobile', 'Mobile telephone'], ['address', 'Address'], ['city', 'City / town'], ['county', 'County'], ['postcode', 'Postcode'], ['country', 'Country'], ['ni', 'National Insurance number'], ['dob', 'Date of birth (DD/MM/YYYY)']];
+const TEXTS = [['firstName', 'Forename'], ['middleName', 'Middle name(s)'], ['lastName', 'Surname'], ['email', 'Email'], ['mobile', 'Mobile telephone'], ['address', 'Address'], ['city', 'City / town'], ['county', 'County'], ['postcode', 'Postcode'], ['country', 'Country'], ['ni', 'National Insurance number'], ['dob', 'Date of birth (DD/MM/YYYY)'], ['convictionDetails', 'Conviction details (only if you have unspent convictions)'], ['adjustments', 'Adjustments you need for an interview (if any)']];
 const REPS = {
   employment: [['employer', 'Employer'], ['jobTitle', 'Your job title'], ['start', 'Start (DD/MM/YYYY)'], ['end', 'End (DD/MM/YYYY, blank if current)'], ['reason', 'Reason for leaving'], ['duties', 'Brief description of duties & responsibilities', 'ta']],
   education: [['qualification', 'Subject / qualification'], ['place', 'Place of study'], ['grade', 'Grade / result'], ['year', 'Year obtained']],
@@ -1026,7 +1226,7 @@ async function remoteStatus() {
     applied_today: applied, daily_cap: cap,
     in_queue: all.filter((j) => ['pending', 'cv_ready', 'applying'].includes(j.status)).length,
     failed: all.filter((j) => j.status === 'apply_failed').length,
-    needs_you: all.filter((j) => ['ready', 'ready_to_submit'].includes(j.status) || (j.status === 'skipped' && /^Draft saved on Trac/.test(j.reason || ''))).length,
+    needs_you: all.filter((j) => ['ready', 'ready_to_submit', 'awaiting_review'].includes(j.status) || (j.status === 'skipped' && /^Draft saved on Trac/.test(j.reason || ''))).length,
     recent, blocked,
   };
 }
@@ -1209,7 +1409,7 @@ async function remotePost(path, body, signal) {
 // Test builds only (node build.mjs --test): lets automated tests drive the same objects.
 // Release builds leave this out, so nothing internal is exposed on the page.
 if (process.env.JOBAI_TEST === '1') {
-  globalThis.__jobaiTest = { agent, agents, mods: { reed: require('../../bot/modules/reed'), linkedin: require('../../bot/modules/linkedin'), ats: require('../../bot/modules/ats_filler'), feedJobs, fetchJD }, store, cfg, loadConfig, Page, vfs, vfsReady, trac: require('../../bot/modules/trac_source'), apply: require('../../bot/modules/trac_apply'), parseCV: require('../../bot/modules/cv_parser').parseCV, pdf: require('../../bot/modules/cv_pdf_writer') };
+  globalThis.__jobaiTest = { scoreJob, agent, agents, mods: { reed: require('../../bot/modules/reed'), linkedin: require('../../bot/modules/linkedin'), ats: require('../../bot/modules/ats_filler'), feedJobs, fetchJD }, store, cfg, loadConfig, Page, vfs, vfsReady, trac: require('../../bot/modules/trac_source'), apply: require('../../bot/modules/trac_apply'), parseCV: require('../../bot/modules/cv_parser').parseCV, pdf: require('../../bot/modules/cv_pdf_writer') };
 }
 
 navigate('dashboard');

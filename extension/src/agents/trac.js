@@ -50,6 +50,9 @@ export class TracAgent {
       unwatch = stopOnWindowClose(this);
       this.page = await Page.open('about:blank', { windowId: this.windowId });
       while (this.running) {
+        const off = cfg.outsideSchedule();
+        if (off) { if (this._offMsg !== off) this.log(off); this._offMsg = off; await this.wait(Date.now() + 5 * 60 * 1000); continue; }
+        this._offMsg = '';
         const cycleEnd = Date.now() + 10 * 60 * 1000;
         await this.search().catch((e) => this.log('Search error: ' + e.message));
         if (!this.running) break;

@@ -23,6 +23,7 @@ const cfg = {
   SKIP_EXTERNAL_SITES: true,
   MAX_APPLICATIONS_PER_DAY: 25,
   PLAN_CAP: 25,
+  SCHEDULE: null,
   MIN_SCORE: 0,  // same as the app: no minimum unless the user sets one (the 45% floor still applies)
   async init() {},
 
@@ -69,8 +70,22 @@ const cfg = {
     cfg.PLAN_CAP = license.status === 'active' ? 25 : 5;
     cfg.MAX_APPLICATIONS_PER_DAY = Math.min(Number(settings.dailyCap || 15), cfg.PLAN_CAP);
     cfg.MIN_SCORE = Number(profile.minScore) || 0;
+    cfg.SCHEDULE = settings.schedule || null;
     const full = `${first} ${last}`.trim();
     cfg.RESUME_FILENAME = full ? `${full} Resume.pdf` : 'Resume.pdf';
+  },
+
+  // Same rule as the app: with a schedule on, agents only search and apply on those days and hours.
+  // Returns why it is waiting, or '' when it may work now.
+  outsideSchedule() {
+    const s = cfg.SCHEDULE;
+    if (!s || !s.enabled) return '';
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const days = Array.isArray(s.days) && s.days.length ? s.days : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+    const from = Number(s.start ?? 9), to = Number(s.end ?? 18), now = new Date(), h = now.getHours();
+    if (days.includes(DAYS[now.getDay()]) && h >= from && h < to) return '';
+    const hh = (n) => String(n % 24).padStart(2, '0') + ':00';
+    return `Outside your schedule (${days.join(', ')}, ${hh(from)} to ${hh(to)}). Waiting.`;
   },
 
   // Same check as the desktop app: listings that are really paid training courses.
