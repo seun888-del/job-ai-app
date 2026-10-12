@@ -902,7 +902,9 @@ ipcMain.handle('license:startTrial', async (event, email) => {
   return { ok: true, license_key: body.license_key };
 });
 
-ipcMain.handle('license:verify', async (event, key) => {
+ipcMain.handle('license:verify', (event, key) => verifyLicenseKey(key));
+
+async function verifyLicenseKey(key) {
   const licenseKey = (key || '').trim();
   if (!licenseKey) return { ok: false, error: 'missing_key' };
 
@@ -958,6 +960,62 @@ ipcMain.handle('license:verify', async (event, key) => {
       cost_today_usd: data.cost_today_usd,
     },
   };
+}
+
+// "Set up from my phone": a 6-digit code from tryjobai.com/start (or emailed) brings in
+// the licence plus the CV and details entered on the phone. No key to copy.
+ipcMain.handle('license:sendSetupCode', async (event, email) => {
+  try {
+    const res = await fetch(`${JOBBOT_BACKEND_URL}/v1/setup/send-code`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: String(email || '').trim() }), signal: AbortSignal.timeout(20000),
+    });
+    return { ok: res.ok, http: res.status };
+  } catch { return { ok: false, error: 'network_error' }; }
+});
+
+ipcMain.handle('license:claimSetup', async (event, code) => {
+  let res, body;
+  try {
+    res = await fetch(`${JOBBOT_BACKEND_URL}/v1/setup/claim`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Client': 'app', 'X-Machine-Id': machineId() },
+      body: JSON.stringify({ code: String(code || '').replace(/\D/g, '') }), signal: AbortSignal.timeout(30000),
+    });
+    body = await res.json().catch(() => ({}));
+  } catch { return { ok: false, error: 'network_error' }; }
+  if (!res.ok || !body.license_key) return { ok: false, error: body.error || `http_${res.status}` };
+
+  // Details and CV first: they are the user's own and the server has now deleted its copy.
+  const got = [];
+  const setup = body.setup || {};
+  const P = setup.profile || {};
+  const map = [['first_name', P.firstName], ['middle_name', P.middleName], ['last_name', P.lastName], ['email', P.email],
+    ['phone', P.phone], ['location', P.location], ['linkedin_url', P.linkedin], ['years_experience', P.yearsExperience]];
+  const fields = {};
+  for (const [col, val] of map) if (val) fields[col] = val;
+  if (Object.keys(fields).length) { db.saveProfile(fields); got.push('details'); }
+  if (Array.isArray(P.searchTerms) && P.searchTerms.length) db.addSearchTerms(P.searchTerms.slice(0, 40), 'user_added');
+  const wt = (P.workTypePriority || []).filter((w) => ['remote', 'hybrid', 'onsite'].includes(w));
+  if (wt.length) { try { db.saveSearchPreferences({ work_type_priority: wt }); } catch (_) {} }
+
+  // The licence before the CV, so reading the CV for keywords can use the AI.
+  const lic = await verifyLicenseKey(body.license_key);
+
+  if (setup.cv && setup.cv.dataB64) {
+    try {
+      const dir = path.join(app.getPath('userData'), 'cvs');
+      fs.mkdirSync(dir, { recursive: true });
+      const name = String(setup.cv.name || 'CV.pdf').replace(/[^\w .()-]/g, '').slice(0, 80) || 'CV.pdf';
+      const file_path = path.join(dir, `${Date.now()}_${name}`);
+      fs.writeFileSync(file_path, Buffer.from(setup.cv.dataB64, 'base64'));
+      let keywords = [], suggestedRoles = [];
+      try { ({ keywords, suggestedRoles } = await cvAnalyzer.analyzeCV(file_path)); } catch (_) {}
+      db.addCV({ label: 'Main CV', file_path, extracted_keywords: keywords || [], suggested_roles: suggestedRoles || [] });
+      got.push('CV');
+    } catch (e) { console.error('[Setup] could not save the phone CV:', e.message); }
+  }
+  checkSetupSteps();
+  return { ok: lic.ok, error: lic.ok ? '' : lic.error, got, license: lic.license, usage: lic.usage };
 });
 
 // ── Shell ────────────────────────────────────────────────────────────────

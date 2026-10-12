@@ -10,7 +10,7 @@ import { LinkedInAgent } from './agents/linkedin.js';
 import { AtsAgent, feedJobs, fetchJD } from './agents/ats.js';
 import { Page } from './driver/page.js';
 
-const { checkLicense, askAssistant } = require('./shims/llm.js');
+const { checkLicense, askAssistant, claimSetup, sendSetupCode } = require('./shims/llm.js');
 const { importTracText } = require('../../src/services/tracImporter');
 const { readCvProfile } = require('../../src/services/cvProfile');
 
@@ -558,7 +558,16 @@ VIEWS.license = async function renderLicense() {
       <div class="field" style="max-width:460px;margin-top:12px"><label>${license.key ? 'Replace key' : 'License key'}</label><input id="lic" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key"></div>
       <div class="ext-inline"><button class="primary" id="lic-save">Activate</button>${license.key ? '<button class="secondary" id="lic-remove">Remove key</button>' : ''}<span class="status-msg" id="lic-st"></span></div>
       <p class="muted" style="margin-top:12px">No key yet? <a class="tracker-link" href="https://www.tryjobai.com/trial" target="_blank" rel="noopener noreferrer">Start a free trial</a></p>
-    </div>`;
+    </div>
+    ${globalThis.__jobaiClient === 'android' ? '' : `<div class="card" id="phone-card">
+      <h3 style="margin:0 0 6px">Set up from my phone</h3>
+      <p class="muted">Set up on your phone at tryjobai.com/start? Type the 6-digit code it shows. Your licence, CV and details come straight in.</p>
+      <div class="field" style="max-width:220px;margin-top:12px"><label>Code</label><input id="ph-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
+      <div class="ext-inline"><button class="primary" id="ph-go">Bring in my setup</button><span class="status-msg" id="ph-st"></span></div>
+      <p class="muted" style="margin-top:12px">No code? <a class="tracker-link" href="#" id="ph-mail-show">Email me a code</a></p>
+      <div id="ph-mail" hidden><div class="field" style="max-width:320px"><label>Your email</label><input id="ph-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="ext-inline"><button class="secondary" id="ph-send">Send code</button><span class="status-msg" id="ph-mail-st"></span></div></div>
+    </div>`}`;
   $('#lic-save').addEventListener('click', async () => {
     const k = $('#lic').value.trim();
     if (!/^[A-Za-z0-9_-]{8,200}$/.test(k)) { setSt('#lic-st', 'That does not look like a Job-AI key.', true); return; }
@@ -574,6 +583,7 @@ VIEWS.license = async function renderLicense() {
       setTimeout(renderLicense, 900);
     } catch (e) { setSt('#lic-st', 'Could not reach Job-AI. Check your connection.', true); }
   });
+  wirePhoneSetup();
   $('#lic-remove') && $('#lic-remove').addEventListener('click', async () => {
     if (!confirm('Remove the licence key from this browser? The agents stop until you add it again.')) return;
     Object.values(agents).forEach((a) => a.stop());
@@ -581,6 +591,48 @@ VIEWS.license = async function renderLicense() {
     renderLicense();
   });
 };
+
+// "Set up from my phone": bring in the licence, CV and details from tryjobai.com/start.
+function wirePhoneSetup(rerender) {
+  if (!$('#phone-card')) return;
+  $('#ph-mail-show').addEventListener('click', (e) => { e.preventDefault(); $('#ph-mail').hidden = false; $('#ph-email').focus(); });
+  $('#ph-send').addEventListener('click', async () => {
+    const em = $('#ph-email').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setSt('#ph-mail-st', 'That email does not look right.', true); return; }
+    setSt('#ph-mail-st', 'Sending…');
+    try { const r = await sendSetupCode(em); setSt('#ph-mail-st', r.ok ? 'If that email has Job-AI, a code is on its way. Type it above.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not send. Try again.', !r.ok); }
+    catch (_) { setSt('#ph-mail-st', 'Could not reach Job-AI. Check your connection.', true); }
+  });
+  $('#ph-go').addEventListener('click', async () => {
+    const code = $('#ph-code').value.replace(/\D/g, '');
+    if (code.length !== 6) { setSt('#ph-st', 'The code is 6 numbers.', true); return; }
+    setSt('#ph-st', 'Bringing in your setup…');
+    let r;
+    try { r = await claimSetup(code); } catch (_) { setSt('#ph-st', 'Could not reach Job-AI. Check your connection.', true); return; }
+    if (!r.ok) { setSt('#ph-st', r.http === 404 ? 'That code is wrong or has run out. Get a new one on your phone.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not use the code (' + r.http + ').', true); return; }
+    // Details and CV first: they are the user's own and the server has now deleted its copy.
+    const got = [];
+    if (r.setup && r.setup.profile) {
+      const P = r.setup.profile, out = {};
+      for (const k of ['firstName', 'middleName', 'lastName', 'email', 'phone', 'location', 'linkedin', 'yearsExperience']) if (P[k]) out[k] = P[k];
+      if ((P.searchTerms || []).length) out.searchTerms = P.searchTerms.slice(0, 40);
+      if ((P.workTypePriority || []).length) out.workTypePriority = P.workTypePriority;
+      if (Object.keys(out).length) { await store.patch('profile', out); got.push('details'); }
+    }
+    if (r.setup && r.setup.cv && r.setup.cv.text) {
+      const c = r.setup.cv;
+      await store.set('cv', { name: c.name, type: c.type, text: c.text, dataB64: c.dataB64 });
+      got.push('CV');
+    }
+    const lic = await checkLicense(r.key).catch(() => ({ ok: false, http: 0 }));
+    if (lic.ok) await store.set('license', { key: r.key, status: lic.licenseStatus || 'active', expiresAt: lic.expires_at, checkedAt: Date.now() });
+    globalThis.__jobaiLicense = lic.ok ? r.key : globalThis.__jobaiLicense;
+    await loadConfig(); checkSteps();
+    if (!lic.ok) { setSt('#ph-st', (got.length ? `Your ${got.join(' and ')} came in, but ` : '') + (lic.error === 'device_trial_used' ? 'this computer has already used a free trial.' : 'the licence could not be activated.'), true); return; }
+    setSt('#ph-st', `✓ Done. Licence active${got.length ? ', and your ' + got.join(' and ') + ' are in' : ''}.`);
+    setTimeout(() => navigate('dashboard'), 1500);
+  });
+}
 
 // ── Setup: NHS / Trac details ────────────────────────────────────────────────
 const SECTORS = [['s7', 'Administrative Services'], ['s6', 'Support Services'], ['s5', 'Health Science Services'], ['s1', 'Nursing & Midwifery'], ['s2', 'Medical & Dental'], ['s4', 'Allied Health Professions'], ['s3', 'Emergency Services'], ['s119', 'Personal Social Services'], ['s8', 'Directors'], ['s10', 'Apprenticeships'], ['s9', 'Volunteers']];
@@ -736,11 +788,13 @@ async function initOnboarding() {
       <div class="welcome-feature"><strong>Private</strong><span>Your details and CV stay in this browser, on this device</span></div>
       <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
     </div>
-    <div class="welcome-actions"><button class="primary" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div></div>`;
+    <div class="welcome-actions"><button class="primary" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div>
+    ${globalThis.__jobaiClient === 'android' ? '' : '<p style="margin-top:14px;font-size:14px">Set up on your phone already? <a href="#" id="w-phone" class="tracker-link">Bring in my phone setup</a></p>'}</div>`;
   document.body.appendChild(overlay);
   const dismiss = () => { overlay.remove(); store.patch('settings', { welcomeSeen: true }); };
   $('#w-tour').addEventListener('click', () => { dismiss(); startTour(); });
   $('#w-skip').addEventListener('click', dismiss);
+  $('#w-phone') && $('#w-phone').addEventListener('click', (e) => { e.preventDefault(); dismiss(); navigate('license'); setTimeout(() => $('#ph-code') && $('#ph-code').focus(), 300); });
 }
 
 // ── Ask Job-AI assistant (same behaviour and safety rules as the app) ────────

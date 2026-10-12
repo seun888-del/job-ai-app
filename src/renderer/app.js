@@ -1083,6 +1083,20 @@ async function renderLicense() {
     </div>
 
     <div class="card">
+      <h3>Set up from my phone</h3>
+      <p style="font-size:14px;color:#64748b;margin-bottom:14px">Set up on your phone at tryjobai.com/start? Type the 6-digit code it shows. Your licence, CV and details come straight in.</p>
+      <div class="field" style="max-width:220px"><label>Code</label><input id="phone_code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
+      <button class="primary" id="phone_claim">Bring in my setup</button>
+      <div class="status-msg" id="phone_status"></div>
+      <p style="font-size:13px;color:#64748b;margin-top:12px">No code? <a href="#" id="phone_mail_show">Email me a code</a></p>
+      <div id="phone_mail" style="display:none">
+        <div class="field" style="max-width:320px"><label>Your email</label><input id="phone_email" type="email" placeholder="you@example.com"></div>
+        <button class="secondary" id="phone_send">Send code</button>
+        <div class="status-msg" id="phone_mail_status"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <h3>Privacy</h3>
       <label class="checkbox-label" style="align-items:flex-start">
         <input id="diagnostics_toggle" type="checkbox" ${diagOn ? 'checked' : ''}>
@@ -1165,6 +1179,37 @@ async function renderLicense() {
     } finally {
       _activateBtn.disabled = false;
     }
+  });
+
+  // "Set up from my phone": licence + CV + details from tryjobai.com/start.
+  document.getElementById('phone_mail_show').addEventListener('click', (e) => {
+    e.preventDefault(); document.getElementById('phone_mail').style.display = ''; document.getElementById('phone_email').focus();
+  });
+  document.getElementById('phone_send').addEventListener('click', async () => {
+    const st = document.getElementById('phone_mail_status');
+    const em = document.getElementById('phone_email').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { showStatus(st, 'That email does not look right.', 'error'); return; }
+    st.className = 'status-msg'; st.textContent = 'Sending...';
+    const r = await window.api.license.sendSetupCode(em);
+    showStatus(st, r.ok ? 'If that email has Job-AI, a code is on its way. Type it above.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not send. Check your connection and try again.', r.ok ? 'success' : 'error');
+  });
+  document.getElementById('phone_claim').addEventListener('click', async () => {
+    const btn = document.getElementById('phone_claim'), st = document.getElementById('phone_status');
+    const code = document.getElementById('phone_code').value.replace(/\D/g, '');
+    if (code.length !== 6) { showStatus(st, 'The code is 6 numbers.', 'error'); return; }
+    btn.disabled = true; st.className = 'status-msg'; st.textContent = 'Bringing in your setup...';
+    try {
+      const r = await window.api.license.claimSetup(code);
+      if (r.error === 'bad_code' || r.error === 'http_404') { showStatus(st, 'That code is wrong or has run out. Get a new one on your phone.', 'error'); return; }
+      if (r.error === 'network_error') { showStatus(st, 'Could not reach Job-AI. Check your connection.', 'error'); return; }
+      const got = (r.got || []).length ? ', and your ' + r.got.join(' and ') + ' are in' : '';
+      if (!r.ok) { showStatus(st, (r.got || []).length ? `Your ${r.got.join(' and ')} came in, but the licence could not be activated (${LICENSE_ERRORS[r.error] || r.error}).` : (LICENSE_ERRORS[r.error] || `Error: ${r.error}`), 'error'); return; }
+      dashboardHasLicense = licenseIsActive(r.license);
+      await refreshExpiryBanner();
+      await updateNavProgress();
+      showStatus(st, `Done. Licence active${got}.`, 'success');
+      setTimeout(() => navigate('dashboard'), 1500);
+    } finally { btn.disabled = false; }
   });
 
   const manageBtn = document.getElementById('manage-subscription');

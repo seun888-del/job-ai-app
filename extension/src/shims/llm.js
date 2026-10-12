@@ -75,4 +75,21 @@ async function askAssistant(question, state) {
   return { ok: true, reply: body.reply, remaining_today: body.remaining_today };
 }
 
-module.exports = { llmChat, llmAvailable, checkLicense, askAssistant, headers, mode: 'hosted', isHosted: true };
+// "Set up from my phone": a 6-digit code from tryjobai.com/start (or emailed) brings in the
+// licence plus the CV and details entered on the phone. No key to copy.
+async function claimSetup(code) {
+  const r = await fetch(`${BACKEND}/v1/setup/claim`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Client': globalThis.__jobaiClient || 'extension' },
+    body: JSON.stringify({ code: String(code).replace(/\D/g, '') }), signal: AbortSignal.timeout(30000),
+  });
+  const body = await r.json().catch(() => ({}));
+  return { ok: r.ok && !!body.license_key, http: r.status, error: body.error || '', key: body.license_key || '', setup: body.setup || null };
+}
+async function sendSetupCode(email) {
+  const r = await fetch(`${BACKEND}/v1/setup/send-code`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: String(email).trim() }), signal: AbortSignal.timeout(20000),
+  });
+  return { ok: r.ok, http: r.status };
+}
+
+module.exports = { claimSetup, sendSetupCode, llmChat, llmAvailable, checkLicense, askAssistant, headers, mode: 'hosted', isHosted: true };
