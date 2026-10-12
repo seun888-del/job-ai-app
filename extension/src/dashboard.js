@@ -674,7 +674,10 @@ async function claimPhoneSetup(raw, say) {
         const T = r.setup.trac || {}, t = { ...((await store.get('trac')) || {}) };
         const blank = (k, v) => { if (v && !t[k]) t[k] = v; };
         blank('firstName', P.firstName); blank('lastName', P.lastName); blank('email', P.email); blank('mobile', P.phone); blank('city', P.location);
-        for (const k of ['employment', 'education', 'references']) if (Array.isArray(T[k]) && T[k].length && !(t[k] || []).length) t[k] = T[k];
+        for (const [k, v] of Object.entries(T)) {
+          if (k === 'fromCv' || k === 'imported') continue;
+          if (Array.isArray(v)) { if (v.length && !(t[k] || []).length) t[k] = v; } else blank(k, v);
+        }
         if (!(t.searchTerms || []).length && (P.searchTerms || []).length) t.searchTerms = P.searchTerms.slice(0, 40);
         await store.set('trac', t);
         await store.patch('settings', { wantsNhs: true });
