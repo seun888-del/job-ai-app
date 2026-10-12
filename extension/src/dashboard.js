@@ -832,8 +832,9 @@ async function initOnboarding() {
     </div>
     ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
       <strong style="display:block;margin-bottom:4px">Set up on your phone?</strong>
-      <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin-bottom:10px">Type the 6-digit code from your phone. Your CV, details and licence come straight in.</span>
-      <div style="display:flex;gap:8px"><input id="w-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w-go">Connect</button></div>
+      <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin-bottom:10px">Type the 6-digit code from your phone. No code, or it ran out? We can email you one.</span>
+      <div id="w-codebox" style="display:flex;gap:8px"><input id="w-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w-go" style="white-space:nowrap">Email me a code</button></div>
+      <div id="w-mailbox" style="display:none;gap:8px"><input id="w-email" type="email" placeholder="The email you set up with" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Send code</button></div>
       <div class="status-msg" id="w-st" style="margin-top:8px"></div></div>
       <p style="margin:14px 0 8px;font-size:14px;color:var(--text-muted,#4a453b)">New to Job-AI? Set up here instead:</p>`}
     <div class="welcome-actions"><button class="${globalThis.__jobaiClient === 'android' ? 'primary' : 'secondary'}" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div></div>`;
@@ -842,14 +843,32 @@ async function initOnboarding() {
   $('#w-tour').addEventListener('click', () => { dismiss(); startTour(); });
   $('#w-skip').addEventListener('click', dismiss);
   if ($('#w-code')) {
+    // One button: "Email me a code" while the box is empty, "Connect" once a code is typed.
+    const hasCode = () => $('#w-code').value.replace(/\D/g, '').length > 0;
+    const label = () => { $('#w-go').textContent = hasCode() ? 'Connect' : 'Email me a code'; };
+    const showMail = (on) => { $('#w-mailbox').style.display = on ? 'flex' : 'none'; $('#w-codebox').style.display = on ? 'none' : 'flex'; $(on ? '#w-email' : '#w-code').focus(); };
     const go = async () => {
+      if (!hasCode()) { setSt('#w-st', ''); showMail(true); return; }
       const b = $('#w-go'); b.disabled = true;
       const done = await claimPhoneSetup($('#w-code').value, (t, err) => setSt('#w-st', t, err));
       b.disabled = false;
       if (done) setTimeout(() => { dismiss(); navigate('dashboard'); }, 1200);
     };
+    const send = async () => {
+      const em = $('#w-email').value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setSt('#w-st', 'That email does not look right.', true); return; }
+      $('#w-send').disabled = true; setSt('#w-st', 'Sending…');
+      let r; try { r = await sendSetupCode(em); } catch (_) { r = { ok: false }; }
+      $('#w-send').disabled = false;
+      if (!r.ok) { setSt('#w-st', r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not send. Check your connection and try again.', true); return; }
+      $('#w-code').value = ''; label(); showMail(false);
+      setSt('#w-st', `Sent to ${em}. Type the code from that email here.`);
+    };
     $('#w-go').addEventListener('click', go);
+    $('#w-send').addEventListener('click', send);
+    $('#w-code').addEventListener('input', label);
     $('#w-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    $('#w-email').addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
     setTimeout(() => $('#w-code') && $('#w-code').focus(), 100);
   }
 }

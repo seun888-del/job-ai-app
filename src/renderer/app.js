@@ -3349,17 +3349,37 @@ function initOnboarding() {
   const phone = document.createElement('div');
   phone.style.cssText = 'text-align:left;background:#fbf9f4;border:1px solid #e6e1d6;border-radius:9px;padding:16px;margin:18px 0 6px';
   phone.innerHTML = `<strong style="display:block;margin-bottom:4px">Set up on your phone?</strong>
-    <span style="display:block;font-size:13.5px;color:#4a453b;margin-bottom:10px">Type the 6-digit code from your phone. Your CV, details and licence come straight in.</span>
-    <div style="display:flex;gap:8px"><input id="w_code" inputmode="numeric" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w_go">Connect</button></div>
+    <span style="display:block;font-size:13.5px;color:#4a453b;margin-bottom:10px">Type the 6-digit code from your phone. No code, or it ran out? We can email you one.</span>
+    <div id="w_codebox" style="display:flex;gap:8px"><input id="w_code" inputmode="numeric" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w_go" style="white-space:nowrap">Email me a code</button></div>
+    <div id="w_mailbox" style="display:none;gap:8px"><input id="w_email" type="email" placeholder="The email you set up with" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w_send" style="white-space:nowrap">Send code</button></div>
     <div class="status-msg" id="w_status" style="margin-top:8px"></div>`;
-  const codeIn = phone.querySelector('#w_code'), goBtn = phone.querySelector('#w_go');
+  // One button: "Email me a code" while the box is empty, "Connect" once a code is typed.
+  const codeIn = phone.querySelector('#w_code'), goBtn = phone.querySelector('#w_go'), st = phone.querySelector('#w_status');
+  const codeBox = phone.querySelector('#w_codebox'), mailBox = phone.querySelector('#w_mailbox'), mailIn = phone.querySelector('#w_email'), sendBtn = phone.querySelector('#w_send');
+  const hasCode = () => codeIn.value.replace(/\D/g, '').length > 0;
+  const label = () => { goBtn.textContent = hasCode() ? 'Connect' : 'Email me a code'; };
+  const showMail = (on) => { mailBox.style.display = on ? 'flex' : 'none'; codeBox.style.display = on ? 'none' : 'flex'; (on ? mailIn : codeIn).focus(); };
   const go = async () => {
+    if (!hasCode()) { st.textContent = ''; showMail(true); return; }
     goBtn.disabled = true;
-    try { if (await claimPhoneSetup(codeIn.value, phone.querySelector('#w_status'))) setTimeout(() => { dismiss(); navigate('dashboard'); }, 1200); }
+    try { if (await claimPhoneSetup(codeIn.value, st)) setTimeout(() => { dismiss(); navigate('dashboard'); }, 1200); }
     finally { goBtn.disabled = false; }
   };
+  const send = async () => {
+    const em = mailIn.value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { st.className = 'status-msg error'; st.textContent = 'That email does not look right.'; return; }
+    sendBtn.disabled = true; st.className = 'status-msg'; st.textContent = 'Sending...';
+    const r = await window.api.license.sendSetupCode(em);
+    sendBtn.disabled = false;
+    if (!r.ok) { st.className = 'status-msg error'; st.textContent = r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not send. Check your connection and try again.'; return; }
+    codeIn.value = ''; label(); showMail(false);
+    st.className = 'status-msg success'; st.textContent = `Sent to ${em}. Type the code from that email here.`;
+  };
   goBtn.addEventListener('click', go);
+  sendBtn.addEventListener('click', send);
+  codeIn.addEventListener('input', label);
   codeIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  mailIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
   const or = document.createElement('p');
   or.style.cssText = 'margin:14px 0 8px;font-size:14px;color:#4a453b';
   or.textContent = 'New to Job-AI? Set up here instead:';
