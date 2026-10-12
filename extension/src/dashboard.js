@@ -241,7 +241,9 @@ async function fillFromCv(text) {
   let termsAdded = 0;
   if (r.roles.length && !(P.searchTerms || []).length) { out.searchTerms = r.roles; termsAdded = r.roles.length; }
   if (Object.keys(out).length) { await store.patch('profile', out); await loadConfig(); }
-  return { filled, termsAdded };
+  // Same as the app's CVs page: the job titles this CV fits, and its keywords, shown with the CV.
+  await store.patch('cv', { roles: r.roles || [], keywords: r.keywords || [] });
+  return { filled, termsAdded, roles: r.roles || [] };
 }
 function pickCv(stSel, done) {
   const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.pdf,.doc,.docx' });
@@ -261,6 +263,7 @@ function pickCv(stSel, done) {
         const parts = [];
         if (r.filled.length) parts.push(`Filled in from your CV: ${r.filled.join(', ')}.`);
         if (r.termsAdded) parts.push(`Added ${r.termsAdded} job titles to search for.`);
+        else if (r.roles.length) parts.push(`Suggested ${r.roles.length} job titles that fit your CV. See them on the CVs page.`);
         if (parts.length) msg = parts.join(' ') + ' Check your details, then Save.';
       } catch (err) { msg += '. ' + err.message; }
       done(msg);
@@ -547,8 +550,24 @@ VIEWS.cvs = async function renderCVs() {
   content.innerHTML = `
     <div class="page-header"><h2>CVs</h2><p>Your CV is read on this device and never uploaded. Before each application the AI tailors a copy to that job.</p></div>
     <div class="card"><h3>Your CV</h3><p class="muted">Word (.docx) is read most accurately. PDF also works.</p>
-      <div class="ext-inline"><button class="primary" id="cv-pick">${cv && cv.text ? 'Replace CV' : 'Add CV'}</button><span class="status-msg" id="cv-st">${cv && cv.text ? 'Using: ' + esc(cv.name) : 'No CV yet'}</span></div></div>`;
+      <div class="ext-inline"><button class="primary" id="cv-pick">${cv && cv.text ? 'Replace CV' : 'Add CV'}</button><span class="status-msg" id="cv-st">${cv && cv.text ? 'Using: ' + esc(cv.name) : 'No CV yet'}</span></div>
+      ${cv && cv.text && (cv.roles || []).length ? `<div class="cv-card-section">
+        <strong>Suggested roles</strong>
+        <div class="tag-list">${cv.roles.map((r) => `<div class="tag">${esc(r)}</div>`).join('')}</div>
+        <p class="cv-suggest-hint">Add these to your search so the agents look for them on Reed, LinkedIn and company sites.</p>
+        <div class="ext-inline"><button class="primary" id="cv-add-terms">＋ Add these as search terms</button><span class="status-msg" id="cv-terms-st"></span></div></div>` : ''}
+      ${cv && cv.text && (cv.keywords || []).length ? `<div class="cv-card-section"><strong>Extracted keywords</strong>
+        <div class="tag-list">${cv.keywords.map((k) => `<div class="tag">${esc(k)}</div>`).join('')}</div></div>` : ''}
+      ${cv && cv.text && !cv.roles ? '<p class="muted" style="margin-top:12px">Replace your CV to see the job titles it fits.</p>' : ''}
+    </div>`;
   $('#cv-pick').addEventListener('click', () => pickCv('#cv-st', (msg) => VIEWS.cvs().then(() => setSt('#cv-st', msg))));
+  $('#cv-add-terms')?.addEventListener('click', async () => {
+    const { profile } = await loadConfig();
+    const have = profile.searchTerms || [], lower = new Set(have.map((t) => t.toLowerCase()));
+    const add = (cv.roles || []).filter((r) => !lower.has(r.toLowerCase()));
+    if (add.length) { await store.patch('profile', { searchTerms: [...have, ...add].slice(0, 40) }); await loadConfig(); }
+    setSt('#cv-terms-st', add.length ? `✓ Added ${add.length} to your search. See Search preferences.` : 'These are already in your search.');
+  });
 };
 
 // ── Setup: Search preferences ────────────────────────────────────────────────
@@ -685,7 +704,7 @@ async function claimPhoneSetup(raw, say) {
     }
     if (r.setup && r.setup.cv && r.setup.cv.text) {
       const c = r.setup.cv;
-      await store.set('cv', { name: c.name, type: c.type, text: c.text, dataB64: c.dataB64 });
+      await store.set('cv', { name: c.name, type: c.type, text: c.text, dataB64: c.dataB64, ...(Array.isArray(c.roles) ? { roles: c.roles.slice(0, 8), keywords: (c.keywords || []).slice(0, 25) } : {}) });
       got.push('CV');
     }
     const lic = await checkLicense(r.key).catch(() => ({ ok: false, http: 0 }));
