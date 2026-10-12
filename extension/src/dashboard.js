@@ -444,7 +444,8 @@ VIEWS.dashboard = async function renderDashboardView() {
             <label class="checkbox-label" style="align-items:flex-start;margin:0"><input type="checkbox" class="pc" data-k="openOnStartup" ${settings.openOnStartup ? 'checked' : ''}><span><strong>Open when Chrome starts</strong><br><small class="muted">Job-AI opens in a pinned tab and carries on applying.</small></span></label>
           </div>
         </div>
-      </div>`;
+      </div>
+      ${recentHtml(all)}`;
 
     $$('.start').forEach((b) => b.addEventListener('click', () => startAgent(b.dataset.bot)));
     $$('.stop').forEach((b) => b.addEventListener('click', () => { agents[b.dataset.bot].stop(); renderDashboard(); }));
@@ -477,6 +478,50 @@ VIEWS.dashboard = async function renderDashboardView() {
 };
 function renderDashboard() { return VIEWS.dashboard(); }
 
+// ── Recent activity: the tailored CV and cover letter behind each application (same as the app) ──
+const RECENT = ['applied', 'apply_failed', 'ready', 'ready_to_submit', 'cv_ready', 'applying'];
+const docButtons = (j) => `${j.cvPath ? `<button class="view-cv-btn" data-id="${esc(j.jobId)}" title="View CV" aria-label="View CV"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button>` : ''}${j.coverLetter ? `<button class="view-cl-btn" data-id="${esc(j.jobId)}" title="View cover letter" aria-label="View cover letter"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg></button>` : ''}`;
+function recentHtml(all) {
+  const rows = all.filter((j) => RECENT.includes(j.status)).sort((a, b) => String(b.appliedAt || b.updatedAt).localeCompare(String(a.appliedAt || a.updatedAt))).slice(0, 15);
+  return `<div class="card card-wide"><h3 style="margin:0 0 6px">Recent activity</h3>
+    ${rows.length ? `<div class="table-scroll"><table class="data-table"><thead><tr><th>Title</th><th>Company</th><th>Status</th><th>CV used</th><th>Updated</th><th></th></tr></thead><tbody>
+    ${rows.map((j) => { const [l, c] = STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.url); return `<tr>
+      <td>${u ? `<a class="tracker-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>` : esc(j.title)}</td><td>${esc(j.company || '')}</td>
+      <td><span class="badge ${c}" title="${esc(j.reason || '')}">${esc(l)}</span></td><td class="cv-name-cell">${esc(j.cvName || '-')}</td>
+      <td>${esc(j.appliedAt || j.updatedAt ? new Date(j.appliedAt || j.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '')}</td>
+      <td class="row-actions">${docButtons(j)}</td></tr>`; }).join('')}</tbody></table></div>`
+    : '<div class="empty-state">No applications yet. Each one shows here with the CV and cover letter that were sent.</div>'}</div>`;
+}
+// Open the tailored PDF (kept on this device) in a new tab, or show the cover letter.
+async function openDoc(kind, jobId) {
+  const j = (await store.jobs()).find((x) => x.jobId === jobId); if (!j) return;
+  if (kind === 'cv') {
+    await vfsReady;
+    let bytes; try { bytes = vfs.readFileSync(j.cvPath); } catch (_) { alert('That CV is no longer on this device.'); return; }
+    window.open(URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })), '_blank');
+    return;
+  }
+  let o = $('#cl-modal');
+  if (!o) {
+    o = document.createElement('div'); o.id = 'cl-modal';
+    o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
+    o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:640px;width:100%;max-height:82vh;border-radius:12px;display:flex;flex-direction:column;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border,#e6e1d6)"><div><b>Cover letter</b><div id="cl-sub" class="muted" style="font-size:12px"></div></div><button id="cl-x" class="secondary" aria-label="Close">Close</button></div>
+      <div id="cl-body" style="padding:20px;overflow:auto;white-space:pre-wrap;line-height:1.55;font-size:14px"></div>
+      <div style="padding:12px 20px;border-top:1px solid var(--border,#e6e1d6);text-align:right"><button id="cl-copy" class="primary">Copy</button></div></div>`;
+    document.body.appendChild(o);
+    o.addEventListener('click', (e) => { if (e.target === o || e.target.id === 'cl-x') o.style.display = 'none'; });
+    o.querySelector('#cl-copy').addEventListener('click', (e) => navigator.clipboard.writeText($('#cl-body').textContent).then(() => { e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1500); }).catch(() => {}));
+  }
+  $('#cl-sub').textContent = [j.title, j.company].filter(Boolean).join(' at ');
+  $('#cl-body').textContent = j.coverLetter || '';
+  o.style.display = 'flex';
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('.view-cv-btn, .view-cl-btn'); if (!b) return;
+  openDoc(b.classList.contains('view-cv-btn') ? 'cv' : 'cl', b.dataset.id);
+});
+
 function appRow(a, i) {
   const ok = a.status === 'ready_to_submit';
   const missing = ok ? '' : String(a.reason || '').replace(/^Draft saved on Trac\.?\s*Needs you:\s*/i, '').replace(/\.$/, '');
@@ -503,12 +548,12 @@ VIEWS.tracker = async function renderTracker() {
     <div class="page-header"><h2>Tracker</h2><p>Every job your agents found, and what happened to it.</p></div>
     <div class="ext-inline" style="margin-bottom:12px">${[['all', 'All'], ['applied', 'Applied'], ['open', 'In progress'], ['skipped', 'Skipped']].map(([k, l]) => `<button class="${f === k ? 'primary' : 'secondary'} trk-f" data-f="${k}">${l}</button>`).join('')}</div>
     ${shown.length ? `<div class="card card-wide"><div class="table-scroll"><table class="data-table tracker-table">
-      <thead><tr><th>Job</th><th>Company</th><th>Site</th><th>Status</th><th>Updated</th></tr></thead>
+      <thead><tr><th>Job</th><th>Company</th><th>Site</th><th>Status</th><th>Updated</th><th></th></tr></thead>
       <tbody>${shown.slice(0, 300).map((j) => { const [l, c] = (j.status === 'applied' && STAGE[j.stage]) || STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.draftUrl || j.url); return `<tr>
         <td class="tracker-title" title="${esc(j.title)}">${u ? `<a class="tracker-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>` : esc(j.title)}</td>
         <td>${esc(j.company || '')}</td><td>${esc(SOURCE[j.source] || j.source || '')}</td>
         <td><span class="badge ${c}" title="${esc(j.reason || '')}">${esc(l)}</span></td>
-        <td>${esc(j.updatedAt ? new Date(j.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '')}</td></tr>`; }).join('')}</tbody>
+        <td>${esc(j.updatedAt ? new Date(j.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '')}</td><td class="row-actions">${docButtons(j)}</td></tr>`; }).join('')}</tbody>
     </table></div></div>` : '<div class="card"><div class="empty-state">No applications tracked yet. Jobs appear here once the agents start working.</div></div>'}`;
   $$('.trk-f').forEach((b) => b.addEventListener('click', () => { trackerFilter = b.dataset.f; renderTracker(); }));
 };
