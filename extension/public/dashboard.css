@@ -50,3 +50,6 @@ main { min-width: 0; }
   #asst-fab span { display: none; }
   .setup-pop { right: -8px; }
 }
+
+/* UC card sits above Recent activity: give it the normal card gap (.bot-card sets 0). */
+.bot-card.uc-card { margin-bottom: 18px; }
