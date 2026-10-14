@@ -77,6 +77,8 @@ const anyRunning = () => Object.values(agents).some((a) => a.running);
 // random device id plus the step name, each step sent once. Same as the app.
 const SETUP_BACKEND = 'https://api.tryjobai.com';
 async function sendStep(step) {
+  // Test builds and automated browsers (CI, screen recordings) must not count as real users.
+  if (process.env.JOBAI_TEST === '1' || navigator.webdriver) return;
   try {
     const sent = (await store.get('stepsSent')) || [];
     if (sent.includes(step)) return;
