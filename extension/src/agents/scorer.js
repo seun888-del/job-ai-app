@@ -98,8 +98,8 @@ export async function scoreJob(job, log) {
   }
 
   // Tailored CV in the app's fixed layout.
-  const paths = buildPaths('/jobai/output/saved_cvs', '/jobai/output', cfg.RESUME_FILENAME, jobTitle, job.company, score);
   const full = `${cfg.APPLICANT.firstName} ${cfg.APPLICANT.lastName}`.trim();
+  const paths = buildPaths('/jobai/output/saved_cvs', '/jobai/output', cfg.RESUME_FILENAME, jobTitle, job.company, score, full);
   const pdfOpts = full ? { overrideName: full } : {};
   let rendered = false;
   try {

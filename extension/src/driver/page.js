@@ -13,8 +13,9 @@ const b64 = (bytes) => { let s = ''; for (let i = 0; i < bytes.length; i += 0x80
 function fileSpec(f) {
   if (typeof f === 'string') {
     const bytes = fs.readFileSync(f);
-    // Tailored CVs are stored under a descriptive name; employers see "<Name> Resume.pdf", as in the app.
-    const name = /\/saved_cvs\//.test(f) ? (require('../shims/config').RESUME_FILENAME || 'Resume.pdf') : f.split('/').pop();
+    // Tailored CVs are saved as First_Last_Job_Title_CV.pdf in a per-job folder, so employers see that name.
+    // Older ones sit directly in saved_cvs under an internal name ("..._87pct_..."), which must never be sent.
+    const name = /\/saved_cvs\/[^/]+$/.test(f) ? (require('../shims/config').RESUME_FILENAME || 'Resume.pdf') : f.split('/').pop();
     return { name, type: /\.pdf$/i.test(name) ? 'application/pdf' : /\.docx$/i.test(name) ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/octet-stream', b64: b64(bytes) };
   }
   const bytes = f.buffer instanceof Uint8Array ? f.buffer : new Uint8Array(f.buffer || []);

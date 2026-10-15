@@ -475,15 +475,18 @@ function writeStructuredPDF(cv, outputPath, options = {}) {
   });
 }
 
-function buildPaths(savedDir, uploadDir, uploadFilename, jobTitle, company, score) {
-  if (!fs.existsSync(savedDir))  fs.mkdirSync(savedDir,  { recursive: true });
+const { cvFileName } = require('./cv_filename');
+
+function buildPaths(savedDir, uploadDir, uploadFilename, jobTitle, company, score, fullName) {
+  const date   = new Date().toISOString().slice(0, 10);
+  const safe   = s => String(s || '').replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').substring(0, 40);
+  const jobDir = path.join(savedDir, `${date}_${safe(company)}_${safe(jobTitle)}_${Date.now().toString(36)}`);
+  if (!fs.existsSync(jobDir))    fs.mkdirSync(jobDir,    { recursive: true });
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-  const date   = new Date().toISOString().slice(0, 10);
-  const safe   = s => s.replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '_').substring(0, 40);
-  const saved  = path.join(savedDir,  `${safe(jobTitle)}_${safe(company)}_${score}pct_${date}.pdf`);
+  const saved  = path.join(jobDir, cvFileName(fullName, jobTitle));
   const upload = path.join(uploadDir, uploadFilename);
   return { saved, upload };
 }
 
-module.exports = { writePDF, writeStructuredPDF, buildPaths };
+module.exports = { writePDF, writeStructuredPDF, buildPaths, cvFileName };

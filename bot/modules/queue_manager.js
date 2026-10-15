@@ -186,6 +186,15 @@ function withDb(fn) {
   }
 }
 
+
+// Jobs still waiting to apply may hold a CV tailored before the clean naming; give it the clean name.
+function pendingCvPath(row) {
+  if (!row.cv_path || /^(applied|skipped|failed|apply_failed|duplicate)$/.test(row.status || '')) return row.cv_path;
+  try {
+    const A = require('../config').APPLICANT || {};
+    return require('./cv_filename').uploadablePath(row.cv_path, `${A.firstName || ''} ${A.lastName || ''}`, row.title);
+  } catch (_) { return row.cv_path; }
+}
 function rowToJob(row) {
   return {
     jobId: row.job_id,
@@ -199,7 +208,7 @@ function rowToJob(row) {
     workType: row.work_type,
     cvName: row.cv_name,
     cvScore: row.cv_score,
-    cvPath: row.cv_path,
+    cvPath: pendingCvPath(row),
     coverLetter: row.cover_letter,
     error: row.error,
     retryCount: row.retry_count || 0,

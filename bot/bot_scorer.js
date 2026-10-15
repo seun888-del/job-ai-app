@@ -294,7 +294,7 @@ async function processJob(job) {
   }
 
   if (bestScore >= cfg.MIN_SCORE) {
-    const paths    = buildPaths(path.join(cfg.OUTPUT_DIR, 'saved_cvs'), cfg.OUTPUT_DIR, cfg.RESUME_FILENAME, job.title, job.company, bestScore);
+    const paths    = buildPaths(path.join(cfg.OUTPUT_DIR, 'saved_cvs'), cfg.OUTPUT_DIR, cfg.RESUME_FILENAME, job.title, job.company, bestScore, `${cfg.APPLICANT.firstName || ''} ${cfg.APPLICANT.lastName || ''}`);
     const bestCVObj = cfg.CVS.find(c => c.name === bestCvName) || cfg.CVS[0];
     const isDocx    = bestCVObj && /\.docx?$/i.test(bestCVObj.path);
 
