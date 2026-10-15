@@ -1219,7 +1219,8 @@ async function remoteStatus() {
   const SRC = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company site' };
   const recent = all.filter((j) => ['applied', 'apply_failed', 'ready', 'ready_to_submit'].includes(j.status))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 12)
-    .map((j) => ({ title: j.title || '', company: j.company || '', source: SRC[j.source] || '', status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting', at: j.appliedAt || j.updatedAt || '' }));
+    .map((j) => ({ title: j.title || '', company: j.company || '', source: SRC[j.source] || '', status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting', at: j.appliedAt || j.updatedAt || '', ...(j.status === 'apply_failed' && j.reason ? { reason: String(j.reason).slice(0, 140) } : {}) }));
+  const skipReasons = {}; for (const j of all) if (j.status === 'skipped' && j.reason) { const r = String(j.reason).replace(/\(\d+%\)|\d+%/g, '').trim().slice(0, 80); skipReasons[r] = (skipReasons[r] || 0) + 1; }
   const blocked = !licenceActive(g.license) ? (g.license.key ? 'Your Job-AI access has ended. Subscribe to keep applying.' : 'Activate Job-AI in Chrome first.')
     : !(g.cv && g.cv.text) ? 'Add your CV in Job-AI first.' : applied >= cap ? `Today's limit of ${cap} applications is reached. Agents carry on tomorrow.` : '';
   return {
@@ -1230,6 +1231,8 @@ async function remoteStatus() {
     failed: all.filter((j) => j.status === 'apply_failed').length,
     needs_you: all.filter((j) => ['ready', 'ready_to_submit', 'awaiting_review'].includes(j.status) || (j.status === 'skipped' && /^Draft saved on Trac/.test(j.reason || ''))).length,
     recent, blocked,
+    skipped: all.filter((j) => j.status === 'skipped').length,
+    skip_reasons: Object.entries(skipReasons).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([reason, count]) => ({ reason, count })),
   };
 }
 const REMOTE_SITE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', ats: 'Company site' };
