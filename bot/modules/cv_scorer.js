@@ -12,6 +12,7 @@
 // and (b) stops the addendum dumping keywords the CV already covers in other words.
 
 const { llmChat } = require('../../src/services/llm');
+const { focusJD } = require('./jd_focus');
 
 // ── Term presence: word-boundary-safe contains ───────────────────────────────
 // Short all-letter terms (likely acronyms) must match on a word boundary so
@@ -83,7 +84,7 @@ Example:
 [{"term":"Active Directory","essential":true,"alts":["AD","Entra ID","Azure AD"]},{"term":"user acceptance testing","essential":false,"alts":["UAT"]},{"term":"ITIL","essential":true,"alts":["IT service management","ITSM"]}]
 
 JOB DESCRIPTION:
-${jdText.substring(0, 3000)}`;
+${focusJD(jdText, 3000)}`;
 
   const response = await llmChat(prompt);
 

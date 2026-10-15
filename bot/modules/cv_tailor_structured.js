@@ -23,6 +23,7 @@
  */
 
 const { llmAvailable, llmChat } = require('../../src/services/llm');
+const { focusJD } = require('./jd_focus');
 
 // Bullets per role by recency, so the CV stays easy to skim: latest job 5, the one before 4,
 // the next 3, older jobs 2. The bullets kept are the ones that best match the advert, and
@@ -60,7 +61,7 @@ Return ONE short headline (3 to 7 words) that mirrors the job title above, optio
 // a recruiter. Truthful: the same anti-fabrication verifier (see below) rejects
 // any summary that introduces a tool/number/cert the CV doesn't already support,
 // falling back to the original. Kept to a single paragraph for the layout.
-async function tailorProfile(profile, jobTitle, jdExcerpt, corpus) {
+async function tailorProfile(profile, jobTitle, jdExcerpt, corpus, kwLine = '') {
   if (!profile || profile.trim().length < 30) return profile;
   const prompt = `You are rewriting the professional summary at the top of a candidate's CV so it speaks directly to a specific job and reads naturally to a recruiter. Summarise ONLY what the CV already demonstrates — never inflate.
 
@@ -71,7 +72,7 @@ ${jdExcerpt}
 
 CURRENT SUMMARY:
 ${profile}
-
+${kwLine}
 Rewrite the summary so that:
 - It positions the candidate for THIS role, mirroring key terms from the job advert wherever they are genuinely true of them.
 - It foregrounds their most relevant real strengths and experience.
@@ -229,7 +230,7 @@ function pickBullets(bullets, jdText, roleIndex) {
     .sort((a, z) => z.s - a.s || a.i - z.i).slice(0, bulletCap(roleIndex)).map(r => r.b);
 }
 
-async function selectAndRewordBullets(role, jdExcerpt, roleIndex = 0) {
+async function selectAndRewordBullets(role, jdExcerpt, roleIndex = 0, kw = {}) {
   const bullets = role.bullets || [];
   if (!bullets.length) return bullets;
 
@@ -244,7 +245,9 @@ async function selectAndRewordBullets(role, jdExcerpt, roleIndex = 0) {
   const ordered = ranked.map(r => r.b).slice(0, bulletCap(roleIndex));
 
   const indexed   = ordered.map((b, i) => `[${i + 1}] ${b}`).join('\n');
-  const originals = bullets.join('  ');   // corpus for the anti-fabrication check
+  // Corpus for the anti-fabrication check. The advert's own wording for skills the CV
+  // already shows (e.g. "Active Directory" where the CV says "AD") counts as truthful.
+  const originals = bullets.join('  ') + (kw.corpus ? '  ' + kw.corpus : '');
 
   const prompt = `You are rewriting CV bullet points so they read naturally and persuasively to a HUMAN recruiter for a specific job — not just to pass keyword filters. Make them genuinely strong, but stay 100% truthful to what the candidate actually did. Recruiters skim in seconds, so every bullet must be short, punchy and easy to scan — never a dense wall of text.
 
@@ -254,7 +257,7 @@ ${jdExcerpt}
 ROLE: ${role.title} at ${role.company}
 ORIGINAL BULLETS:
 ${indexed}
-
+${kw.line || ''}
 Task:
 1. The ORIGINAL BULLETS are already pre-ordered with the most job-relevant first. Rewrite EVERY one of them: return exactly ${ordered.length} bullets, in the same order, one rewritten bullet for each original. Never drop or merge bullets: they are the candidate's real experience.
 2. Rewrite each bullet using this shape wherever the source supports it:
@@ -393,7 +396,9 @@ function weaveKeywordsIntoSkills(skills, missingKeywords, cvFullText) {
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
-async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFullText = '') {
+// opts.matchedKeywords: the advert's keywords this CV already covers ({term, essential, alts}),
+// from cv_scorer. The rewrites use their exact wording so the CV matches the advert's phrasing.
+async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFullText = '', opts = {}) {
   // Deep-ish clone so we never mutate the caller's base object
   const out = {
     name: cv.name,
@@ -411,7 +416,13 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
     return out;
   }
 
-  const jd = (jdText || '').substring(0, 3000);
+  const jd = focusJD(jdText, 3000);
+  const matched = (opts.matchedKeywords || []).filter((k) => k && k.term)
+    .sort((a, z) => (z.essential ? 1 : 0) - (a.essential ? 1 : 0)).slice(0, 12);
+  const kw = matched.length ? {
+    line: `\nTERMS FROM THE ADVERT THAT THE CANDIDATE GENUINELY HAS (most important first). Wherever the original text means the same thing, use these exact phrases so the CV matches the advert's wording:\n${matched.map((k) => k.term).join(', ')}\n`,
+    corpus: matched.map((k) => [k.term, ...(k.alts || [])].join(' ')).join('  '),
+  } : {};
 
   // 1. Subtitle
   out.subtitle = await tailorSubtitle(cv.subtitle, jobTitle, jd);
@@ -425,14 +436,15 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
     ...out.experience.flatMap(j => [j.title, j.company, ...(j.bullets || [])]),
     ...out.skills.map(s => `${s.label || ''} ${s.items || ''}`),
     cv.subtitle || '',
+    kw.corpus || '',
   ].join('  ');
-  out.profile = await tailorProfile(cv.profile, jobTitle, jd, corpus);
+  out.profile = await tailorProfile(cv.profile, jobTitle, jd, corpus, kw.line || '');
   console.log(`  [Tailor] Summary ${out.profile === cv.profile ? 'kept original' : 'rewritten to JD'}`);
 
   // 2. Bullets — select most relevant per role AND lightly reword to the JD,
   //    rejecting any rewrite that introduces a new fact (sequential = rate-limit safe)
   for (const [i, role] of out.experience.entries()) {
-    role.bullets = await selectAndRewordBullets(role, jd, i);
+    role.bullets = await selectAndRewordBullets(role, jd, i, kw);
   }
   console.log(`  [Tailor] Bullets selected + lightly reworded for ${out.experience.length} role(s)`);
 
@@ -444,4 +456,13 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
   return out;
 }
 
-module.exports = { tailorStructured, _test: { introducesNewFacts, isWeavable, significantTokens, originalIndex, midSentenceNames, hasPhrase, CLAIM_PHRASES } };
+// Plain text of a tailored CV object, so it can be scored exactly as the employer will read it.
+function structuredText(t) {
+  return [t.subtitle, t.profile,
+    ...(t.experience || []).flatMap((j) => [j.title, j.company, ...(j.bullets || [])]),
+    ...(t.skills || []).map((s) => `${s.label || ''} ${s.items || ''}`),
+    ...(t.education || []).map((e) => Object.values(e || {}).filter((v) => typeof v === 'string').join(' ')),
+  ].filter(Boolean).join('\n');
+}
+
+module.exports = { tailorStructured, structuredText, _test: { introducesNewFacts, isWeavable, significantTokens, originalIndex, midSentenceNames, hasPhrase, CLAIM_PHRASES } };

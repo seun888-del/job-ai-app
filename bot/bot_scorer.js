@@ -24,7 +24,7 @@ const { convertDocxToPdf }            = require('./modules/cv_converter');
 const { tailorCV, weaveKeywords }     = require('./modules/cv_tailor');
 const { lightTailorDocx }             = require('./modules/cv_light_tailor');
 const { parseCV }                     = require('./modules/cv_parser');
-const { tailorStructured }            = require('./modules/cv_tailor_structured');
+const { tailorStructured, structuredText } = require('./modules/cv_tailor_structured');
 const { generateCoverLetter, generateSupportingStatement } = require('./modules/cover_letter');
 const { isRelevantRole }              = require('./modules/relevance_gate');
 const { llmAvailable, mode: llmMode } = require('../src/services/llm');
@@ -144,7 +144,7 @@ async function scoreWithBoost(cv, jdText) {
   // 0 — is a hard skip with no addendum rescue.
   if (score < QUICK_FAIL_THRESHOLD) {
     console.log(`  [Scorer Agent] ${score}% below quick-fail threshold — skipping this CV (no addendum)`);
-    return { score, cvText: cleanedText, rawCvText: cleanedText, missingKeywords };
+    return { score, cvText: cleanedText, rawCvText: cleanedText, missingKeywords, allKeywords };
   }
 
   // Addendum: append missing keywords at the bottom for ATS (no rewriting of CV body)
@@ -157,7 +157,7 @@ async function scoreWithBoost(cv, jdText) {
     console.log(`  [Scorer Agent] After addendum: ${score}%`);
   }
 
-  return { score, cvText, rawCvText: cleanedText, missingKeywords: missingKeywords || [] };
+  return { score, cvText, rawCvText: cleanedText, missingKeywords: missingKeywords || [], allKeywords: allKeywords || [] };
 }
 
 async function processJob(job) {
@@ -211,13 +211,14 @@ async function processJob(job) {
 
   // NHS jobs are judged on essential-criteria evidence (below), so skip the keyword score's AI
   // call: the AI account has a per-minute limit shared by every user.
-  let { score, cvText: boostedText, rawCvText, missingKeywords } = job.source === 'trac'
+  let { score, cvText: boostedText, rawCvText, missingKeywords, allKeywords } = job.source === 'trac'
     ? await (async () => { const t = cleanText(await cvSelector.extractCVText(bestCV.path)); return { score: 0, cvText: t, rawCvText: t, missingKeywords: [] }; })()
     : await scoreWithBoost(bestCV, job.description);
   let bestScore        = score;
   let bestCvText       = boostedText;
   let bestRawCvText    = rawCvText;
   let bestMissing      = missingKeywords;
+  let bestAllKeywords  = allKeywords || [];
   let bestCvName       = bestCV.name;
 
   // If the primary CV didn't reach target, try the others in keyword-score order
@@ -237,6 +238,7 @@ async function processJob(job) {
         bestCvText    = result.cvText;
         bestRawCvText = result.rawCvText;
         bestMissing   = result.missingKeywords;
+        bestAllKeywords = result.allKeywords || [];
         bestCvName    = altCV.name;
       }
 
@@ -316,8 +318,10 @@ async function processJob(job) {
       if (!baseStruct.experience.length || _bulletCount === 0) {
         throw new Error('parser found no work experience — using full-text fallback');
       }
+      const missingSet = new Set((bestMissing || []).map((k) => String(k).toLowerCase()));
       const tailoredStruct = await tailorStructured(
-        baseStruct, jobTitle, job.description, bestMissing, bestRawCvText
+        baseStruct, jobTitle, job.description, bestMissing, bestRawCvText,
+        { matchedKeywords: bestAllKeywords.filter((k) => k && k.term && !missingSet.has(String(k.term).toLowerCase())) }
       );
 
       // Header hardening. PDF text extraction can corrupt the header (mangled
@@ -351,6 +355,11 @@ async function processJob(job) {
       await writeStructuredPDF(tailoredStruct, paths.upload, pdfOpts);
       console.log(`  [Scorer Agent] ✓ Tailored CV rendered (reference layout): ${paths.saved}`);
       rendered = true;
+      // The match shown to the user is the CV that is actually sent, not the scoring addendum.
+      if (bestAllKeywords.length) {
+        bestScore = cvScorer.rescoreCV(structuredText(tailoredStruct), bestAllKeywords).score;
+        console.log(`  [Scorer Agent] Tailored CV matches ${bestScore}% of the advert's keywords`);
+      }
     } catch (err) {
       console.warn(`  [Scorer Agent] Structured tailoring failed (${err.message}) — falling back`);
     }
@@ -399,7 +408,7 @@ async function processJob(job) {
       // "awaiting_review". No apply agent touches it until the user approves.
       let coverLetter = null;
       try {
-        coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, bestCvText);
+        coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, bestRawCvText || bestCvText);
       } catch (err) {
         console.warn(`  [Scorer Agent] Cover letter failed: ${err.message}`);
       }
@@ -423,7 +432,7 @@ async function processJob(job) {
     });
 
     // Generate cover letter in background — updates queue when done
-    generateCoverLetter(jobTitle, job.company, job.description, bestCvText)
+    generateCoverLetter(jobTitle, job.company, job.description, bestRawCvText || bestCvText)
       .then(coverLetter => {
         if (coverLetter) {
           queue.update(job.jobId, { coverLetter });

@@ -1,4 +1,5 @@
 const { llmAvailable, llmChat } = require('../../src/services/llm');
+const { focusJD } = require('./jd_focus');
 const cfg = require('../config');
 
 const AVAILABILITY_LABEL = {
@@ -21,8 +22,9 @@ async function generateCoverLetter(jobTitle, company, jobDescription, cvText) {
     ? `\nNOTICE PERIOD: ${AVAILABILITY_LABEL[availability]}`
     : '';
 
-  const jdExcerpt = (jobDescription || '').substring(0, 2500);
-  const cvExcerpt = (cvText || '').substring(0, 2000);
+  const jdExcerpt = focusJD(jobDescription, 2500);
+  // The candidate's own CV text (never the keyword addendum), so the letter only claims real skills.
+  const cvExcerpt = (cvText || '').substring(0, 3500);
 
   const prompt = `Write a short, targeted cover letter that reads like it was written specifically for this job — not templated.
 

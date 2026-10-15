@@ -8,7 +8,7 @@ import * as store from '../lib/store.js';
 const cvScorer = require('../../../bot/modules/cv_scorer');
 const { cleanText } = require('../../../bot/modules/cv_cleaner');
 const { parseCV } = require('../../../bot/modules/cv_parser');
-const { tailorStructured } = require('../../../bot/modules/cv_tailor_structured');
+const { tailorStructured, structuredText } = require('../../../bot/modules/cv_tailor_structured');
 const { writePDF, writeStructuredPDF, buildPaths } = require('../../../bot/modules/cv_pdf_writer');
 const { generateCoverLetter } = require('../../../bot/modules/cover_letter');
 const { isRelevantRole } = require('../../../bot/modules/relevance_gate');
@@ -84,7 +84,7 @@ export async function scoreJob(job, log) {
     catch (e) { log('Scoring failed (' + e.message + '), will retry later.'); await store.updateJob(job.jobId, { status: 'pending' }); return; }
     let score = r.score, text = raw;
     if (score >= QUICK_FAIL && score < BOOST_TARGET && (r.missingKeywords || []).length) { text = boostCVText(raw, r.missingKeywords); score = cvScorer.rescoreCV(text, r.allKeywords).score; }
-    if (!best || score > best.score) best = { cv: c, raw, cvText: text, score, missing: r.missingKeywords || [] };
+    if (!best || score > best.score) best = { cv: c, raw, cvText: text, score, missing: r.missingKeywords || [], all: r.allKeywords || [] };
   }
   const cv = best.cv, raw = best.raw, cvText0 = best.cvText, missing = best.missing;
   let score = best.score, cvText = cvText0;
@@ -106,7 +106,9 @@ export async function scoreJob(job, log) {
     const base = parseCV(raw, pdfOpts);
     const bullets = (base.experience || []).reduce((n, r) => n + (r.bullets ? r.bullets.length : 0), 0);
     if (!base.experience.length || !bullets) throw new Error('no work experience parsed');
-    const t = await tailorStructured(base, jobTitle, job.description, missing, raw);
+    const missingSet = new Set(missing.map((k) => String(k).toLowerCase()));
+    const matchedKeywords = best.all.filter((k) => k && k.term && !missingSet.has(String(k.term).toLowerCase()));
+    const t = await tailorStructured(base, jobTitle, job.description, missing, raw, { matchedKeywords });
     const A = cfg.APPLICANT;
     const contact = [A.location, A.phone, A.email].map((s) => String(s || '').trim()).filter(Boolean).join('   |   ');
     if (contact) t.contact = contact;
@@ -115,6 +117,8 @@ export async function scoreJob(job, log) {
     if (t.profile) t.profile = String(t.profile).replace(/\bsummary\b[\s™®]*\bwork experience\b/gi, ' ').replace(/[™®]/g, '').replace(/\s{2,}/g, ' ').trim();
     await writeStructuredPDF(t, paths.saved, pdfOpts);
     rendered = true;
+    // Show the match of the CV that is actually sent, not the scoring addendum.
+    if (best.all.length) score = cvScorer.rescoreCV(structuredText(t), best.all).score;
   } catch (e) { log('Structured CV failed (' + e.message + '), using the full-text layout.'); }
   if (!rendered) {
     try { await writePDF(cvText, paths.saved, pdfOpts); }
@@ -122,7 +126,7 @@ export async function scoreJob(job, log) {
   }
 
   let coverLetter = null;
-  try { coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, cvText); } catch (_) {}
+  try { coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, raw); } catch (_) {}
   // "Review before applying" (Search preferences): hold it for the user, as the app does.
   const review = !!((await store.get('settings')) || {}).reviewBeforeApply;
   await store.updateJob(job.jobId, { status: review ? 'awaiting_review' : 'cv_ready', cvPath: paths.saved, cvScore: score, cvName: cv.label || cv.name, ...(coverLetter ? { coverLetter } : {}) });
