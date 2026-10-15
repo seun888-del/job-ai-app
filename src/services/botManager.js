@@ -115,6 +115,9 @@ function start(botName, userDataPath, opts = {}) {
     env.JOBBOT_CDP_PORT = String(opts.cdpPort);
   }
 
+  // Started by the user pressing Start: a site that isn't signed in opens its login page and waits.
+  if (opts.loginPrompt) env.JOBBOT_LOGIN_PROMPT = '1';
+
   // Reed API key for direct API job search (Phase 1 without browser)
   if (opts.reedApiKey) {
     env.REED_API_KEY = opts.reedApiKey;

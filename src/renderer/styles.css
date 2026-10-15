@@ -414,6 +414,9 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 .agent-run-state { font-size: 12px; font-weight: 600; margin: 0 0 14px; letter-spacing: 0.01em; }
 .agent-run-state.on { color: var(--primary); }
 .agent-run-state.off { color: var(--text-faint); }
+.agent-signin { font-size: 12px; color: var(--text-muted); margin: -8px 0 12px; }
+.agent-signin.ok { color: var(--success, #16a34a); }
+.agent-signin.needed { color: var(--danger, #dc2626); font-weight: 600; }
 
 .bot-status {
   font-size: 11px;

@@ -5,6 +5,7 @@ const stealth = require('./stealth');
 const captcha = require('./captcha_solver');
 const ai      = require('./question_ai'); // LLM fallback for unknown screening questions
 const cvValidate = require('./cv_validate'); // reject corrupt/empty CVs before attaching
+const { promptLogin } = require('./login_prompt'); // sign-in window when the user presses Start
 
 const SSDIR = cfg.SCREENSHOTS_DIR;
 const DELAY = (ms) => new Promise(r => setTimeout(r, ms));
@@ -1404,15 +1405,17 @@ async function dismissModal(page) {
   } catch (_) {}
 }
 
+// Signed in = LinkedIn kept us on a member page. Logged out, /feed/ redirects to the login
+// page or the guest home, whose text also says "Jobs", so the URL is the reliable signal.
+const linkedInSignedIn = (pg) => pg.evaluate(() => !/\/(login|checkpoint|uas|authwall|signup)/i.test(location.pathname) &&
+  location.pathname !== '/' && (/^\/feed/.test(location.pathname) || !!document.querySelector('[class*="global-nav"], [class*="feed-identity"]')));
+
 async function ensureLoggedIn(page) {
   await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await DELAY(2000);
-  const isLoggedIn = await page.evaluate(() => {
-    const t = (document.body?.innerText || '').toLowerCase();
-    return t.includes('home') || t.includes('my network') || t.includes('jobs') ||
-           !!document.querySelector('[class*="global-nav"], [class*="feed-identity"]');
-  }).catch(() => false);
-  if (!isLoggedIn) throw new Error('LinkedIn: not logged in. Click "Connect account" on the LinkedIn bot card first.');
+  if (!(await linkedInSignedIn(page).catch(() => false))) {
+    await promptLogin(page, { site: 'LinkedIn', loginUrl: 'https://www.linkedin.com/login', isSignedIn: linkedInSignedIn });
+  }
   console.log('  [LinkedIn] Session active');
 }
 

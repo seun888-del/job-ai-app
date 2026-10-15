@@ -7,6 +7,7 @@ const queue     = require('./queue_manager');
 const atsFiller = require('./ats_filler');
 const ai        = require('./question_ai'); // LLM fallback for unknown screening questions
 const cvValidate = require('./cv_validate'); // reject corrupt/empty CVs before attaching
+const { promptLogin } = require('./login_prompt'); // sign-in window when the user presses Start
 
 const SSDIR        = cfg.SCREENSHOTS_DIR;
 const SESSION_FILE = cfg.SESSION_FILE;
@@ -106,6 +107,13 @@ async function login(browser, email, password) {
   return page;
 }
 
+// Signed out, every Reed page carries a "Sign in" link to /account/signin; the old check
+// looked for any /account link, which signed-out pages also have ("Saved jobs").
+const reedSignedIn = (pg) => pg.evaluate(() => location.hostname === 'www.reed.co.uk' &&
+  !/login|signin|authentication/i.test(location.pathname) &&
+  !document.querySelector('a[href*="/account/signin" i], a[href*="secure.reed.co.uk/login" i]') &&
+  !!document.body && document.body.innerText.length > 200);
+
 // ── ENSURE LOGGED IN ──────────────────────────────────────────────────────
 async function ensureLoggedIn(page) {
   await page.goto('https://www.reed.co.uk', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -124,12 +132,9 @@ async function ensureLoggedIn(page) {
     await DELAY(2000);
   }
 
-  const isLoggedIn = await page.evaluate(() => {
-    const t = (document.body?.innerText || '').toLowerCase();
-    return t.includes('my reed') || t.includes('sign out') || t.includes('log out') ||
-           !!document.querySelector('[href*="/my-reed"], [href*="/account"]');
-  }).catch(() => false);
-  if (!isLoggedIn) throw new Error('Reed: not logged in. Click "Connect account" on the Reed bot card first.');
+  if (!(await reedSignedIn(page).catch(() => false))) {
+    await promptLogin(page, { site: 'Reed', loginUrl: 'https://secure.reed.co.uk/login', isSignedIn: reedSignedIn });
+  }
   console.log('  [Reed] Session active');
 }
 

@@ -104,6 +104,7 @@ contextBridge.exposeInMainWorld('api', {
     connect: (site, loginUrl) => ipcRenderer.invoke('site:connect', { site, loginUrl }),
     // Which sites have a saved login session (profile folder) on this device
     connectedStatus: () => ipcRenderer.invoke('site:connectedStatus'),
+    signInStates: () => ipcRenderer.invoke('site:signInStates'),
   },
   onUpdateAvailable: (callback) => {
     ipcRenderer.on('update:available', (_e, version) => callback(version));

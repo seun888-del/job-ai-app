@@ -83,6 +83,10 @@ async function launchPersistentContext(profileDir, extraOpts = {}) {
   const sharedOpts = {
     headless: false,
     args: [...BASE_ARGS, ...minimizeArgs],
+    // Playwright's --enable-automation also switches off Chrome's password manager, so the
+    // agent window could neither save nor fill a login. Without it Chrome offers "Save password?"
+    // when the user signs in and fills it in if the site ever signs them out.
+    ignoreDefaultArgs: ['--enable-automation'],
     viewport: { width: 1366, height: 768 },
     ...buildProxyOpts(),
     ...extraOpts,

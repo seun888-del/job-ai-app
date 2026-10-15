@@ -768,14 +768,15 @@ async function agentAccessAllowed() {
 
 // ── Bot manager ──────────────────────────────────────────────────────────
 ipcMain.handle('bot:start', async (event, botName) => {
-  const r = await startBotGated(botName); // throws if the licence gate refuses
+  const r = await startBotGated(botName, { loginPrompt: true }); // throws if the licence gate refuses
   sendStep('agents_started');
   return r;
 });
 
 // Start an agent exactly as the "Start applying" button does (licence gate included).
 // Shared by the button and by JOBBOT_AUTOSTART (unattended runs).
-async function startBotGated(botName) {
+// loginPrompt: someone is at the computer, so a signed-out site may ask them to sign in.
+async function startBotGated(botName, { loginPrompt = false } = {}) {
   // Gate: no agent may run without a currently-valid trial or subscription.
   const access = await agentAccessAllowed();
   if (!access.ok) {
@@ -791,7 +792,7 @@ async function startBotGated(botName) {
   if (cdpPort) {
     // Chrome is still running from "Connect account" — attach the bot to it
     // directly via CDP. No kill, no relaunch, same session.
-    return botManager.start(botName, userData, { cdpPort });
+    return botManager.start(botName, userData, { cdpPort, loginPrompt });
   }
 
   // Chrome was already closed — open fresh with the saved profile
@@ -799,7 +800,7 @@ async function startBotGated(botName) {
   for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
     try { fs.unlinkSync(path.join(profileDir, f)); } catch (_) {}
   }
-  return botManager.start(botName, userData, {});
+  return botManager.start(botName, userData, { loginPrompt });
 }
 ipcMain.handle('bot:stop', (event, botName) => botManager.stop(botName));
 
@@ -1258,6 +1259,7 @@ function connectedSitesStatus() {
   return status;
 }
 ipcMain.handle('site:connectedStatus', () => { checkSetupSteps(); return connectedSitesStatus(); });
+ipcMain.handle('site:signInStates', () => { try { return queueReader.getSignInStates(); } catch (_) { return {}; } });
 
 // In-app support assistant. Sends the user's question plus a PII-light snapshot
 // of their local agent state to the licensed backend, which answers using its

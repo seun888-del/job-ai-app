@@ -381,6 +381,20 @@ async function approveTracSubmit(jobId) {
   }
 }
 
+// Last sign-in result per site, as the agents record it: { reed: 'ok' | 'dead' | 'checking' }.
+function getSignInStates() {
+  return withQueueDb(db => {
+    const out = {};
+    try {
+      for (const r of all(db, "SELECT key, value FROM meta WHERE key LIKE 'sess:%'")) {
+        const v = String(r.value || ''); const i = v.lastIndexOf(':');
+        out[String(r.key).slice(5)] = i < 0 ? v : v.slice(0, i);
+      }
+    } catch (_) {}
+    return out;
+  }, {});
+}
+
 // Accounts the user must sign in to again: the newest such skip per site, from the last 3 days.
 function getReconnectNeeded() {
   return withQueueDb(db => {
@@ -392,4 +406,4 @@ function getReconnectNeeded() {
   }, []);
 }
 
-module.exports = { init, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };
+module.exports = { init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };

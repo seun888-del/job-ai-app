@@ -485,7 +485,7 @@ async function renderLogin() {
 
     <div class="card">
       <h3>LinkedIn</h3>
-      <p style="font-size:13px;color:#64748b;margin:0 0 12px">LinkedIn uses a persistent browser session instead of a stored password. Use the <strong>Connect account</strong> button on the Dashboard. Log in once and the session is saved automatically.</p>
+      <p style="font-size:13px;color:#64748b;margin:0 0 12px">LinkedIn uses your browser session, not a stored password. Press <strong>Start applying</strong> on the Dashboard and sign in when LinkedIn opens. You stay signed in after that.</p>
       <button class="secondary" id="go-dashboard-li">Go to Dashboard →</button>
     </div>
   `;
@@ -1267,8 +1267,8 @@ function showBrowserNotice() {
       <div class="notice-box">
         <div class="notice-icon">🤖</div>
         <h3>The Agents drive their own browser</h3>
-        <p>When you start, a Chrome window opens for each connected job site and the Agent works inside it automatically, searching, tailoring your CV, and applying.</p>
-        <div class="notice-warn">⚠️ Please leave those windows alone. Do not click, type in, or close them. They are the Agent working, not your browser. Just minimise them and carry on. Closing a window stops that Agent.</div>
+        <p>When you start, a Chrome window opens for each job site and the Agent works inside it automatically, searching, tailoring your CV, and applying.</p>
+        <div class="notice-warn">⚠️ If a site asks you to sign in, sign in in that window. Otherwise please leave those windows alone. Do not click, type in, or close them. They are the Agent working, not your browser. Just minimise them and carry on. Closing a window stops that Agent.</div>
         <button class="primary" id="notice-ok">Got it, start applying</button>
       </div>`;
     document.body.appendChild(overlay);
@@ -1399,9 +1399,7 @@ function buildGetStartedCard(profile, cvs, anyConnected, anyRunning) {
           ${cvDone ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link cv-fill-btn">Upload CV →</button>'}</li>
         <li>${mark(profileDone, 2)}<span>Check your details</span>
           ${profileDone ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="personal">Check details →</button>'}</li>
-        <li>${mark(anyConnected, 3)}<span>Connect your job sites. Click <strong>Connect account</strong> on a card below and log in once</span>
-          ${anyConnected ? '<em class="gs-ok">Done</em>' : ''}</li>
-        <li><span id="gs-mark-4">${mark(anyRunning, 4)}</span><span>Click <strong>Start applying</strong>. The AI scores jobs, tailors your CV and applies for you automatically</span>
+        <li><span id="gs-mark-4">${mark(anyRunning, 3)}</span><span>Click <strong>Start applying</strong>. Sign in to each job site the first time its window opens</span>
           <em class="gs-ok" id="gs-done-4" style="${anyRunning ? '' : 'display:none'}">Applying…</em></li>
       </ol>
     </div>`;
@@ -1820,6 +1818,7 @@ async function renderDashboard() {
     window.api.queue.ucPending().catch(() => 0),
     window.api.searchTerms.get().catch(() => []),
   ]);
+  const signIn = await window.api.site.signInStates().catch(() => ({}));
   // Completion flags for the "Set up your details" quick-access card.
   const setupDone = {
     personal: !!(profile && profile.first_name && profile.last_name && profile.email),
@@ -1854,6 +1853,16 @@ async function renderDashboard() {
     </label>`;
   }
 
+  // Sign-in happens when Start is pressed, so the card only reports it.
+  function signInLine(key) {
+    if (!CONNECT_URLS[key]) return '';
+    const st = signIn[key];
+    if (key === 'trac' && !st) return ''; // Trac always waits for sign-in in its own window
+    if (st === 'ok') return `<div class="agent-signin ok">✓ Signed in to ${CRED_SITE_NAMES[key]}</div>`;
+    if (st === 'dead') return `<div class="agent-signin needed">Sign in needed. Press Start applying and sign in when ${CRED_SITE_NAMES[key]} opens.</div>`;
+    return `<div class="agent-signin">You'll sign in to ${CRED_SITE_NAMES[key]} when you press Start applying.</div>`;
+  }
+
   function buildBotCard(key, label) {
     const needsCreds = CREDS_NEEDED.has(key);
     const isConnected = !needsCreds || !!dashCreds[key]?.username;
@@ -1885,9 +1894,9 @@ async function renderDashboard() {
         </div>
         <div class="agent-run-state ${isEnabled ? 'on' : 'off'}" id="run-state-${key}">${isEnabled ? '✓ Included, runs when you press Start applying' : '○ Unticked, this site will be skipped'}</div>
         ${key === 'trac' ? tracSubmitToggleHtml() : ''}
+        ${signInLine(key)}
         <div class="bot-card-actions">
           ${needsCreds ? `<button class="btn-connect" data-bot="${key}" data-action="connect">Connect account</button>` : ''}
-          ${!needsCreds && CONNECT_URLS[key] ? `<button class="btn-connect" data-bot="${key}" data-action="connect-session">Connect account</button>` : ''}
           ${CHROME_SESSION_BOTS.has(key) ? `<button class="btn-connect" data-bot="${key}" data-action="import-chrome" title="Copy your real Chrome session into the bot profile, bypasses Cloudflare verification">Use my Chrome →</button>` : ''}
         </div>
       </div>`;
@@ -3166,9 +3175,9 @@ const TOUR_STEPS = [
   },
   {
     view: 'dashboard',
-    title: 'Step 5: Connect your job site accounts',
-    tip: 'On the Dashboard, each job site such as Reed or LinkedIn has a "Connect account" button. Click it and a browser window opens. Log in as you normally would. Your session is saved so the Agent can apply on your behalf without ever seeing your password.',
-    action: 'Click "Connect account" on a job site card, log in, then close the browser window. You only need one connected to begin. If you later change your password or log out on that job site, click "Connect account" again to reconnect, otherwise the Agent can no longer log in and will stop working for that site.',
+    title: 'Step 5: Sign in when you start',
+    tip: 'When you press Start applying, any job site you are not signed in to opens its login page. Sign in as you normally would. You stay signed in, and Job-AI never sees your password.',
+    action: 'Press Start applying and sign in to each site when its window opens. If a site signs you out later, you are asked again the next time you press Start.',
   },
   {
     view: 'dashboard',
@@ -3221,10 +3230,10 @@ function tourNavigateTo(view) {
 
 // After a phone setup the pages are already filled in, so this tour is about using Job-AI.
 const USE_TOUR = (nhs) => [
-  { view: 'dashboard', title: 'Sign in to your job sites', tip: 'Your agents apply through your own Reed and LinkedIn accounts. This is the one thing to do on this computer: sign in once and you stay signed in. Job-AI never sees your password.', action: 'Click "Connect account" on the Reed and LinkedIn cards, sign in in the window that opens, then close it. The company sites agent needs no sign in.' },
+  { view: 'dashboard', title: 'Sign in to your job sites', tip: 'Your agents apply through your own Reed and LinkedIn accounts. This is the one thing to do on this computer: sign in once and you stay signed in. Job-AI never sees your password.', action: 'Press Start applying. When Reed or LinkedIn opens, sign in there and the agent carries on. The company sites agent needs no sign in.' },
   { view: 'dashboard', title: 'Choose your agents and start', tip: 'Tick the agents you want, then press Start applying. They find jobs, tailor your CV to each one and apply, in the background.', action: 'Keep Job-AI open while they work. You can minimise it.' },
   { view: 'tracker', title: 'See every application', tip: 'The Tracker lists every job your agents applied to. Set the stage as you hear back: phone screen, interview, offer.', action: 'Anything that needs you shows on the Dashboard.' },
-  ...(nhs ? [{ view: 'trac-details', title: 'NHS jobs', tip: 'NHS applications go through Trac. We filled in your jobs and qualifications from your CV. Trac forms also ask for your address, referees and a few declarations.', action: 'Check this page, add anything missing and click Save. Then click "Connect account" on the NHS card to sign in to Trac. Finished forms wait as "Ready to submit" unless you turn on Submit for me.' }] : []),
+  ...(nhs ? [{ view: 'trac-details', title: 'NHS jobs', tip: 'NHS applications go through Trac. We filled in your jobs and qualifications from your CV. Trac forms also ask for your address, referees and a few declarations.', action: 'Check this page, add anything missing and click Save. When you press Start applying, sign in to Trac in the window that opens. Finished forms wait as "Ready to submit" unless you turn on Submit for me.' }] : []),
   { view: 'dashboard', title: 'Control it from your phone', tip: 'Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.', action: 'On iPhone, add it to your Home Screen to get notifications. Keep this computer on while the agents work: "Keep awake while agents run" is on the Dashboard.' },
 ];
 function startTour(useSteps) {
@@ -3407,15 +3416,15 @@ function renderHelp() {
   const faqs = [
     {
       q: 'How do I get started?',
-      a: 'Open the Setup menu (top right) and complete the 4 pages: Personal Details, CVs, Search Preferences, and License. Then go to the Dashboard, click “Connect account” on a job site card and log in once, and click “Start applying”. The “How to start applying” checklist on the Dashboard walks you through anything still missing.'
+      a: 'Open the Setup menu (top right) and complete the 4 pages: Personal Details, CVs, Search Preferences, and License. Then go to the Dashboard and click “Start applying”. Sign in to each job site the first time its window opens. The “How to start applying” checklist on the Dashboard walks you through anything still missing.'
     },
     {
       q: 'Which job sites does Job-AI use?',
       a: 'Job-AI applies through Reed.co.uk and LinkedIn. Each has its own Agent card on the Dashboard. Connect the account(s) you want and Job-AI searches and applies on your behalf.'
     },
     {
-      q: 'How do I connect my job site accounts?',
-      a: 'On the Dashboard, each Agent card has a “Connect account” button. Click it and a regular browser window opens on that site\'s login page. Log in as you normally would. Your session is saved locally so the Agent can apply on your behalf. You only need to do this once per site. Reconnect whenever your session expires, or when you change your password or log out on that job site, otherwise the Agent can no longer log in.'
+      q: 'How do I sign in to my job sites?',
+      a: 'Press “Start applying”. Any site you are not signed in to opens its login page in the agent window. Sign in as you normally would and the Agent carries on. Your session is saved on this computer, so you only do this once per site. If a site signs you out later, you are asked again the next time you press Start.'
     },
     {
       q: 'What are the Agents and what do they do?',
@@ -3427,7 +3436,7 @@ function renderHelp() {
     },
     {
       q: 'The Agent says “not logged in”. What do I do?',
-      a: 'Your session for that site has expired. Click the “Connect account” button on that Agent\'s card on the Dashboard, log in again in the browser that opens, then click “Start applying”.'
+      a: 'Your session for that site has expired. Press “Start applying” on this computer and sign in when the site opens.'
     },
     {
       q: 'How do I add more CVs?',
@@ -3447,7 +3456,7 @@ function renderHelp() {
     },
     {
       q: 'Are my login sessions shared or stored online?',
-      a: 'No. When you click “Connect account” and log in, the session cookie is saved in a profile folder on your own device only. Job-AI never uploads or transmits your credentials or sessions anywhere.'
+      a: 'No. When you sign in to a job site, the session cookie is saved in a profile folder on your own device only. Job-AI never uploads or transmits your credentials or sessions anywhere.'
     },
     {
       q: 'How do I cancel or manage my subscription?',
