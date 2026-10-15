@@ -40,6 +40,15 @@ const UNDECODABLE   = new RegExp('[' + UNDECODABLE_CLASS + ']');
 // glyph, so truncation stops exactly where the real word ends.
 const SAFE_LEAD = /^[A-Za-z0-9.,&/()'’+\- ]*[A-Za-z0-9)]/;
 
+// Free editors stamp their name on each page ("Created with OfficeSuite"). PDF text
+// extraction reads it as part of the CV, so it ended up printed on every tailored CV.
+const EDITORS = 'OfficeSuite|WPS Office|Polaris Office|Zety|Resume\\.io|Novoresume|Kickresume|VisualCV|Resume Genius|Enhancv|MyPerfectResume|LiveCareer|CVwizard|Resume\\.com';
+const WATERMARK_RE = new RegExp(`^[ \\t]*(created|made|generated|produced|designed|powered|built)[ \\t]+(with|by|using|in)[ \\t]*\\n?[ \\t]*(${EDITORS})[ \\t.]*$`, 'gim');
+const SPIRE_RE = /^.*Evaluation Warning\s*:.*$/gim;
+function stripWatermarks(text) {
+  return String(text || '').replace(WATERMARK_RE, '').replace(SPIRE_RE, '').replace(/\n{3,}/g, '\n\n');
+}
+
 function sanitizeCVText(text) {
   if (!text || typeof text !== 'string') return text || '';
 
@@ -66,7 +75,7 @@ function sanitizeCVText(text) {
     // that was pure garbage collapsed to '' but left a stray marker).
     .replace(UNDECODABLE_G, '');
 
-  return cleaned;
+  return stripWatermarks(cleaned);
 }
 
-module.exports = { sanitizeCVText };
+module.exports = { sanitizeCVText, stripWatermarks };

@@ -156,7 +156,7 @@ async function searchJobs(page, searchTerm, limit = 10) {
     const currentUrl = page.url();
     const signedOut = await isSignedOutView();
     console.log(`  [LinkedIn] 0 jobs found${signedOut ? ' (still signed-out — reconnect the LinkedIn account)' : ''}. URL: ${currentUrl}`);
-    await page.screenshot({ path: require('path').join(SSDIR, 'li_search_empty.png') }).catch(() => {});
+    await page.screenshot({ path: require('path').join(SSDIR, 'li_search_empty.png'), timeout: 5000 }).catch(() => {});
   }
   return jobs;
 }
@@ -272,7 +272,7 @@ async function getJobDescription(page, job) {
     hasEasyApply = (await page.getByText('Easy Apply', { exact: false }).count()) > 0;
   }
 
-  await page.screenshot({ path: path.join(SSDIR, 'job_page_check.png') });
+  await page.screenshot({ path: path.join(SSDIR, 'job_page_check.png'), timeout: 5000 }).catch(() => {});
   const sectionUsed = jd.length < fullJD.length ? 'trimmed JD' : 'full JD';
   console.log(`  [JD] ${sectionUsed} — ${jd.length} chars | Easy Apply: ${hasEasyApply}`);
   return { ...job, description: jd, hasEasyApply };
@@ -300,7 +300,7 @@ async function applyToJob(page, job, resumePath) {
     return null;
   }
 
-  await page.screenshot({ path: path.join(SSDIR, 'apply_page_before_click.png') });
+  await page.screenshot({ path: path.join(SSDIR, 'apply_page_before_click.png'), timeout: 5000 }).catch(() => {});
 
   let clicked = false;
   try { await page.click('.jobs-apply-button', { timeout: 10000 }); clicked = true; } catch (_) {}
@@ -319,12 +319,12 @@ async function applyToJob(page, job, resumePath) {
   }
 
   if (!clicked) {
-    await page.screenshot({ path: path.join(SSDIR, 'apply_no_button.png') });
+    await page.screenshot({ path: path.join(SSDIR, 'apply_no_button.png'), timeout: 5000 }).catch(() => {});
     throw new Error('Easy Apply button not found');
   }
 
   await DELAY(4000);
-  await page.screenshot({ path: path.join(SSDIR, 'apply_01_modal.png') });
+  await page.screenshot({ path: path.join(SSDIR, 'apply_01_modal.png'), timeout: 5000 }).catch(() => {});
 
   let stepCount = 0;
   const MAX_STEPS = 12;
@@ -336,7 +336,7 @@ async function applyToJob(page, job, resumePath) {
     const modalVisible = await page.$('.jobs-easy-apply-modal, [class*="easy-apply-modal"], [aria-label*="Easy Apply"]');
     if (!modalVisible) { console.log('  [LinkedIn] Modal closed.'); break; }
 
-    await page.screenshot({ path: path.join(SSDIR, `apply_0${stepCount}_step.png`) });
+    await page.screenshot({ path: path.join(SSDIR, `apply_0${stepCount}_step.png`), timeout: 5000 }).catch(() => {});
     await fillContactFields(page);
     const uploaded = await uploadResume(page, resumePath);
     if (uploaded) { cvUploaded = true; console.log('  [LinkedIn] Resume uploaded.'); }
@@ -363,14 +363,14 @@ async function applyToJob(page, job, resumePath) {
     if (submitted) {
       console.log('  [LinkedIn] Application submitted!');
       await DELAY(3000);
-      await page.screenshot({ path: path.join(SSDIR, 'apply_submitted.png') });
+      await page.screenshot({ path: path.join(SSDIR, 'apply_submitted.png'), timeout: 5000 }).catch(() => {});
       return true;
     }
 
     const advanced = await tryNext(page, job);
     if (!advanced) {
       console.log('  [LinkedIn] Could not advance — dismissing modal.');
-      await page.screenshot({ path: path.join(SSDIR, `apply_stuck_step${stepCount}.png`) });
+      await page.screenshot({ path: path.join(SSDIR, `apply_stuck_step${stepCount}.png`), timeout: 5000 }).catch(() => {});
       await dismissModal(page).catch(() => {});
       await DELAY(2000);
       break;
@@ -1317,7 +1317,7 @@ async function trySubmit(page, job) {
       const btn = await page.$(sel);
       if (btn && await btn.isVisible()) {
         console.log(`  [LinkedIn] Review complete — submitting: ${job?.title} @ ${job?.company}`);
-        await page.screenshot({ path: path.join(SSDIR, 'apply_review_before_submit.png') });
+        await page.screenshot({ path: path.join(SSDIR, 'apply_review_before_submit.png'), timeout: 5000 }).catch(() => {});
         await btn.click();
         return true;
       }

@@ -25,7 +25,8 @@ const AI_PHRASES = [
 ];
 
 function cleanText(text) {
-  let t = text;
+  // Also catches CV text extracted and saved before the watermark fix (the extension stores it).
+  let t = require('./cv_text_sanitizer').stripWatermarks(text);
 
   // Replace dashes and bullets
   t = t.replace(EM_DASH,  ' - ');

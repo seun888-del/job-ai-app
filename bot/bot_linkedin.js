@@ -51,6 +51,31 @@ function workTypePriority() {
   return map;
 }
 
+// LinkedIn sometimes leaves a tab stuck (an Easy Apply window spinning forever); after that
+// every navigation on it times out. When that happens, swap in a fresh tab.
+let _ctx = null, _page = null, _wedged = false;
+const WEDGED_RE = /Timeout \d+ms exceeded/i;
+function noteError(err) { if (WEDGED_RE.test((err && err.message) || '')) _wedged = true; }
+// One application never takes this long; past it the tab is stuck, so give up on it.
+const APPLY_LIMIT_MS = 6 * 60 * 1000;
+function applyWithLimit(job) {
+  let t;
+  const limit = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`Timeout ${APPLY_LIMIT_MS}ms exceeded (application stuck)`)), APPLY_LIMIT_MS); });
+  return Promise.race([pg().then((p) => linkedin.applyToJob(p, job, job.cvPath)), limit]).finally(() => clearTimeout(t));
+}
+async function pg() {
+  if (!_wedged && _page && !_page.isClosed()) {
+    const ok = await Promise.race([_page.evaluate(() => 1).then(() => true, () => false), DELAY(8000).then(() => false)]);
+    if (ok) return _page;
+  }
+  console.log('  [LinkedIn Agent] The LinkedIn tab stopped responding. Opening a fresh tab.');
+  // Close the stuck tab first: a new LinkedIn tab could otherwise share its frozen process.
+  if (_page) await Promise.race([_page.close({ runBeforeUnload: false }).catch(() => {}), DELAY(5000)]);
+  _page = await _ctx.newPage();
+  _wedged = false;
+  return _page;
+}
+
 // Drain — apply all currently cv_ready LinkedIn jobs, then return immediately.
 async function drainReadyCVs(liPage) {
   const priority = workTypePriority();
@@ -77,7 +102,7 @@ async function drainReadyCVs(liPage) {
     queue.update(job.jobId, { status: 'applying' });
     console.log(`  [LinkedIn Agent] [Drain] Applying: ${job.title} @ ${job.company}`);
     try {
-      const applied = await linkedin.applyToJob(liPage, job, job.cvPath);
+      const applied = await applyWithLimit(job);
       if (applied === null) {
         queue.update(job.jobId, { status: 'skipped' });
         queue.markApplied(job.jobId);
@@ -88,7 +113,7 @@ async function drainReadyCVs(liPage) {
         console.log(`  [LinkedIn Agent] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
         const _cb = queue.recordUploadFailure('linkedin');
         if (_cb.tripped) {
-          console.log('  [LinkedIn Agent] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your LinkedIn account (Connect account on the dashboard), then press Start applying. Pausing LinkedIn applications + tailoring until then.');
+          console.log('  [LinkedIn Agent] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Press Start applying and sign in to LinkedIn when its window opens. Pausing LinkedIn applications + tailoring until then.');
           return;
         }
       } else {
@@ -101,6 +126,7 @@ async function drainReadyCVs(liPage) {
     } catch (err) {
       queue.update(job.jobId, { status: 'apply_failed', error: err.message });
       logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
+      noteError(err);
       console.error(`  [LinkedIn Agent] [Drain] Error: ${err.message}`);
     }
     await DELAY(8000 + Math.random() * 7000);
@@ -119,8 +145,9 @@ async function phase1_searchAndQueue(liPage) {
     console.log(`\n  [LinkedIn Agent] Searching: "${searchTerm}"`);
     let jobs;
     try {
-      jobs = await linkedin.searchJobs(liPage, searchTerm, cfg.MAX_JOBS_PER_SEARCH);
+      jobs = await linkedin.searchJobs(await pg(), searchTerm, cfg.MAX_JOBS_PER_SEARCH);
     } catch (err) {
+      noteError(err);
       console.error(`  [LinkedIn Agent] Search failed: ${err.message}`);
       continue;
     }
@@ -151,7 +178,7 @@ async function phase1_searchAndQueue(liPage) {
       }
 
       try {
-        const jobDetails = await linkedin.getJobDescription(liPage, job);
+        const jobDetails = await linkedin.getJobDescription(await pg(), job);
 
         if (!jobDetails.description || jobDetails.description.trim().split(/\s+/).length < 80) {
           console.log(`  [LinkedIn Agent] Short/missing JD — skipping: ${job.title}`);
@@ -190,6 +217,7 @@ async function phase1_searchAndQueue(liPage) {
         queue.add({ ...jobDetails, source: 'linkedin', workType });
         console.log(`  [LinkedIn Agent] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
       } catch (err) {
+        noteError(err);
         console.error(`  [LinkedIn Agent] Error on "${job.title}": ${err.message}`);
       }
 
@@ -247,7 +275,7 @@ async function phase2_applyReadyCVs(liPage) {
       console.log(`\n  [LinkedIn Agent] Applying: ${job.title} @ ${job.company} [${job.workType || 'hybrid'}] (CV: ${job.cvName}, Score: ${job.cvScore}%)`);
 
       try {
-        const applied = await linkedin.applyToJob(liPage, job, job.cvPath);
+        const applied = await applyWithLimit(job);
 
         if (applied === null) {
           queue.update(job.jobId, { status: 'skipped' });
@@ -263,7 +291,7 @@ async function phase2_applyReadyCVs(liPage) {
           console.log(`  [LinkedIn Agent] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
           const _cb = queue.recordUploadFailure('linkedin');
           if (_cb.tripped) {
-            console.log('  [LinkedIn Agent] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Reconnect your LinkedIn account (Connect account on the dashboard), then press Start applying. Pausing LinkedIn applications + tailoring until then.');
+            console.log('  [LinkedIn Agent] ⚠️ RECONNECT NEEDED — 3 tailored CVs in a row could not be attached. Press Start applying and sign in to LinkedIn when its window opens. Pausing LinkedIn applications + tailoring until then.');
             return;
           }
           continue;
@@ -281,6 +309,7 @@ async function phase2_applyReadyCVs(liPage) {
       } catch (err) {
         queue.update(job.jobId, { status: 'apply_failed', error: err.message });
         logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
+        noteError(err);
         console.error(`  [LinkedIn Agent] Error applying to "${job.title}": ${err.message}`);
       }
 
@@ -355,6 +384,7 @@ async function main() {
   }
   // Login verified — let the Scorer tailor LinkedIn jobs again.
   queue.markSessionHealthy('linkedin');
+  _ctx = context; _page = liPage;
 
   // When the shared daily application cap is reached, stop the WHOLE agent — not
   // just applications — so it doesn't keep searching + scoring/tailoring CVs it
