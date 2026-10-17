@@ -89,7 +89,8 @@ async function sendSetupCode(email) {
   const r = await fetch(`${BACKEND}/v1/setup/send-code`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: String(email).trim() }), signal: AbortSignal.timeout(20000),
   });
-  return { ok: r.ok, http: r.status };
+  const body = await r.json().catch(() => ({}));
+  return { ok: r.ok, http: r.status, error: body.error || '' };
 }
 
 module.exports = { BACKEND, claimSetup, sendSetupCode, llmChat, llmAvailable, checkLicense, askAssistant, headers, mode: 'hosted', isHosted: true };

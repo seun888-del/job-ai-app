@@ -99,6 +99,7 @@ async function checkSteps() {
     if ((await store.jobs()).some((j) => j.status === 'applied')) sendStep('first_applied');
   } catch (_) {}
 }
+sendStep('opened');
 checkSteps();
 setInterval(checkSteps, 5 * 60 * 1000);
 
@@ -916,7 +917,7 @@ function wirePhoneSetup(rerender) {
     const em = $('#ph-email').value.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setSt('#ph-mail-st', 'That email does not look right.', true); return; }
     setSt('#ph-mail-st', 'Sending…');
-    try { const r = await sendSetupCode(em); setSt('#ph-mail-st', r.ok ? 'If that email has Job-AI, a code is on its way. Type it above.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not send. Try again.', !r.ok); }
+    try { const r = await sendSetupCode(em); setSt('#ph-mail-st', codeSentMsg(r, em), !r.ok); }
     catch (_) { setSt('#ph-mail-st', 'Could not reach Job-AI. Check your connection.', true); }
   });
   $('#ph-go').addEventListener('click', async () => {
@@ -926,6 +927,13 @@ function wirePhoneSetup(rerender) {
 
 // Bring in what the user set up on their phone (tryjobai.com/start): licence, details and CV.
 // say(text, isError) shows progress. Returns true when the licence is active.
+function codeSentMsg(r, em) {
+  if (r.ok) return `Code sent to ${em}. Type it here. Not there? Check spam.`;
+  if (r.error === 'ended') return 'That email has already had a free trial. Subscribe at tryjobai.com to carry on.';
+  if (r.error === 'disposable_email') return 'Please use your normal email address.';
+  if (r.error === 'too_many_trials' || r.http === 429) return 'Too many tries. Wait a few minutes.';
+  return 'Could not send. Check your connection and try again.';
+}
 async function claimPhoneSetup(raw, say) {
   {
     const code = String(raw || '').replace(/\D/g, '');
@@ -1145,22 +1153,22 @@ async function initOnboarding() {
       <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
     </div>
     ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
-      <strong style="display:block;margin-bottom:4px">Set up on your phone?</strong>
-      <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin-bottom:10px">Type the 6-digit code from your phone. No code, or it ran out? We can email you one.</span>
-      <div id="w-codebox" style="display:flex;gap:8px"><input id="w-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w-go" style="white-space:nowrap">Email me a code</button></div>
-      <div id="w-mailbox" style="display:none;gap:8px"><input id="w-email" type="email" placeholder="The email you set up with" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Send code</button></div>
+      <strong style="display:block;margin-bottom:4px">Start your free 7-day trial</strong>
+      <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin-bottom:10px">Enter your email and we will send you a 6-digit code. No card needed. Already set up on your phone? Type its code instead.</span>
+      <div id="w-codebox" style="display:none;gap:8px"><input id="w-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w-go" style="white-space:nowrap">Connect</button></div>
+      <div id="w-mailbox" style="display:flex;gap:8px"><input id="w-email" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Email me a code</button></div>
+      <p style="margin:8px 0 0;font-size:13px"><a href="#" id="w-swap" class="tracker-link">I have a code</a></p>
       <div class="status-msg" id="w-st" style="margin-top:8px"></div></div>
-      <p style="margin:14px 0 8px;font-size:14px;color:var(--text-muted,#4a453b)">New to Job-AI? Set up here instead:</p>`}
+      <p style="margin:14px 0 8px;font-size:14px;color:var(--text-muted,#4a453b)">Or look around first:</p>`}
     <div class="welcome-actions"><button class="${globalThis.__jobaiClient === 'android' ? 'primary' : 'secondary'}" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div></div>`;
   document.body.appendChild(overlay);
   const dismiss = () => { overlay.remove(); store.patch('settings', { welcomeSeen: true }); };
   $('#w-tour').addEventListener('click', () => { dismiss(); startTour(); });
   $('#w-skip').addEventListener('click', dismiss);
   if ($('#w-code')) {
-    // One button: "Email me a code" while the box is empty, "Connect" once a code is typed.
+    // Email first (new or returning users get a code); a code from the phone works too.
     const hasCode = () => $('#w-code').value.replace(/\D/g, '').length > 0;
-    const label = () => { $('#w-go').textContent = hasCode() ? 'Connect' : 'Email me a code'; };
-    const showMail = (on) => { $('#w-mailbox').style.display = on ? 'flex' : 'none'; $('#w-codebox').style.display = on ? 'none' : 'flex'; $(on ? '#w-email' : '#w-code').focus(); };
+    const showMail = (on) => { $('#w-mailbox').style.display = on ? 'flex' : 'none'; $('#w-codebox').style.display = on ? 'none' : 'flex'; $('#w-swap').textContent = on ? 'I have a code' : 'Email me a code instead'; $(on ? '#w-email' : '#w-code').focus(); };
     const go = async () => {
       if (!hasCode()) { setSt('#w-st', ''); showMail(true); return; }
       const b = $('#w-go'); b.disabled = true;
@@ -1178,16 +1186,16 @@ async function initOnboarding() {
       $('#w-send').disabled = true; setSt('#w-st', 'Sending…');
       let r; try { r = await sendSetupCode(em); } catch (_) { r = { ok: false }; }
       $('#w-send').disabled = false;
-      if (!r.ok) { setSt('#w-st', r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not send. Check your connection and try again.', true); return; }
-      $('#w-code').value = ''; label(); showMail(false);
-      setSt('#w-st', `Sent to ${em}. Type the code from that email here.`);
+      if (!r.ok) { setSt('#w-st', codeSentMsg(r, em), true); return; }
+      $('#w-code').value = ''; showMail(false);
+      setSt('#w-st', codeSentMsg(r, em));
     };
     $('#w-go').addEventListener('click', go);
     $('#w-send').addEventListener('click', send);
-    $('#w-code').addEventListener('input', label);
+    $('#w-swap').addEventListener('click', (e) => { e.preventDefault(); setSt('#w-st', ''); showMail($('#w-mailbox').style.display === 'none'); });
     $('#w-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     $('#w-email').addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
-    setTimeout(() => $('#w-code') && $('#w-code').focus(), 100);
+    setTimeout(() => $('#w-email') && $('#w-email').focus(), 100);
   }
 }
 
