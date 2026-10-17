@@ -24,6 +24,7 @@ const vfsReady = vfs.__load().catch(() => {}); // saved tailored CVs, back into 
 const lines = (sel) => String(($(sel) || {}).value || '').split('\n').map((x) => x.trim()).filter(Boolean);
 // Only ever open normal web pages from stored data (never javascript:, data:, file: ...).
 const safeUrl = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : null; } catch (_) { return null; } };
+const SETUP_URL = 'https://tryjobai.com/start?from=extension';
 const openTab = (u) => { const s = safeUrl(u); if (s) chrome.tabs.create({ url: s }); };
 
 // This install's device id (random, stays on this device). Sent with licence checks like the app.
@@ -409,7 +410,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         </div>
       </div>
 
-      ${hasLicence ? '' : `<div class="no-license-banner"><span>Start your free 7-day trial to run the Agents. No card needed.</span><button class="no-license-cta preflight-link" data-view="license">Start free trial →</button></div>`}
+      ${hasLicence ? '' : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 7 days, no card needed.</span><button class="no-license-cta open-url" data-url="${SETUP_URL}">Set up Job-AI →</button></div>`}
 
       <div class="card get-started-card">
         <h3>How to start applying</h3>
@@ -853,14 +854,16 @@ VIEWS.license = async function renderLicense() {
   const active = licenceActive(license);
   // The saved key is never written back into the page; only its last 4 characters are shown.
   content.innerHTML = `
-    <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence. The same key works in the desktop app.' : 'Start a free trial with your email, or add the key from your Job-AI welcome email.'}</p></div>
+    <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence. The same key works in the desktop app.' : 'Set up Job-AI to start your free trial, or add the key from your Job-AI welcome email.'}</p></div>
     ${active ? '' : `<div class="card" id="trial-card">
-      <h3 style="margin:0 0 6px">Start your free 7-day trial</h3>
-      <p class="muted" style="margin:0">Enter your email and we will send you a 6-digit code. No card needed. Already have a code from your phone? Type it below.</p>
-      <div class="field" style="max-width:460px;margin-top:12px"><label>Your email</label><input id="tr-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
-      <div class="ext-inline"><button class="primary" id="tr-send">Email me a code</button><span class="status-msg" id="tr-mail-st"></span></div>
-      <div class="field" style="max-width:220px;margin-top:16px"><label>6-digit code</label><input id="tr-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
+      <h3 style="margin:0 0 6px">Set up Job-AI</h3>
+      <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. Free for 7 days, no card needed. At the end you get a 6-digit code to type here.</p>
+      <div class="ext-inline" style="margin-top:12px"><button class="primary open-url" data-url="${SETUP_URL}">Set up Job-AI (2 minutes)</button></div>
+      <div class="field" style="max-width:220px;margin-top:16px"><label>Got your code? Type it here</label><input id="tr-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
       <div class="ext-inline"><button class="secondary" id="tr-go">Connect</button><span class="status-msg" id="tr-st"></span></div>
+      <p class="muted" style="margin-top:12px"><a class="tracker-link" href="#" id="tr-mail-show">Lost your code? Email me one</a></p>
+      <div id="tr-mail" hidden><div class="field" style="max-width:320px"><label>The email you set up with</label><input id="tr-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="ext-inline"><button class="secondary" id="tr-send">Send code</button><span class="status-msg" id="tr-mail-st"></span></div></div>
     </div>`}
     <div class="card">${active ? '' : '<h3 style="margin:0 0 6px">Already have a key?</h3>'}
       ${license.key ? `<div class="stat-row"><span class="stat-label">Key</span><span class="stat-value">•••• ${esc(license.key.slice(-4))}</span></div>
@@ -917,17 +920,19 @@ VIEWS.license = async function renderLicense() {
   });
 };
 
-// "Start your free trial": email -> 6-digit code -> licence. New emails get a trial; known
-// emails (or a code from the phone setup page) bring in their existing licence.
+// "Set up Job-AI": the setup page gives a 6-digit code that brings in the licence, CV and
+// details. Lost the code? Email one (a new email still gets a trial, as a fallback).
 function wireTrialCard() {
   if (!$('#trial-card')) return;
+  $('#trial-card .open-url').addEventListener('click', (e) => openTab(e.currentTarget.dataset.url));
+  $('#tr-mail-show').addEventListener('click', (e) => { e.preventDefault(); $('#tr-mail').hidden = false; $('#tr-email').focus(); });
   const send = async () => {
     const em = $('#tr-email').value.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setSt('#tr-mail-st', 'That email does not look right.', true); return; }
     $('#tr-send').disabled = true; setSt('#tr-mail-st', 'Sending…');
     let r; try { r = await sendSetupCode(em); } catch (_) { r = { ok: false }; }
     $('#tr-send').disabled = false; setSt('#tr-mail-st', codeSentMsg(r, em), !r.ok);
-    if (r.ok) $('#tr-code').focus();
+    if (r.ok) { $('#tr-mail').hidden = true; setSt('#tr-st', codeSentMsg(r, em)); $('#tr-code').focus(); }
   };
   const go = async () => {
     $('#tr-go').disabled = true;
@@ -1185,11 +1190,12 @@ async function initOnboarding() {
       <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
     </div>
     ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
-      <strong style="display:block;margin-bottom:4px">Start your free 7-day trial</strong>
-      <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin-bottom:10px">Enter your email and we will send you a 6-digit code. No card needed. Already set up on your phone? Type its code instead.</span>
-      <div id="w-codebox" style="display:none;gap:8px"><input id="w-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w-go" style="white-space:nowrap">Connect</button></div>
-      <div id="w-mailbox" style="display:flex;gap:8px"><input id="w-email" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Email me a code</button></div>
-      <p style="margin:8px 0 0;font-size:13px"><a href="#" id="w-swap" class="tracker-link">I have a code</a></p>
+      <strong style="display:block;margin-bottom:4px">Set up Job-AI</strong>
+      <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin-bottom:10px">Takes 2 minutes: your email, your CV and a few details. Free for 7 days, no card needed. Then type the 6-digit code it gives you here.</span>
+      <button class="primary" id="w-setup" style="width:100%;margin-bottom:12px">Set up Job-AI (2 minutes)</button>
+      <div id="w-codebox" style="display:flex;gap:8px"><input id="w-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="secondary" id="w-go" style="white-space:nowrap">Connect</button></div>
+      <div id="w-mailbox" style="display:none;gap:8px"><input id="w-email" type="email" autocomplete="email" placeholder="The email you set up with" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Send code</button></div>
+      <p style="margin:8px 0 0;font-size:13px"><a href="#" id="w-swap" class="tracker-link">Lost your code? Email me one</a></p>
       <div class="status-msg" id="w-st" style="margin-top:8px"></div></div>
       <p style="margin:14px 0 8px;font-size:14px;color:var(--text-muted,#4a453b)">Or look around first:</p>`}
     <div class="welcome-actions"><button class="${globalThis.__jobaiClient === 'android' ? 'primary' : 'secondary'}" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div></div>`;
@@ -1198,9 +1204,9 @@ async function initOnboarding() {
   $('#w-tour').addEventListener('click', () => { dismiss(); startTour(); });
   $('#w-skip').addEventListener('click', dismiss);
   if ($('#w-code')) {
-    // Email first (new or returning users get a code); a code from the phone works too.
+    // Set up on tryjobai.com/start, then type its code here. Lost it? Email one.
     const hasCode = () => $('#w-code').value.replace(/\D/g, '').length > 0;
-    const showMail = (on) => { $('#w-mailbox').style.display = on ? 'flex' : 'none'; $('#w-codebox').style.display = on ? 'none' : 'flex'; $('#w-swap').textContent = on ? 'I have a code' : 'Email me a code instead'; $(on ? '#w-email' : '#w-code').focus(); };
+    const showMail = (on) => { $('#w-mailbox').style.display = on ? 'flex' : 'none'; $('#w-codebox').style.display = on ? 'none' : 'flex'; $('#w-swap').textContent = on ? 'I have a code' : 'Lost your code? Email me one'; $(on ? '#w-email' : '#w-code').focus(); };
     const go = async () => {
       if (!hasCode()) { setSt('#w-st', ''); showMail(true); return; }
       const b = $('#w-go'); b.disabled = true;
@@ -1222,12 +1228,12 @@ async function initOnboarding() {
       $('#w-code').value = ''; showMail(false);
       setSt('#w-st', codeSentMsg(r, em));
     };
+    $('#w-setup').addEventListener('click', () => openTab(SETUP_URL));
     $('#w-go').addEventListener('click', go);
     $('#w-send').addEventListener('click', send);
     $('#w-swap').addEventListener('click', (e) => { e.preventDefault(); setSt('#w-st', ''); showMail($('#w-mailbox').style.display === 'none'); });
     $('#w-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     $('#w-email').addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
-    setTimeout(() => $('#w-email') && $('#w-email').focus(), 100);
   }
 }
 
