@@ -409,7 +409,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         </div>
       </div>
 
-      ${hasLicence ? '' : `<div class="no-license-banner"><span>&#9888;  A license is required to start the Agents.</span><button class="no-license-cta preflight-link" data-view="license">Activate license →</button></div>`}
+      ${hasLicence ? '' : `<div class="no-license-banner"><span>Start your free 7-day trial to run the Agents. No card needed.</span><button class="no-license-cta preflight-link" data-view="license">Start free trial →</button></div>`}
 
       <div class="card get-started-card">
         <h3>How to start applying</h3>
@@ -853,19 +853,26 @@ VIEWS.license = async function renderLicense() {
   const active = licenceActive(license);
   // The saved key is never written back into the page; only its last 4 characters are shown.
   content.innerHTML = `
-    <div class="page-header"><h2>License</h2><p>Paste the key from your Job-AI welcome email. The same key works in the desktop app.</p></div>
-    <div class="card">
+    <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence. The same key works in the desktop app.' : 'Start a free trial with your email, or add the key from your Job-AI welcome email.'}</p></div>
+    ${active ? '' : `<div class="card" id="trial-card">
+      <h3 style="margin:0 0 6px">Start your free 7-day trial</h3>
+      <p class="muted" style="margin:0">Enter your email and we will send you a 6-digit code. No card needed. Already have a code from your phone? Type it below.</p>
+      <div class="field" style="max-width:460px;margin-top:12px"><label>Your email</label><input id="tr-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="ext-inline"><button class="primary" id="tr-send">Email me a code</button><span class="status-msg" id="tr-mail-st"></span></div>
+      <div class="field" style="max-width:220px;margin-top:16px"><label>6-digit code</label><input id="tr-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
+      <div class="ext-inline"><button class="secondary" id="tr-go">Connect</button><span class="status-msg" id="tr-st"></span></div>
+    </div>`}
+    <div class="card">${active ? '' : '<h3 style="margin:0 0 6px">Already have a key?</h3>'}
       ${license.key ? `<div class="stat-row"><span class="stat-label">Key</span><span class="stat-value">•••• ${esc(license.key.slice(-4))}</span></div>
       <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value">${active ? (license.status === 'trial' ? 'Free trial' : 'Active') : license.status === 'device_trial_used' ? 'Trial already used on this device' : 'Not active'}</span></div>
       ${license.expiresAt ? `<div class="stat-row"><span class="stat-label">${active ? 'Renews / ends' : 'Ended'}</span><span class="stat-value">${esc(new Date(license.expiresAt).toLocaleDateString('en-GB'))}</span></div>` : ''}` : ''}
       <div class="field" style="max-width:460px;margin-top:12px"><label>${license.key ? 'Replace key' : 'License key'}</label><input id="lic" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key"></div>
       <div class="ext-inline"><button class="primary" id="lic-save">Activate</button>${license.key ? '<button class="secondary" id="lic-remove">Remove key</button>' : ''}<span class="status-msg" id="lic-st"></span></div>
-      <p class="muted" style="margin-top:12px">No key yet? <a class="tracker-link" href="https://tryjobai.com/start" target="_blank" rel="noopener noreferrer">Get started free</a></p>
     </div>
     ${license.key ? `<div class="card"><h3 style="margin:0 0 6px">Subscription</h3>
       <p class="muted" style="margin:0 0 12px">Update your payment details, view invoices, or cancel your subscription in Stripe's secure portal.</p>
       <div class="ext-inline"><button class="secondary" id="manage-sub">Manage or cancel subscription →</button><span class="status-msg" id="manage-st"></span></div></div>` : ''}
-    ${globalThis.__jobaiClient === 'android' ? '' : `<div class="card" id="phone-card">
+    ${globalThis.__jobaiClient === 'android' || !active ? '' : `<div class="card" id="phone-card">
       <h3 style="margin:0 0 6px">Set up from my phone</h3>
       <p class="muted">Set up on your phone at tryjobai.com/start? Type the 6-digit code it shows. Your licence, CV and details come straight in.</p>
       <div class="field" style="max-width:220px;margin-top:12px"><label>Code</label><input id="ph-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
@@ -901,6 +908,7 @@ VIEWS.license = async function renderLicense() {
     } catch (e) { setSt('#lic-st', 'Could not reach Job-AI. Check your connection.', true); }
   });
   wirePhoneSetup();
+  wireTrialCard();
   $('#lic-remove') && $('#lic-remove').addEventListener('click', async () => {
     if (!confirm('Remove the licence key from this browser? The agents stop until you add it again.')) return;
     Object.values(agents).forEach((a) => a.stop());
@@ -908,6 +916,30 @@ VIEWS.license = async function renderLicense() {
     renderLicense();
   });
 };
+
+// "Start your free trial": email -> 6-digit code -> licence. New emails get a trial; known
+// emails (or a code from the phone setup page) bring in their existing licence.
+function wireTrialCard() {
+  if (!$('#trial-card')) return;
+  const send = async () => {
+    const em = $('#tr-email').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setSt('#tr-mail-st', 'That email does not look right.', true); return; }
+    $('#tr-send').disabled = true; setSt('#tr-mail-st', 'Sending…');
+    let r; try { r = await sendSetupCode(em); } catch (_) { r = { ok: false }; }
+    $('#tr-send').disabled = false; setSt('#tr-mail-st', codeSentMsg(r, em), !r.ok);
+    if (r.ok) $('#tr-code').focus();
+  };
+  const go = async () => {
+    $('#tr-go').disabled = true;
+    const done = await claimPhoneSetup($('#tr-code').value, (t, err) => setSt('#tr-st', t, err));
+    $('#tr-go').disabled = false;
+    if (done) setTimeout(() => navigate('dashboard'), 1500);
+  };
+  $('#tr-send').addEventListener('click', send);
+  $('#tr-email').addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  $('#tr-go').addEventListener('click', go);
+  $('#tr-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+}
 
 // "Set up from my phone": bring in the licence, CV and details from tryjobai.com/start.
 function wirePhoneSetup(rerender) {
@@ -941,7 +973,7 @@ async function claimPhoneSetup(raw, say) {
     say('Bringing in your setup…');
     let r;
     try { r = await claimSetup(code); } catch (_) { say('Could not reach Job-AI. Check your connection.', true); return false; }
-    if (!r.ok) { say(r.http === 404 ? 'That code is wrong or has run out. Get a new one on your phone.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not use the code (' + r.http + ').', true); return false; }
+    if (!r.ok) { say(r.http === 404 ? 'That code is wrong or has run out. Ask for a new one.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not use the code (' + r.http + ').', true); return false; }
     // Details and CV first: they are the user's own and the server has now deleted its copy.
     const got = [];
     if (r.setup && r.setup.profile) {
