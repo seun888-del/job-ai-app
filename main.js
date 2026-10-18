@@ -696,6 +696,7 @@ ipcMain.handle('queue:summary', () => queueReader.getQueueSummary());
 ipcMain.handle('queue:clearRecent', () => queueReader.clearRecentActivity());
 ipcMain.handle('queue:ucPending', () => queueReader.getUcPendingCount());
 ipcMain.handle('queue:ucPendingList', () => queueReader.getUcPendingList(200));
+ipcMain.handle('queue:workSearchLog', () => queueReader.getWorkSearchLog());
 ipcMain.handle('uc:markLogged', (_e, jobIds) => queueReader.markUcLoggedManual(jobIds));
 ipcMain.handle('queue:tracApps', () => queueReader.getTracApplications());
 ipcMain.handle('queue:recent', (event, limit) => queueReader.getRecentApplications(limit));

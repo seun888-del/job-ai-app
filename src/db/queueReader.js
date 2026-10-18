@@ -62,6 +62,17 @@ function getUcPendingList(limit = 200) {
   }, []);
 }
 
+// Every application the agents really sent, newest first, for the US work search log
+// (date, employer, position, how and where applied). Real applied dates only.
+function getWorkSearchLog(limit = 2000) {
+  return withQueueDb(db => {
+    const rows = all(db, `SELECT a.job_id, a.title, a.company, a.applied_at, q.url, q.source
+      FROM applied_jobs a LEFT JOIN queue q ON q.job_id = a.job_id
+      WHERE a.title IS NOT NULL AND a.title != '' ORDER BY a.applied_at DESC LIMIT ?`, [limit]);
+    return rows.map(r => ({ jobId: r.job_id, title: r.title, company: r.company || '', appliedAt: r.applied_at, url: r.url || '', source: r.source || String(r.job_id || '').split('_')[0] }));
+  }, []);
+}
+
 // The ONE write this otherwise read-only module performs: after the user has
 // copied their log into their UC journal by hand, mark those applications logged
 // so they drop off the pending list. Rare, user-initiated; uses the same
@@ -406,4 +417,4 @@ function getReconnectNeeded() {
   }, []);
 }
 
-module.exports = { init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };
+module.exports = { init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };
