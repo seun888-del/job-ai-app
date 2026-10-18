@@ -1662,4 +1662,112 @@ module.exports = {
       }
       return out;
     },
+  "f0487d58454e0": () => {
+    const vis = [...document.querySelectorAll('a, button')].filter(e => e.offsetParent !== null).map(e => (e.innerText || '').trim().toLowerCase());
+    if (vis.includes('log in') || vis.includes('login')) return false;
+    return vis.includes('applied') || vis.includes('messages') || !!document.querySelector('a[href*="/profile/edit"]');
+  },
+  "f66796c7e176d": () => /just a moment|verify you are human|performing security verification/i.test((document.title || '') + ' ' + ((document.body && document.body.innerText) || '').slice(0, 500)),
+  "f30281abd96c8": () => window.scrollBy(0, 1400),
+  "f070d4d1bf286": (lim) => {
+    const out = []; const seen = new Set();
+    for (const a of document.querySelectorAll('a[href*="/jobs/"]')) {
+      const m = (a.getAttribute('href') || '').match(/\/jobs\/(\d+)-[\w-]*/);
+      if (!m || seen.has(m[1])) continue;
+      const title = ((a.querySelector('span') || a).innerText || '').trim().split('\n')[0];
+      if (!title) continue;
+      seen.add(m[1]);
+      let card = a; for (let k = 0; k < 6 && card && !/apply on/i.test(card.innerText || ''); k++) card = card.parentElement;
+      let block = a, company = '';
+      for (let k = 0; k < 16 && block; k++, block = block.parentElement) {
+        const c = block.querySelector('a[href^="/company/"]');
+        if (c) { company = (c.innerText || '').trim().split('\n')[0]; break; }
+      }
+      const spans = [...a.querySelectorAll('span')].map(x => (x.innerText || '').trim()).filter(Boolean);
+      out.push({
+        jobId: 'wellfound_' + m[1], jobKey: m[1], title, company,
+        url: location.origin + m[0],
+        external: /apply on company/i.test((card && card.innerText) || ''),
+        remoteText: spans.slice(1).join(' | '),
+      });
+      if (out.length >= lim) break;
+    }
+    return out;
+  },
+  "f6f7cef7627c2": () => {
+    const desc = document.querySelector('[class*="styles_description"]');
+    // Page title: "Title at Company • Location • ..."
+    const tm = (document.title || '').match(/ at (.+?) •/);
+    const vis = [...document.querySelectorAll('button, a')].filter(b => b.offsetParent !== null && !b.closest('nav, aside, header')).map(b => (b.innerText || '').trim());
+    return {
+      description: desc ? desc.innerText.trim() : (document.querySelector('main') || document.body).innerText.trim().slice(0, 8000),
+      company: tm ? tm[1].trim() : '',
+      alreadyApplied: vis.some(t => /^applied$/i.test(t)),
+      salaryText: [...document.querySelectorAll('span, div')].map(e => e.children.length ? '' : (e.innerText || '').trim()).find(t => /^\$\d/.test(t)) || '',
+    };
+  },
+  "f6f9cb8fdea56": ([css, src, tok]) => {
+    const re = new RegExp(src, 'i');
+    const el = [...document.querySelectorAll(css)].find(e => e.offsetParent !== null && re.test(((e.innerText || e.getAttribute('aria-label') || '') + '').trim()));
+    if (!el) return false;
+    el.setAttribute('data-jbclick', tok);
+    return true;
+  },
+  "f758dd580184b": n => (document.body.innerText || '').includes(n),
+  "f45b36990667c": () => {
+    const vis = [...document.querySelectorAll('button, a')].filter(b => b.offsetParent !== null && !b.closest('nav, aside, header')).map(b => (b.innerText || '').trim());
+    return { applied: vis.some(t => /^applied$|^application sent$/i.test(t)), canApply: vis.some(t => /^apply$|^apply now$/i.test(t)), external: vis.some(t => /apply on company (website|site)/i.test(t)) };
+  },
+  "fc4a82c41b501": m => { const d = document.querySelector(m); return d ? d.innerText : ''; },
+  "fb759e78b053e": (M) => {
+    const root = document.querySelector(M); if (!root) return [];
+    return [...root.querySelectorAll('textarea, input[type="text"], input:not([type]), select')]
+      .filter(el => el.offsetParent !== null && !el.value && (el.required || /\*/.test((el.closest('label') || {}).innerText || '')))
+      .map(el => ((el.closest('label') || {}).innerText || el.name || '').replace(/\*/g, '').trim().slice(0, 60));
+  },
+  "fdd28ac2a15a9": m => {
+      const d = document.querySelector(m);
+      const txt = document.body.innerText || '';
+      const ts = [...document.querySelectorAll('iframe')].some(f => /challenges\.cloudflare\.com/.test(f.src) && f.getBoundingClientRect().height > 20);
+      return { open: !!(d && /send application/i.test(d.innerText)), ok: /application (has been |was )?(sent|submitted)|you applied|applied\b.*ago|successfully applied/i.test(txt), ts,
+        err: d ? [...d.querySelectorAll('[role="alert"], [class*="error" i]')].map(e => e.innerText.trim()).filter(Boolean).slice(0, 3) : [] };
+    },
+  "fa01477a1c8d0": () => [...document.querySelectorAll('button, span')].some(b => b.offsetParent !== null && !b.closest('nav, aside, header') && /^applied$/i.test((b.innerText || '').trim())),
+  "f532050bd68c3": (M) => {
+    const root = document.querySelector(M); if (!root) return [];
+    const qText = el => {
+      if (el.labels && el.labels[0] && el.type !== 'radio') return el.labels[0].innerText.trim();
+      // Wellfound wraps each field in a <label for="form-input--undefined">, so el.labels is empty.
+      const wl = el.type !== 'radio' && el.closest('label');
+      if (wl && (wl.innerText || '').trim()) return wl.innerText.replace(/\*\s*$/, '').trim();
+      const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+      if (lg) return lg.innerText.trim();
+      let n = el.parentElement;
+      for (let i = 0; i < 6 && n; i++, n = n.parentElement) {
+        const t = [...n.querySelectorAll('label, p, span, div, h3, h4')].find(x => x.children.length === 0 && (x.innerText || '').trim().length > 4 && !x.contains(el) && !(x.closest('label') && x.closest('label').contains(el)));
+        if (t) return t.innerText.trim();
+      }
+      return el.getAttribute('aria-label') || el.placeholder || el.name || '';
+    };
+    const out = []; let k = 0; const radios = {};
+    for (const el of root.querySelectorAll('input, select, textarea')) {
+      if (['hidden', 'file', 'submit', 'button', 'search', 'checkbox'].includes(el.type)) continue;
+      if (el.offsetParent === null && !(el.type === 'radio' && el.closest('label'))) continue;
+      if (/turnstile/i.test(el.name || '')) continue;
+      if (!el.dataset.jbq) el.dataset.jbq = 'q' + (k++) + Math.random().toString(36).slice(2, 6);
+      if (el.type === 'radio') {
+        const g = el.name || qText(el);
+        const r = radios[g] = radios[g] || { kind: 'radio', q: qText(el), opts: [], done: false };
+        r.opts.push({ text: ((el.labels && el.labels[0] && el.labels[0].innerText) || el.value || '').trim(), id: el.dataset.jbq });
+        if (el.checked) r.done = true;
+      } else if (el.tagName === 'SELECT') {
+        if (el.value && el.selectedIndex > 0) continue;
+        out.push({ kind: 'select', q: qText(el), id: el.dataset.jbq, opts: [...el.options].slice(1).map(o => ({ text: o.text.trim(), value: o.value })) });
+      } else if (!el.value) {
+        out.push({ kind: el.tagName === 'TEXTAREA' ? 'textarea' : (el.type === 'number' ? 'number' : 'text'), q: qText(el), id: el.dataset.jbq, name: el.name || '' });
+      }
+    }
+    for (const r of Object.values(radios)) if (!r.done) out.push(r);
+    return out;
+  },
 };

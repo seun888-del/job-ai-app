@@ -236,10 +236,16 @@ async function applyToJob(page, job, resumePath, coverLetter) {
 
   const send = await _find(page, `${MODAL} button`, /^send application$/);
   if (!send) { console.log('  [Wellfound] No Send application button.'); return false; }
-  // Wellfound greys the button out while a required answer is missing.
-  if (await page.locator(send).first().isDisabled().catch(() => false)) {
+  // Required questions carry a "*" in their label. Never send with one empty.
+  const emptyRequired = await page.evaluate((M) => {
+    const root = document.querySelector(M); if (!root) return [];
+    return [...root.querySelectorAll('textarea, input[type="text"], input:not([type]), select')]
+      .filter(el => el.offsetParent !== null && !el.value && (el.required || /\*/.test((el.closest('label') || {}).innerText || '')))
+      .map(el => ((el.closest('label') || {}).innerText || el.name || '').replace(/\*/g, '').trim().slice(0, 60));
+  }, MODAL).catch(() => []);
+  if (emptyRequired.length) {
+    console.log(`  [Wellfound] Required question left empty (${emptyRequired.join(' | ')}), not sending.`);
     await page.screenshot({ path: path.join(SSDIR, 'wellfound_incomplete.png'), fullPage: true }).catch(() => {});
-    console.log('  [Wellfound] A required question is still empty, not sending.');
     return false;
   }
   if (process.env.JOBBOT_NO_SUBMIT === '1') { console.log('  [Wellfound] TEST MODE: reached Send application, not pressing it'); return true; }
@@ -325,7 +331,7 @@ async function _answerQuestions(page, job, coverLetter) {
       const context = f.kind === 'textarea' ? (job.description || '') : '';
       let ans = isCover && coverLetter ? coverLetter : await ai.aiTextAnswer({ question: isCover ? 'Write a short cover note for this application' : f.q, job, long: f.kind === 'textarea', context });
       if (f.kind === 'number') ans = (String(ans || '').match(/\d+/) || [''])[0];
-      if (!ans) continue;
+      if (!ans) { console.log(`  [Wellfound] No answer for "${f.q.slice(0, 60)}"`); continue; }
       await page.locator(`[data-jbq="${f.id}"]`).fill(String(ans).slice(0, 4000));
       console.log(`  [Wellfound] ${isCover ? 'Cover letter' : 'Q: ' + f.q.slice(0, 70)} -> ${String(ans).replace(/\s+/g, ' ').slice(0, 60)}`);
       await DELAY(400);

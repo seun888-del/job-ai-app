@@ -8,6 +8,7 @@ import { TracAgent } from './agents/trac.js';
 import { ReedAgent } from './agents/reed.js';
 import { LinkedInAgent } from './agents/linkedin.js';
 import { DiceAgent } from './agents/dice.js';
+import { WellfoundAgent } from './agents/wellfound.js';
 import { AtsAgent, feedJobs, fetchJD } from './agents/ats.js';
 import { Page } from './driver/page.js';
 import { scoreJob } from './agents/scorer.js';
@@ -117,6 +118,7 @@ const agents = {
   linkedin: new LinkedInAgent({ onChange }),
   // Indeed (agents/indeed.js) waits: its review page showed a captcha in a test browser. Check in real Chrome first.
   dice: new DiceAgent({ onChange }),
+  wellfound: new WellfoundAgent({ onChange }),
   ats: new AtsAgent({ onChange }),
 };
 const agent = agents.trac;
@@ -125,10 +127,11 @@ const AGENTS = [
   ['reed', 'Reed Agent', 'https://www.reed.co.uk/account/signin', 'Sign in to Reed'],
   ['linkedin', 'LinkedIn Agent', 'https://www.linkedin.com/login', 'Sign in to LinkedIn'],
   ['dice', 'Dice Agent', 'https://www.dice.com/dashboard/login', 'Sign in to Dice'],
+  ['wellfound', 'Wellfound Agent', 'https://wellfound.com/login', 'Sign in to Wellfound'],
   ['ats', 'Company Sites Agent', '', ''],
 ];
-// UK: Trac and Reed. USA: Indeed and Dice. LinkedIn and company sites run in both.
-const inRegion = (k, us) => (us ? k !== 'trac' && k !== 'reed' : k !== 'indeed' && k !== 'dice');
+// UK: Trac and Reed. USA: Indeed, Dice and Wellfound. LinkedIn and company sites run in both.
+const inRegion = (k, us) => (us ? k !== 'trac' && k !== 'reed' : k !== 'indeed' && k !== 'dice' && k !== 'wellfound');
 const anyRunning = () => Object.values(agents).some((a) => a.running);
 // ── Setup-step beacon ───────────────────────────────────────────────────────
 // Where new users stall before their first application (activated, CV added, job
@@ -421,7 +424,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       trac: !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length),
     };
     const base = hasLicence && setupDone.cvs;
-    const canRun = { trac: !us && base && setupDone.trac, reed: !us && base && setupDone.search, linkedin: base && setupDone.search, indeed: us && base && setupDone.search, dice: us && base && setupDone.search, ats: base && setupDone.search };
+    const canRun = { trac: !us && base && setupDone.trac, reed: !us && base && setupDone.search, linkedin: base && setupDone.search, indeed: us && base && setupDone.search, dice: us && base && setupDone.search, wellfound: us && base && setupDone.search, ats: base && setupDone.search };
     const running = anyRunning();
     const hour = new Date().getHours();
     const name = profile.firstName || trac.firstName || '';
@@ -430,7 +433,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac) };
     // Which agents "Start applying" runs (tick box on each card, like the app). All ticked by default.
     const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
-    const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', ats: 'Company sites' };
+    const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites' };
     const bySource = Object.keys(LABEL).map((s) => [s, applied.filter((j) => j.source === s).length]).filter(([, n]) => n);
 
     const card = ([key, label, url, signLabel]) => {
@@ -660,7 +663,7 @@ function showUcLog(list) {
 }
 
 // ── US work search log (same as the app): benefit weeks run Sunday to Saturday ──
-const WSL_SITE = { linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', ats: 'company website', reed: 'Reed' };
+const WSL_SITE = { linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'company website', reed: 'Reed' };
 function wslWeekStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - x.getDay()); return x; }
 function wslByWeek(list) {
   const weeks = new Map();
@@ -716,7 +719,7 @@ VIEWS.analytics = async function renderAnalytics() {
   const all = await store.jobs();
   const applied = all.filter((j) => j.status === 'applied'), skipped = all.filter((j) => j.status === 'skipped'), failed = all.filter((j) => j.status === 'apply_failed');
   const count = (list, key) => Object.entries(list.reduce((m, j) => { const k = key(j); if (k) m[k] = (m[k] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]);
-  const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', ats: 'Company sites' };
+  const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites' };
   const bySource = count(applied, (j) => LABEL[j.source] || j.source), byCv = count(applied, (j) => j.cvName || 'Unknown');
   const skipReasons = count(skipped, (j) => String(j.reason || '').replace(/\s*\(\d+%\)$/, '').replace(/\d+%/g, 'N%')).slice(0, 10);
   const companies = count(applied, (j) => j.company).slice(0, 10), titles = count(applied, (j) => j.title).slice(0, 10);
@@ -813,7 +816,7 @@ setInterval(() => { if (current === 'dashboard' && !document.hidden) renderDashb
 const STAGE_LIST = [['applied', 'Applied'], ['phone_screen', 'Phone screen'], ['interview', 'Interview'], ['offer', 'Offer'], ['rejected', 'Rejected'], ['withdrawn', 'Withdrawn']];
 const STAGE = { phone_screen: ['Phone screen', 'badge-info'], interview: ['Interview', 'badge-info'], offer: ['Offer', 'badge-success'], rejected: ['Rejected', 'badge-muted'], withdrawn: ['Withdrawn', 'badge-muted'] };
 const STATUS = { awaiting_review: ['Waiting for your review', 'badge-warning'], processing: ['Tailoring CV', 'badge-info'], applied: ['Applied', 'badge-success'], apply_failed: ['Failed', 'badge-danger'], skipped: ['Skipped', 'badge-muted'], pending: ['Found', 'badge-info'], cv_ready: ['CV ready', 'badge-info'], applying: ['Applying', 'badge-info'], ready: ['Waiting for you', 'badge-warning'], ready_to_submit: ['Ready to submit', 'badge-success'] };
-const SOURCE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', ats: 'Company site' };
+const SOURCE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site' };
 let trackerFilter = 'all';
 VIEWS.tracker = async function renderTracker() {
   const all = (await store.jobs()).slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
@@ -1370,7 +1373,7 @@ async function initOnboarding() {
 // phone is the computer.
 // It also shares what needs the user, the applications list and the search settings (only when
 // they change), so the phone can submit a ready NHS form, set a stage, or change settings.
-const REMOTE_LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', ats: 'Company sites' };
+const REMOTE_LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites' };
 let remoteCtl = null, remoteNudgeT = null;
 function remoteNudge() { clearTimeout(remoteNudgeT); remoteNudgeT = setTimeout(() => { if (remoteCtl) remoteCtl.abort(); }, 800); }
 async function remoteGate() {
@@ -1380,7 +1383,7 @@ async function remoteGate() {
   const search = !!((profile.searchTerms || []).length);
   const tracOk = !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length);
   const us = isUS(settings);
-  const canRun = { trac: !us && base && tracOk, reed: !us && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, ats: base && search };
+  const canRun = { trac: !us && base && tracOk, reed: !us && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, wellfound: us && base && search, ats: base && search };
   const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
   return { license, cv, canRun, enabled };
 }
@@ -1388,7 +1391,7 @@ async function remoteStatus() {
   const g = await remoteGate();
   const all = await store.jobs();
   const applied = await store.appliedToday(), cap = cfg.MAX_APPLICATIONS_PER_DAY;
-  const SRC = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', ats: 'Company site' };
+  const SRC = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site' };
   const recent = all.filter((j) => ['applied', 'apply_failed', 'ready', 'ready_to_submit'].includes(j.status))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 12)
     .map((j) => ({ title: j.title || '', company: j.company || '', source: SRC[j.source] || '', status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting', at: j.appliedAt || j.updatedAt || '', ...(j.status === 'apply_failed' && j.reason ? { reason: String(j.reason).slice(0, 140) } : {}) }));
@@ -1407,7 +1410,7 @@ async function remoteStatus() {
     skip_reasons: Object.entries(skipReasons).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([reason, count]) => ({ reason, count })),
   };
 }
-const REMOTE_SITE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', ats: 'Company site' };
+const REMOTE_SITE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site' };
 const REMOTE_STAGES = ['applied', 'phone_screen', 'interview', 'offer', 'rejected', 'withdrawn'];
 const TRAC_LIST = 'https://apps.trac.jobs/applicationlist';
 async function remoteExtra() {
@@ -1586,7 +1589,7 @@ async function remotePost(path, body, signal) {
 // Test builds only (node build.mjs --test): lets automated tests drive the same objects.
 // Release builds leave this out, so nothing internal is exposed on the page.
 if (process.env.JOBAI_TEST === '1') {
-  globalThis.__jobaiTest = { scoreJob, agent, agents, mods: { reed: require('../../bot/modules/reed'), linkedin: require('../../bot/modules/linkedin'), indeed: require('../../bot/modules/indeed'), dice: require('../../bot/modules/dice'), ats: require('../../bot/modules/ats_filler'), feedJobs, fetchJD }, store, cfg, loadConfig, Page, vfs, vfsReady, trac: require('../../bot/modules/trac_source'), apply: require('../../bot/modules/trac_apply'), parseCV: require('../../bot/modules/cv_parser').parseCV, pdf: require('../../bot/modules/cv_pdf_writer') };
+  globalThis.__jobaiTest = { scoreJob, agent, agents, mods: { reed: require('../../bot/modules/reed'), linkedin: require('../../bot/modules/linkedin'), indeed: require('../../bot/modules/indeed'), dice: require('../../bot/modules/dice'), wellfound: require('../../bot/modules/wellfound'), ats: require('../../bot/modules/ats_filler'), feedJobs, fetchJD }, store, cfg, loadConfig, Page, vfs, vfsReady, trac: require('../../bot/modules/trac_source'), apply: require('../../bot/modules/trac_apply'), parseCV: require('../../bot/modules/cv_parser').parseCV, pdf: require('../../bot/modules/cv_pdf_writer') };
 }
 
 navigate('dashboard');

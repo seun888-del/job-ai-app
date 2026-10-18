@@ -87,10 +87,11 @@ export class SiteAgent {
     if (cfg.TITLE_BLOCKLIST.some((k) => t.includes(k))) return;
     if (cfg.COMPANY_BLOCKLIST.some((b) => (job.company || '').toLowerCase().includes(b))) return;
     const add = (fields) => store.addJob({ ...job, ...fields, source: this.source });
+    if (details && details.hasEasyApply === false) return add({ status: 'skipped', reason: details.isExternalOnly ? 'External site' : 'No apply button' });
     if (!details || !details.description || details.description.trim().split(/\s+/).length < (this.minWords || 80)) return add({ status: 'skipped', reason: 'Job description too short or missing' });
     if (details.isTrainingCourse || cfg.isTrainingCourseJD(details.description, job.title)) return add({ status: 'skipped', reason: 'Training course' });
-    if (details.hasEasyApply === false) return add({ status: 'skipped', reason: details.isExternalOnly ? 'External site' : 'No apply button' });
-    const workType = detectWorkType(details.description);
+    // A site that states the work type (Wellfound's job cards) beats guessing from the text.
+    const workType = details.workType || detectWorkType(details.description);
     if (!cfg.WORK_TYPE_PRIORITY.includes(workType)) return add({ status: 'skipped', reason: `Work type (${workType}) not wanted` });
     if (cfg.APPLICANT.seekSponsorship && !(await sponsorship.offersSponsorship(details.description).catch(() => false))) return add({ status: 'skipped', reason: 'No sponsorship offered' });
     if (!salary.isAcceptable(details.description, cfg.APPLICANT.salaryExpectation)) return add({ status: 'skipped', reason: 'Below your salary expectation' });
