@@ -131,6 +131,14 @@ async function openSubscribe() {
 function tzLooksUS() {
   try { return (Intl.DateTimeFormat().resolvedOptions().timeZone || '').startsWith('America/'); } catch (_) { return false; }
 }
+// The UK / USA switch, shown on the dashboard and in Search Preferences.
+function regionSwitchHtml(isUS) {
+  return `<div class="region-row"><span class="region-label">Find jobs in:</span>
+        <div class="region-switch" role="group" aria-label="Find jobs in">
+          <button class="region-opt${isUS ? '' : ' active'}" data-region="United Kingdom">UK</button>
+          <button class="region-opt${isUS ? ' active' : ''}" data-region="United States">USA</button>
+        </div></div>`;
+}
 async function setRegion(country) {
   const us = country === 'United States';
   await window.api.profile.save({ country });
@@ -157,7 +165,8 @@ document.addEventListener('click', async (e) => {
   const btn = e.target.closest('.region-opt');
   if (!btn || btn.classList.contains('active')) return;
   await setRegion(btn.dataset.region);
-  if (_currentView === 'dashboard') render('dashboard');
+  // Both views show the switch; Search Preferences also shows the location it swaps.
+  if (_currentView === 'dashboard' || _currentView === 'search') render(_currentView);
 });
 
 // US users read "resume" instead of "CV". Rewrites visible text and placeholders
@@ -724,11 +733,12 @@ async function renderCVs() {
 
 // â”€â”€ 4. Search Preferences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function renderSearch() {
-  const [prefs, terms, excludes, blacklist] = await Promise.all([
+  const [prefs, terms, excludes, blacklist, regionProfile] = await Promise.all([
     window.api.searchPrefs.get(),
     window.api.searchTerms.get(),
     window.api.excludeKeywords.get(),
     window.api.blacklist.get(),
+    window.api.profile.get(),
   ]);
 
   content.innerHTML = `
@@ -739,6 +749,8 @@ async function renderSearch() {
 
     <div class="card">
       <h3>Search Criteria</h3>
+      ${regionSwitchHtml((regionProfile && regionProfile.country) === 'United States')}
+      <p class="field-hint" style="margin:4px 0 14px">Picks the job sites the agents use. USA: LinkedIn, Indeed, Dice and Wellfound. UK: LinkedIn, Reed and NHS jobs.</p>
       <div class="field-row">
         <div class="field">
           <label>Location</label>
@@ -2087,10 +2099,7 @@ async function renderDashboard() {
       <div>
         <h2 class="dash-greeting">${greeting}</h2>
         <p class="dash-sub">${dashboardHasLicense ? 'Your agents are ready. Applications run automatically each day.' : 'Monitor agent activity and track your application progress.'}</p>
-        <div class="region-switch" role="group" aria-label="Job market">
-          <button class="region-opt${isUS ? '' : ' active'}" data-region="United Kingdom">UK</button>
-          <button class="region-opt${isUS ? ' active' : ''}" data-region="United States">USA</button>
-        </div>
+        ${regionSwitchHtml(isUS)}
       </div>
       <div class="dash-cta">
         <span class="scorer-pill${scorerRunning ? ' scorer-pill-active' : ''}" id="scorer-pill" data-status="${status.scorer || 'stopped'}"

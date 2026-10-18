@@ -464,9 +464,11 @@ VIEWS.dashboard = async function renderDashboardView() {
         <div>
           <h2 class="dash-greeting">Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}${name ? ', ' + esc(name) : ''}</h2>
           <p class="dash-sub">${running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Monitor agent activity and track your application progress.'}</p>
-          <div class="region-switch" role="group" aria-label="Job market">
-            <button class="region-opt${us ? '' : ' active'}" data-region="uk">UK</button>
-            <button class="region-opt${us ? ' active' : ''}" data-region="us">USA</button>
+          <div class="region-row"><span class="region-label">Find jobs in:</span>
+            <div class="region-switch" role="group" aria-label="Find jobs in">
+              <button class="region-opt${us ? '' : ' active'}" data-region="uk">UK</button>
+              <button class="region-opt${us ? ' active' : ''}" data-region="us">USA</button>
+            </div>
           </div>
         </div>
         <div class="dash-cta">
