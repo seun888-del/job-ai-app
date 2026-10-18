@@ -199,7 +199,7 @@ Respond with ONLY the answer text — no preamble, no quotes, no labels.`;
 // the model could answer from the payload; missing/unknown → omitted (never invented).
 // Sensitive questions (legal / equality) are filtered out here as a second safety net;
 // the caller answers those from the user's own stored values.
-async function aiFillFields({ fields, payload, job }) {
+async function aiFillFields({ fields, payload, job, form = 'an NHS job application form (Trac)', usEnglish = false }) {
   if (!aiEnabled() || !Array.isArray(fields) || !fields.length) return {};
   // Reuse answers already given this session: the same question ("working with people",
   // "an example of flexibility") comes up on form after form, so ask the AI only once.
@@ -212,7 +212,7 @@ async function aiFillFields({ fields, payload, job }) {
   });
   if (!safe.length) return out;
   const list = safe.map((f) => ({ id: f.id, question: String(f.label).slice(0, 300), type: f.kind, ...(f.options && f.options.length ? { options: f.options.slice(0, 40) } : {}) }));
-  const prompt = `You are completing an NHS job application form (Trac) on behalf of the candidate below. Answer each form field using ONLY the candidate's data.
+  const prompt = `You are completing ${form} on behalf of the candidate below. Answer each form field using ONLY the candidate's data.
 
 CANDIDATE DATA (JSON):
 ${JSON.stringify(payload || {}).slice(0, 7000)}
@@ -225,9 +225,11 @@ ${JSON.stringify(list)}
 RULES:
 - For a field with "options", the value MUST be the exact text of one option.
 - For a text field, give just the value (no labels, no quotes around it).
-- For a free-text question about the candidate's experience or suitability, write 2 to 4 first-person sentences grounded in their employment history. British English. No em or en dashes.
+- For a free-text question about the candidate's experience or suitability, write 2 to 4 first-person sentences grounded in their employment history. ${usEnglish ? 'American' : 'British'} English. No em or en dashes.
 - If the data does not contain the answer and it cannot be clearly derived from it (addresses, dates, phone numbers, registration numbers you do not have), use null. NEVER invent facts.
 - Yes/No questions about standard declarations or confirmations (e.g. "I confirm the information is true") are answered "Yes".
+- "Have you worked for / been employed by this company before?": answer from the employment history, so "No" unless that employer is listed.
+- Skills, tools or certificates: answer "Yes" only if the data shows them (skills list, duties, education); if the data does not mention them, use null.
 
 Return ONLY JSON: {"answers":[{"id":<id>,"value":<string or null>}]}`;
   try {

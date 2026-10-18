@@ -644,6 +644,55 @@ module.exports = {
         }
         return '';
       },
+  "f5f84b3caca16": () => {
+    const vis = (e) => !!(e.offsetParent || e.getClientRects().length);
+    const labelOf = (el) => {
+      const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+      if (lg && lg.innerText.trim()) return lg.innerText.trim();
+      const g = el.closest('[role="radiogroup"]'); const lb = g && g.getAttribute('aria-labelledby');
+      const lbe = lb && document.getElementById(lb.split(' ')[0]);
+      if (lbe && lbe.innerText.trim()) return lbe.innerText.trim();
+      const own = el.id && document.querySelector('label[for="' + el.id + '"]');
+      if (own && el.type !== 'radio' && own.innerText.trim()) return own.innerText.trim();
+      const q = el.closest('[class*="ia-Question"], [class*="question"]');
+      const ql = q && q.querySelector('label, legend, [class*="label"]');
+      if (ql && ql.innerText.trim() && !ql.contains(el)) return ql.innerText.trim();
+      const optionLabels = new Set(el.type === 'radio' ? [...document.querySelectorAll('input[type="radio"]')].filter((r) => r.name === el.name)
+        .map((r) => ((document.querySelector('label[for="' + r.id + '"]') || r.closest('label') || {}).innerText || '').trim()) : []);
+      let node = el.parentElement;
+      for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
+        for (const tag of ['legend', 'h1', 'h2', 'h3', 'p', 'label', 'span']) {
+          for (const l of node.querySelectorAll(tag)) {
+            if (l.contains(el) || l.querySelector('input')) continue;
+            const t = (l.innerText || '').trim();
+            if (t.length > 8 && !optionLabels.has(t) && !/^(yes|no|true|false)$/i.test(t)) return t;
+          }
+        }
+      }
+      return '';
+    };
+    const out = []; let n = 0; const seen = new Set();
+    for (const el of document.querySelectorAll('input[type="radio"], select, input[type="text"], input[type="number"], textarea')) {
+      if (!vis(el) && el.type !== 'radio') continue;
+      if (el.type === 'radio') {
+        if (seen.has(el.name)) continue; seen.add(el.name);
+        const group = [...document.querySelectorAll('input[type="radio"]')].filter((r) => r.name === el.name);
+        if (group.some((r) => r.checked)) continue;
+        const opts = group.map((r) => ((document.querySelector('label[for="' + r.id + '"]') || r.closest('label') || {}).innerText || '').trim()).filter(Boolean);
+        el.setAttribute('data-jbq', 'q' + n);
+        out.push({ id: 'q' + (n++), label: labelOf(el), kind: 'radio', options: opts });
+      } else if (el.tagName === 'SELECT') {
+        if (el.value) continue;
+        el.setAttribute('data-jbq', 'q' + n);
+        out.push({ id: 'q' + (n++), label: labelOf(el), kind: 'select', options: [...el.options].map((o) => o.text.trim()).filter((t) => t && !/^select|^choose|^please/i.test(t)) });
+      } else {
+        if (el.value) continue;
+        el.setAttribute('data-jbq', 'q' + n);
+        out.push({ id: 'q' + (n++), label: labelOf(el), kind: el.tagName === 'TEXTAREA' ? 'textarea' : el.type });
+      }
+    }
+    return out;
+  },
   "fc2cebe71021b": el => {
           const fs = el.closest('fieldset');
           const legend = fs && fs.querySelector('legend');

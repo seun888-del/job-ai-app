@@ -669,7 +669,7 @@ function _resolveDropdown(question, options) {
   return fallback;
 }
 
-async function _buildTextAnswer(question, job) {
+async function _buildTextAnswer(question, job, { factsOnly = false } = {}) {
   const { yearsExperience, salaryExpectation, availability, willingToRelocate, location, firstName, lastName } = cfg.APPLICANT;
   const q = (question || '').toLowerCase();
 
@@ -697,6 +697,8 @@ async function _buildTextAnswer(question, job) {
   if (/city only|which city|city.*work|where.*based|where do you|location/i.test(q)) {
     return (location || '').split(',')[0].trim() || location || '';
   }
+  // Everything below is written text (canned or AI); the page-level AI pass comes first.
+  if (factsOnly) return '';
 
   // Current employment / work situation
   if (/current.*work.*situation|work.*situation|employment.*status|are you currently employed\s*\??\*?$|current.*role\b|current.*position\b/i.test(q) && !/employed by|worked (for|at)/i.test(q)) {
@@ -751,10 +753,11 @@ Job: ${title} at ${company}
 
 Form question: "${question}"
 
-Write a short, professional answer (2-4 sentences). Sound natural and human. No bullet points. No mention of AI. Answer directly — do not include the question in your response.`;
+Write a short, professional answer (2-4 sentences). Sound natural and human. No bullet points. No mention of AI. Answer directly, without repeating the question.
+Use ONLY the facts above. Never invent experience, hobbies, products used, links, URLs or personal details. If the question cannot be answered from these facts (for example it asks for a link, a website or a personal detail not listed), reply with exactly: SKIP`;
 
       const answer = await llmChat(prompt);
-      if (answer && answer.trim()) {
+      if (answer && answer.trim() && !/^\W*skip\W*$/i.test(answer.trim())) {
         console.log(`  [Indeed] AI: "${question.substring(0, 60)}" → "${answer.substring(0, 80)}..."`);
         return answer.trim();
       }
@@ -908,9 +911,101 @@ Reply with ONLY the numbers of the option(s) to tick, comma-separated. Example: 
   }
 }
 
+// The candidate data the page-level AI answers from (same idea as the NHS agent's payload).
+function _candidatePayload(job) {
+  const A = cfg.APPLICANT || {}, D = cfg.TRAC_DETAILS || {};
+  return {
+    name: [A.firstName, A.lastName].filter(Boolean).join(' '), location: A.location,
+    yearsOfExperience: A.yearsExperience, availability: A.availability,
+    skills: [...new Set((cfg.CVS || []).flatMap((c) => c.keywords || []))].slice(0, 40),
+    willingToRelocate: !!A.willingToRelocate, drivingLicence: !!A.drivingLicence,
+    employment: (D.employment || []).map((e) => ({ employer: e.employer, jobTitle: e.jobTitle, start: e.start, end: e.end, duties: String(e.duties || '').slice(0, 400) })),
+    education: D.education || [],
+    coverLetterForThisJob: String((job && job.coverLetter) || '').slice(0, 1500),
+    jobAdvert: String((job && job.description) || '').slice(0, 2500),
+  };
+}
+
+// One AI call per page for every question the profile rules can't answer: the AI sees all of
+// them with the candidate's data and returns null instead of guessing. Returns id -> answer,
+// where id is the data-jbq mark put on the field (radio group: its first radio).
+async function _pageAiAnswers(frame, job) {
+  if (!ai.aiEnabled()) return new Map();
+  const fields = await frame.evaluate(() => {
+    const vis = (e) => !!(e.offsetParent || e.getClientRects().length);
+    const labelOf = (el) => {
+      const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+      if (lg && lg.innerText.trim()) return lg.innerText.trim();
+      const g = el.closest('[role="radiogroup"]'); const lb = g && g.getAttribute('aria-labelledby');
+      const lbe = lb && document.getElementById(lb.split(' ')[0]);
+      if (lbe && lbe.innerText.trim()) return lbe.innerText.trim();
+      const own = el.id && document.querySelector('label[for="' + el.id + '"]');
+      if (own && el.type !== 'radio' && own.innerText.trim()) return own.innerText.trim();
+      const q = el.closest('[class*="ia-Question"], [class*="question"]');
+      const ql = q && q.querySelector('label, legend, [class*="label"]');
+      if (ql && ql.innerText.trim() && !ql.contains(el)) return ql.innerText.trim();
+      const optionLabels = new Set(el.type === 'radio' ? [...document.querySelectorAll('input[type="radio"]')].filter((r) => r.name === el.name)
+        .map((r) => ((document.querySelector('label[for="' + r.id + '"]') || r.closest('label') || {}).innerText || '').trim()) : []);
+      let node = el.parentElement;
+      for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
+        for (const tag of ['legend', 'h1', 'h2', 'h3', 'p', 'label', 'span']) {
+          for (const l of node.querySelectorAll(tag)) {
+            if (l.contains(el) || l.querySelector('input')) continue;
+            const t = (l.innerText || '').trim();
+            if (t.length > 8 && !optionLabels.has(t) && !/^(yes|no|true|false)$/i.test(t)) return t;
+          }
+        }
+      }
+      return '';
+    };
+    const out = []; let n = 0; const seen = new Set();
+    for (const el of document.querySelectorAll('input[type="radio"], select, input[type="text"], input[type="number"], textarea')) {
+      if (!vis(el) && el.type !== 'radio') continue;
+      if (el.type === 'radio') {
+        if (seen.has(el.name)) continue; seen.add(el.name);
+        const group = [...document.querySelectorAll('input[type="radio"]')].filter((r) => r.name === el.name);
+        if (group.some((r) => r.checked)) continue;
+        const opts = group.map((r) => ((document.querySelector('label[for="' + r.id + '"]') || r.closest('label') || {}).innerText || '').trim()).filter(Boolean);
+        el.setAttribute('data-jbq', 'q' + n);
+        out.push({ id: 'q' + (n++), label: labelOf(el), kind: 'radio', options: opts });
+      } else if (el.tagName === 'SELECT') {
+        if (el.value) continue;
+        el.setAttribute('data-jbq', 'q' + n);
+        out.push({ id: 'q' + (n++), label: labelOf(el), kind: 'select', options: [...el.options].map((o) => o.text.trim()).filter((t) => t && !/^select|^choose|^please/i.test(t)) });
+      } else {
+        if (el.value) continue;
+        el.setAttribute('data-jbq', 'q' + n);
+        out.push({ id: 'q' + (n++), label: labelOf(el), kind: el.tagName === 'TEXTAREA' ? 'textarea' : el.type });
+      }
+    }
+    return out;
+  }).catch(() => []);
+  // Leave the profile-rule questions (salary, notice, visa, EEO...) to the rules.
+  const todo = [];
+  for (const f of fields) {
+    if (!f.label) continue;
+    if (f.kind === 'radio' && _resolveRadio(f.label.toLowerCase(), f.options, { allowUnknown: false })) continue;
+    if ((f.kind === 'text' || f.kind === 'number' || f.kind === 'textarea') && await _buildTextAnswer(f.label.toLowerCase(), job, { factsOnly: true })) continue;
+    if (f.kind === 'select') continue; // dropdowns keep their own matcher
+    todo.push(f);
+  }
+  if (!todo.length) return new Map();
+  const us = (cfg.APPLICANT || {}).country === 'United States';
+  const answers = await ai.aiFillFields({ fields: todo, payload: _candidatePayload(job), job, form: 'a job application on Indeed', usEnglish: us }).catch(() => null);
+  if (!answers) return new Map();
+  const map = new Map(Object.entries(answers));
+  // Asked but not answered = the data doesn't hold the answer. Stays blank (never guessed).
+  for (const f of todo) if (!map.has(f.id)) map.set(f.id, null);
+  console.log(`  [Indeed] AI answered ${map.size} of ${todo.length} question(s) on this page from your details`);
+  return map;
+}
+
 async function _answerQuestions(page, job) {
   for (const frame of _allFrames(page)) {
     try {
+      const pageAI = await _pageAiAnswers(frame, job);
+      // undefined = not asked (use the old rules), null = asked and the data has no answer (leave blank).
+      const aiFor = async (el) => { const id = await el.getAttribute('data-jbq').catch(() => null); return id && pageAI.has(id) ? pageAI.get(id) : undefined; };
       // ── Radio buttons (group by name — works without fieldset wrappers) ──
       const allRadios = await frame.$$('input[type="radio"]');
       const radioGroups = new Map();
@@ -962,7 +1057,14 @@ async function _answerQuestions(page, job) {
         const labels = options.map(o => o.label);
         // A lone option ("I understand") is an acknowledgement: it must be ticked to continue.
         let targetLabel = labels.length === 1 ? labels[0] : _resolveRadio(question, labels, { allowUnknown: false });
-        if (!targetLabel && question) {
+        let askedUnknown = false;
+        if (!targetLabel) {
+          const v = await aiFor(radios[0]);
+          const m = v && ai._matchOption(v, labels.map(text => ({ text })));
+          if (m) { targetLabel = m.text; console.log(`  [Indeed] AI (page): "${question.substring(0, 70)}" → "${m.text}"`); }
+          else if (v === null) { askedUnknown = true; console.log(`  [Indeed] Not in your details, left blank: "${question.substring(0, 70)}"`); }
+        }
+        if (!targetLabel && question && !askedUnknown) {
           // Unknown question: let the AI pick from the candidate's profile (sensitive
           // questions are refused inside aiPickOption), else the old default.
           const picked = await ai.aiPickOption({ question, options: labels.map(text => ({ text })), job, kind: 'radio' }).catch(() => null);
@@ -1012,7 +1114,8 @@ async function _answerQuestions(page, job) {
         }).catch(() => '');
         const type = await inp.getAttribute('type').catch(() => 'text');
 
-        const answer = await _buildTextAnswer(question, job);
+        const pv = await aiFor(inp);
+        const answer = (await _buildTextAnswer(question, job, { factsOnly: true })) || pv || (pv === null ? '' : await _buildTextAnswer(question, job));
         if (answer) {
           await inp.click().catch(() => {}); await DELAY(80 + Math.random() * 120);
           await inp.type(answer, { delay: 55 + Math.random() * 75 }).catch(() => {});
@@ -1035,7 +1138,8 @@ async function _answerQuestions(page, job) {
           const lab = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
           return (lab ? lab.innerText : el.closest('[class*="ia-Question"], [class*="question"]')?.querySelector('label, [class*="label"]')?.innerText || '').trim();
         }).catch(() => '');
-        const answer = await _buildTextAnswer(label, job);
+        const tv = await aiFor(ta);
+        const answer = (await _buildTextAnswer(label.toLowerCase(), job, { factsOnly: true })) || tv || (tv === null ? '' : await _buildTextAnswer(label, job));
         if (answer) {
           await ta.click().catch(() => {}); await DELAY(80 + Math.random() * 120);
           await ta.type(answer, { delay: 30 + Math.random() * 40 }).catch(() => {});
