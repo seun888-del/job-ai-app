@@ -598,7 +598,7 @@ function _resolveRadio(question, labels, { allowUnknown = true } = {}) {
   // For "do you currently X / are you bound by / have you ever" questions, "No" is the safe default.
   // For "are you comfortable / willing / able" questions, "Yes" is right.
   if (!allowUnknown) return null;
-  const isNegativePattern = /do you currently|are you bound|have you ever|non.?compete|restrict|conflict|partner.*compan|compan.*partner|nda|lawsuit|terminat/i.test(q);
+  const isNegativePattern = /do you currently|are you currently|are you bound|have (you )?ever|employed by .* before|worked (for|at) .* before|previously (been )?(employed|worked)|former employee|non.?compete|restrict|conflict|partner.*compan|compan.*partner|nda|lawsuit|terminat/i.test(q);
   const fallback = isNegativePattern
     ? (find(/^no/i) || labels[labels.length - 1])
     : (find(/^yes/i) || labels[0]);

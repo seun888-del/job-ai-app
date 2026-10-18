@@ -33,9 +33,11 @@ const _cache = new Map();
 // Lazily decide whether AI is reachable at all: a shipped build always has a
 // license key in env; dev needs JOBBOT_ALLOW_LOCAL_LLM. If neither, stay off and
 // never attempt a call (keeps the bot fast + silent when AI is unavailable).
-let _enabled = null;
+// Only "on" is remembered: the licence can arrive after the first check (the extension
+// loads it from storage, or the user activates mid-session), so "off" is re-checked each time.
+let _enabled = false;
 function aiEnabled() {
-  if (_enabled === null) {
+  if (!_enabled) {
     _enabled = !!(llm && typeof llm.llmChat === 'function') &&
       (!!process.env.JOBBOT_LICENSE_KEY || !!process.env.JOBBOT_ALLOW_LOCAL_LLM);
   }
