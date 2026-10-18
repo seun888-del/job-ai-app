@@ -83,6 +83,7 @@ const shims = {
     b.onResolve({ filter: /^(node:)?path$/ }, () => ({ path: S('path.js') }));
     b.onResolve({ filter: /^\.\/(stealth|captcha_solver|queue_manager)$/ }, () => ({ path: S('noop.js') }));
     b.onResolve({ filter: /^\.\/cv_validate$/ }, () => ({ path: S('cv_validate.js') }));
+    b.onResolve({ filter: /^\.\/browser_launcher$/ }, () => ({ path: S('browser_launcher.js') }));
     b.onResolve({ filter: /^pdfkit$/ }, () => ({ path: resolve(root, 'node_modules/pdfkit/js/pdfkit.standalone.js') }));
     // Shared agent modules: rewrite page functions to call them by id.
     b.onLoad({ filter: /[\\/]bot[\\/]modules[\\/][^\\/]+\.js$/ }, (a) => {
@@ -102,7 +103,7 @@ const common = {
   logLevel: 'warning',
   plugins: [shims],
   // A few settings the desktop code reads from process.env.
-  define: { 'process.env.JOBBOT_LICENSE_KEY': 'globalThis.__jobaiLicense', 'process.env.JOBBOT_ALLOW_LOCAL_LLM': 'undefined', 'process.env.JOBBOT_AIFILL_MS': 'undefined', 'process.env.JOBBOT_AIFILL_DEBUG': 'undefined', 'process.env.JOBBOT_TRAC_RESUME': 'undefined', 'process.env.JOBAI_TEST': test ? '"1"' : '"0"' },
+  define: { 'process.env.JOBBOT_LICENSE_KEY': 'globalThis.__jobaiLicense', 'process.env.JOBBOT_ALLOW_LOCAL_LLM': 'undefined', 'process.env.JOBBOT_AIFILL_MS': 'undefined', 'process.env.JOBBOT_AIFILL_DEBUG': 'undefined', 'process.env.JOBBOT_TRAC_RESUME': 'undefined', 'process.env.JOBBOT_NO_SUBMIT': test ? 'globalThis.__jobaiNoSubmit' : 'undefined', 'process.env.JOBBOT_LOGIN_PROMPT': 'undefined', 'process.env.JOBBOT_SHOW_BROWSER': 'undefined', 'process.env.JOBBOT_USERDATA': 'undefined', 'process.env.JOBAI_TEST': test ? '"1"' : '"0"' },
 };
 
 const builds = [

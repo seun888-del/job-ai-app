@@ -36,6 +36,8 @@
     "https://www.reed.co.uk/*",
     "https://secure.reed.co.uk/*",
     "https://www.linkedin.com/*",
+    "https://*.indeed.com/*",
+    "https://www.dice.com/*",
     "https://*.greenhouse.io/*",
     "https://jobs.lever.co/*",
     "https://api.lever.co/*",

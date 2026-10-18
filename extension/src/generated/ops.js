@@ -185,7 +185,7 @@ module.exports = {
         }
         return true;
       },
-  "f0f5cb5b6f470": () => {
+  "f466e4cd1d27d": () => {
     const t = (document.title || '').toLowerCase();
     const b = (document.body?.innerText || '').substring(0, 1200).toLowerCase();
     const isCfChallenge =
@@ -247,6 +247,98 @@ module.exports = {
       const cb = widget?.getAttribute('data-callback');
       if (cb && typeof window[cb] === 'function') window[cb](t);
     },
+  "f278086faf9b7": () => {
+    const links = [...document.querySelectorAll('header a, header button, nav a, nav button')].map(a => (a.innerText || '').trim().toLowerCase());
+    if (links.includes('login') || links.includes('log in') || links.includes('sign in')) return false;
+    return !!document.querySelector('a[href*="/dashboard/profile"], a[href*="/logout"], [data-testid*="avatar" i], [aria-label*="profile" i], [aria-label*="account" i]')
+      || links.some(t => /log ?out|sign ?out|profile|my jobs/.test(t));
+  },
+  "f4c56983362de": () => window.scrollBy(0, 900),
+  "f85c71c23f76f": (lim) => {
+    const seen = new Set(); const out = [];
+    for (const a of document.querySelectorAll('a[data-testid="job-search-job-detail-link"], a[href*="/job-detail/"]')) {
+      const m = (a.getAttribute('href') || '').match(/\/job-detail\/([0-9a-f-]{36})/i);
+      if (!m || seen.has(m[1])) continue;
+      const title = (a.innerText || a.getAttribute('aria-label') || '').trim();
+      if (!title || /^view details/i.test(title)) continue;
+      seen.add(m[1]);
+      // The card's text runs "Title / Company / Location • age / type / pay".
+      let card = a; for (let i = 0; i < 6 && card && !(card.innerText || '').includes('•'); i++) card = card.parentElement;
+      const lines = ((card && card.innerText) || '').split('\n').map(s => s.trim()).filter(Boolean);
+      const ti = lines.indexOf(title);
+      out.push({ jobId: 'dice_' + m[1], jobKey: m[1], title, company: lines[ti + 1] || '', location: (lines[ti + 2] || '').split('•')[0].trim(), url: `${location.origin}/job-detail/${m[1]}` });
+      if (out.length >= lim) break;
+    }
+    return out;
+  },
+  "f9fa901a32fcb": () => {
+    const desc = document.querySelector('[data-testid="jobDescriptionHtml"], [class*="jobDescription"], #jobDescription');
+    const company = document.querySelector('a[href*="/company-profile/"], [data-cy="companyNameLink"]');
+    // Dice's own apply goes to /job-applications/{id}; anything else leaves Dice.
+    const apply = [...document.querySelectorAll('a, button, apply-button-wc, span')].find(b => b.offsetParent !== null && /^(apply now|easy apply|apply|continue application)$/i.test((b.innerText || '').trim()));
+    const href = (apply && (apply.getAttribute('href') || (apply.closest('a') && apply.closest('a').getAttribute('href')))) || '';
+    const applied = [...document.querySelectorAll('button, a, span')].some(b => b.offsetParent !== null && /^applied$|^application submitted$/i.test((b.innerText || '').trim()));
+    return {
+      description: desc ? desc.innerText.trim() : (document.querySelector('main')?.innerText || '').trim().slice(0, 8000),
+      company: company ? company.innerText.trim() : '',
+      hasEasyApply: !!apply && (!href || /job-applications|dashboard\/login/.test(href)),
+      alreadyApplied: applied,
+    };
+  },
+  "f6f9cb8fdea56": ([css, src, tok]) => {
+    const re = new RegExp(src, 'i');
+    const el = [...document.querySelectorAll(css)].find(e => e.offsetParent !== null && re.test(((e.innerText || e.getAttribute('aria-label') || '') + '').trim()));
+    if (!el) return false;
+    el.setAttribute('data-jbclick', tok);
+    return true;
+  },
+  "fc6ca92edff20": () => {
+    const vis = [...document.querySelectorAll('button, a, span')].filter(b => b.offsetParent !== null).map(b => (b.innerText || '').trim());
+    return { applied: vis.some(t => /^applied$|^application submitted$/i.test(t)), canApply: vis.some(t => /^(easy apply|apply now|continue application)$/i.test(t)) };
+  },
+  "f1ce4b4de9fb8": () => ((document.body.innerText.match(/step \d+ of \d+/i) || [''])[0]) + '|' + [...document.querySelectorAll('form')].map(f => f.innerText).join('|').slice(0, 1500),
+  "f4206c2633837": () => /application (has been |was )?(submitted|sent)|successfully applied|thanks for applying/i.test(document.body.innerText || '') || /\/success|confirmation/i.test(location.href),
+  "f0a6254bc1dcb": () => [...document.querySelectorAll('[role="alert"], [class*="error" i]')].map(e => (e.innerText || '').trim()).filter(t => t && t.length < 200),
+  "f62f30cef2966": () => /resume\s*\*/i.test(document.body.innerText || '') && !/review your application/i.test(document.body.innerText || ''),
+  "fc7e4f66dd4df": re => ((document.body.innerText || '').match(new RegExp(re, 'i')) || [])[1] || '',
+  "fb01e722dc612": () => [...document.querySelectorAll('[role="menuitem"], [role="menu"] button, [role="menu"] a, li button')].filter(e => e.offsetParent !== null).map(e => (e.innerText || '').trim()).filter(Boolean),
+  "fe08dca83387d": () => {
+    const vis = e => e.offsetParent !== null || (e.type === 'radio' && e.closest('label') && e.closest('label').offsetParent !== null);
+    const qText = el => {
+      const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
+      if (lg) return lg.innerText.trim();
+      const rg = el.closest('[role="radiogroup"]');
+      const lb = el.getAttribute('aria-labelledby') || (rg && rg.getAttribute('aria-labelledby'));
+      if (lb) { const t = lb.split(' ').map(id => (document.getElementById(id) || {}).innerText || '').join(' ').trim(); if (t) return t; }
+      if (el.type !== 'radio' && el.labels && el.labels[0]) return el.labels[0].innerText.trim();
+      let n = el.parentElement;
+      for (let i = 0; i < 6 && n; i++, n = n.parentElement) {
+        const t = [...n.querySelectorAll('label, p, span, div')].find(x => x.children.length === 0 && (x.innerText || '').trim().length > 8 && !x.contains(el) && !(x.closest('label') && x.closest('label').contains(el)));
+        if (t) return t.innerText.trim();
+      }
+      return el.getAttribute('aria-label') || el.name || '';
+    };
+    const out = []; let k = 0; const radios = {};
+    // The wizard's form is not inside <main>; header search boxes are outside any form.
+    for (const el of document.querySelectorAll('form input, form select, form textarea')) {
+      if (['hidden', 'file', 'submit', 'button', 'search', 'checkbox'].includes(el.type) || !vis(el)) continue;
+      if (!el.dataset.jbq) el.dataset.jbq = 'q' + (k++) + Math.random().toString(36).slice(2, 6);
+      if (el.type === 'radio') {
+        const g = el.name || qText(el);
+        const r = radios[g] = radios[g] || { kind: 'radio', q: qText(el), opts: [], done: false };
+        r.opts.push({ text: ((el.labels && el.labels[0] && el.labels[0].innerText) || el.value || '').trim(), id: el.dataset.jbq });
+        if (el.checked) r.done = true;
+      } else if (el.tagName === 'SELECT') {
+        if (el.value && el.selectedIndex > 0) continue;
+        out.push({ kind: 'select', q: qText(el), id: el.dataset.jbq, opts: [...el.options].slice(1).map(o => ({ text: o.text.trim(), value: o.value })) });
+      } else if (!el.value) {
+        out.push({ kind: el.tagName === 'TEXTAREA' ? 'textarea' : (el.type === 'number' ? 'number' : 'text'), q: qText(el), id: el.dataset.jbq });
+      }
+    }
+    for (const r of Object.values(radios)) if (!r.done) out.push(r);
+    return out;
+  },
+  "f189586c3428f": id => { const i = document.querySelector(`[data-jbq="${id}"]`); if (i) (i.closest('label') || i).click(); },
   "f308ebf110f8b": () => {
       const btn = Array.from(document.querySelectorAll('button')).find(b =>
         /accept.*cookie|accept all/i.test(b.textContent || '')
@@ -405,13 +497,17 @@ module.exports = {
                  t.includes('successfully applied')   || t.includes('application received') ||
                  t.includes('application complete')   || t.includes('we received your');
         },
-  "f6a740629a645": () => {
-    const t = (document.body?.innerText || '').toLowerCase();
-    return t.includes('welcome,') || t.includes('jobs for you') || t.includes('sign out') ||
-           !!document.querySelector('[data-gnav-element-name="SignOut"], [id*="UserDropdown"], [class*="UserDropdown"]');
+  "f7da9d28088fe": () => {
+    const header = document.querySelector('header, #gnav-main-container, [data-testid="gnav"]') || document.body;
+    const links = [...header.querySelectorAll('a, button')].map(a => (a.innerText || '').trim().toLowerCase());
+    if (links.includes('sign in')) return false;
+    return !!header.querySelector('[data-gnav-element-name="Profile"], [data-gnav-element-name="Messages"], a[href*="/account/view"], a[href*="/myjobs"], [aria-label*="Profile" i], [aria-label*="Account" i]')
+      || links.some(t => t === 'sign out');
   },
+  "fe3bedac081b0": () => /updates to our terms of service/i.test(document.body?.innerText || '')
+    && [...document.querySelectorAll('button')].some(b => /accept terms/i.test(b.innerText || '')),
   "f1dfe56f4e052": () => window.scrollBy(0, 800),
-  "f7757cc6b82c8": (lim) => {
+  "fbb0ef7c53023": (lim) => {
     // Try multiple card selector strategies across Indeed versions
     const cardSelectors = [
       '.job_seen_beacon',
@@ -456,7 +552,7 @@ module.exports = {
       };
     }).filter(j => j.jobKey && j.title);
   },
-  "f8974a4002a5b": () => {
+  "fbeb50a4daaee": () => {
     // Description extraction
     const descSelectors = [
       '#jobDescriptionText',
@@ -478,7 +574,7 @@ module.exports = {
     // Detect Indeed Apply button (stays on indeed.com) vs external company apply
     const hasIndeedApplyBtn = !!document.querySelector(
       '#indeedApplyButton, [class*="ia-IndeedApply-button"], [data-testid="indeed-apply-button"], [class*="indeedApply"] button'
-    );
+    ) || [...document.querySelectorAll('button, a, [role="button"]')].some(b => /^(apply now|easily apply)$/i.test((b.innerText || '').trim()));
     const bodyText = (document.body?.innerText || '').toLowerCase();
     const isExternal = !hasIndeedApplyBtn && (
       bodyText.includes('apply on company site') ||
@@ -493,15 +589,27 @@ module.exports = {
       isExternalApply: isExternal,
     };
   },
-  "f87096a725712": () => {
+  "fbade83579af8": () => {
     const t = (document.body?.innerText || '').toLowerCase();
     return t.includes('application submitted') || t.includes('you applied') || t.includes('already applied');
   },
-  "f37806ed2bf50": () =>
+  "f150e17dc38a5": () => [...document.querySelectorAll('[role="alert"], [class*="error" i], [id*="error" i]')]
+        .map(e => (e.innerText || '').trim()).filter(t => t && t.length < 200),
+  "ff6193b686471": () =>
         !!document.querySelector('.cf-turnstile, [data-sitekey][class*="turnstile"]') ||
         !!document.querySelector('iframe[src*="turnstile"]') ||
         (document.body?.innerText || '').toLowerCase().includes('verify you are human'),
-  "f072efe138881": el => {
+  "f5e73d16e452f": (el) => {
+      let b = el.parentElement;
+      for (let i = 0; i < 5 && b && !b.querySelector('select, button, [role="combobox"]'); i++) b = b.parentElement;
+      return b;
+    },
+  "f34cecbb5363a": (s, w) => {
+        const re = new RegExp(`\\+${w.code}(\\D|$)|^${w.iso}$|${w.name}`, 'i');
+        const o = [...s.options].find(o => re.test(o.text) || re.test(o.value));
+        return o ? o.value : null;
+      },
+  "fe4c7a26d780e": el => {
         const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label');
         const labelText = (lab ? (lab.innerText || lab.textContent) : '').trim();
         // Skip consent/terms checkboxes — handled separately
@@ -512,14 +620,15 @@ module.exports = {
         for (let i = 0; i < 6; i++) {
           if (!node) break;
           if (node.querySelectorAll('input[type="checkbox"]').length >= 2) {
-            groupKey = node.className || node.id || `depth-${i}`;
+            if (!node.dataset.jbGroup) node.dataset.jbGroup = 'g' + Math.random().toString(36).slice(2);
+            groupKey = node.dataset.jbGroup;
             break;
           }
           node = node.parentElement;
         }
         return { labelText, groupKey: groupKey || '__single__' };
       },
-  "f428b02babe6b": el => {
+  "f2cb5da735627": el => {
         let node = el.parentElement;
         for (let i = 0; i < 8; i++) {
           if (!node) break;
@@ -534,55 +643,71 @@ module.exports = {
         }
         return '';
       },
-  "f32cc2848bc6e": el => {
+  "fc2cebe71021b": el => {
+          const fs = el.closest('fieldset');
+          const legend = fs && fs.querySelector('legend');
+          if (legend && (legend.innerText || '').trim()) return legend.innerText.trim();
+          const group = el.closest('[role="radiogroup"]');
+          const lbId = group && group.getAttribute('aria-labelledby');
+          const lb = lbId && document.getElementById(lbId.split(' ')[0]);
+          if (lb && (lb.innerText || '').trim()) return lb.innerText.trim();
+          // Otherwise the nearest text above that isn't one of this group's own option labels.
+          const name = el.getAttribute('name');
+          const optionLabels = new Set([...document.querySelectorAll(`input[type="radio"]${name ? `[name="${CSS.escape(name)}"]` : ''}`)]
+            .map(r => ((document.querySelector(`label[for="${r.id}"]`) || r.closest('label') || {}).innerText || '').trim()));
           let node = el.parentElement;
           for (let i = 0; i < 8; i++) {
             if (!node) break;
-            for (const tag of ['legend', 'h1', 'h2', 'h3', 'p', 'label']) {
+            for (const tag of ['legend', 'h1', 'h2', 'h3', 'p', 'label', 'span']) {
               for (const l of node.querySelectorAll(tag)) {
+                if (l.querySelector('input[type="radio"]') || (tag === 'label' && l.htmlFor && document.getElementById(l.htmlFor)?.type === 'radio')) continue;
                 const t = (l.innerText || '').trim();
-                if (t.length > 8 && !/^(yes|no|true|false)$/i.test(t)) return t;
+                if (t.length > 8 && !optionLabels.has(t) && !/^(yes|no|true|false)$/i.test(t)) return t;
               }
             }
             node = node.parentElement;
           }
           return '';
         },
-  "f423155a60576": el => {
+  "fcdb39fa54654": el => {
             const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label') || el.nextElementSibling;
             return (lab ? (lab.innerText || lab.textContent) : '').trim();
           },
-  "f8860defabe67": el => {
+  "ff13066be150c": el => {
           const lab = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
           return (lab ? lab.innerText : el.closest('[class*="ia-Question"], [class*="question"], [role="group"]')?.querySelector('label, legend, [class*="label"]')?.innerText || '').trim();
         },
-  "f6f82f0928ab9": el =>
+  "faafefe1701e5": el =>
           Array.from(el.options).map(o => ({ value: o.value, text: o.text.trim().toLowerCase() })),
-  "fec09152b1411": el => {
+  "fc9a2799a6f23": el => {
           const lab = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
           return (lab ? lab.innerText : el.closest('[class*="ia-Question"], [class*="question"]')?.querySelector('label, [class*="label"]')?.innerText || '').toLowerCase();
         },
-  "fa4389a69209d": el => {
+  "f0d02c6f37c59": el => {
           const lab = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
           return (lab ? lab.innerText : el.closest('[class*="ia-Question"], [class*="question"]')?.querySelector('label, [class*="label"]')?.innerText || '').trim();
         },
-  "f9a6f93f30383": el => {
+  "f4984d7972bda": el => {
           const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label');
           return (lab ? (lab.innerText || lab.textContent) : '').toLowerCase();
         },
-  "fcdda72caf143": () => {
+  "f166170d90a16": () => {
       const t = (document.body?.innerText || '').toLowerCase();
       return t.includes('preparing review') || t.includes('loading');
     },
-  "fbaf9bc50f008": () =>
+  "f8adc21b45f77": () =>
       !!document.querySelector('.cf-turnstile, [data-sitekey][class*="turnstile"]') ||
       !!document.querySelector('iframe[src*="turnstile"]') ||
       (document.body?.innerText || '').toLowerCase().includes('verify you are human'),
-  "fbbb24d16933e": () => {
+  "fe5e8d6d70214": () => {
             const el = document.querySelector('.g-recaptcha, [data-sitekey]');
             return el?.getAttribute('data-sitekey') || null;
           },
-  "fd1b2670977e1": () => {
+  "fa3cf280d4f19": () => {
+    const b = document.querySelector('[data-testid="submit-application-button"], button[data-testid="ia-submitButton"]');
+    return !!(b && b.disabled && document.querySelector('iframe[src*="recaptcha"], .g-recaptcha, iframe[src*="hcaptcha"]'));
+  },
+  "f910884c2edda": () => {
     const texts = ['continue', 'next', 'review'];
     for (const el of document.querySelectorAll('button, [role="button"]')) {
       const t = (el.textContent || '').trim().toLowerCase();
@@ -874,33 +999,29 @@ module.exports = {
         return lab ? lab.innerText.trim() : '(unknown field)';
       })
       .filter((v, i, a) => a.indexOf(v) === i),
-  "f9c8c232b15cb": () => {
-    const t = (document.body?.innerText || '').toLowerCase();
-    return t.includes('home') || t.includes('my network') || t.includes('jobs') ||
-           !!document.querySelector('[class*="global-nav"], [class*="feed-identity"]');
-  },
-  "ff0e4f7a731b0": () => {
+  "fbfbe61cc8089": () => !/\/(login|checkpoint|uas|authwall|signup)/i.test(location.pathname) &&
+  location.pathname !== '/' && (/^\/feed/.test(location.pathname) || !!document.querySelector('[class*="global-nav"], [class*="feed-identity"]')),
+  "fd77c2b6bc343": () => {
       const text = (document.body.innerText || '').toLowerCase();
       // Logged-in indicators: profile link, "my reed", account menu
       return text.includes('my reed') || text.includes('sign out') || text.includes('log out') ||
              !!document.querySelector('[href*="/my-reed"], [href*="/account"], [data-testid*="account"]');
     },
-  "f3ae36022b876": () => {
+  "f4404df7cfaac": () => {
         const text = (document.body.innerText || '').toLowerCase();
         return text.includes('my reed') || text.includes('sign out') || text.includes('log out') ||
                !!document.querySelector('[href*="/my-reed"], [href*="/account"], [data-testid*="account"]');
       },
-  "f30b738529888": () => {
+  "f59ff103e2085": () => location.hostname === 'www.reed.co.uk' &&
+  !/login|signin|authentication/i.test(location.pathname) &&
+  !document.querySelector('a[href*="/account/signin" i], a[href*="secure.reed.co.uk/login" i]') &&
+  !!document.body && document.body.innerText.length > 200,
+  "fedf498dbfb3e": () => {
     const bodyText = document.body?.innerText || '';
     return bodyText.includes('HTTP ERROR 431') ? 431 : 0;
   },
-  "fc7cb5f2ea208": () => {
-    const t = (document.body?.innerText || '').toLowerCase();
-    return t.includes('my reed') || t.includes('sign out') || t.includes('log out') ||
-           !!document.querySelector('[href*="/my-reed"], [href*="/account"]');
-  },
   "f9c3ec91f0304": () => (document.body?.innerText || '').includes('HTTP ERROR 431'),
-  "fb47b3910cb3f": () => {
+  "fceef27206f9e": () => {
       // Reed's primary card selector — numeric data-id is always present
       let cards = Array.from(document.querySelectorAll('article[data-id]'));
       if (cards.length === 0) {
@@ -942,7 +1063,7 @@ module.exports = {
         };
       }).filter(j => j.url && j.jobId !== 'reed_');
     },
-  "f242e1ce740f7": () => {
+  "f42baf00bada2": () => {
     // ── Job description ──────────────────────────────────────────────────
     // Strategy 1: known class/ID selectors
     const descSelectors = [
@@ -1038,14 +1159,14 @@ module.exports = {
 
     return { description, isTrainingCourse, isExternalOnly, hasEasyApply, externalApplyUrl };
   },
-  "fd77f54cc1269": () => {
+  "f9a42aef4a226": () => {
     const text = (document.body.innerText || '').toLowerCase();
     return text.includes('you have already applied') ||
            text.includes('already applied') ||
            text.includes('application submitted') ||
            text.includes('you applied');
   },
-  "f3ca8359feed1": () => {
+  "f2eaaf9e58468": () => {
       const el = Array.from(document.querySelectorAll('button, a')).find(e => {
         const t = (e.innerText || e.textContent || '').trim().toLowerCase();
         return t === 'apply now' || t === 'apply' || t.startsWith('apply ');
@@ -1053,60 +1174,62 @@ module.exports = {
       if (el) { el.scrollIntoView({ behavior: 'instant', block: 'center' }); el.click(); return true; }
       return false;
     },
-  "f0d6ce9d4e196": node => {
+  "f6f04320b41b6": node => {
         const id = node.id;
         const lab = (id && document.querySelector(`label[for="${id}"]`)) ||
                     node.closest('label') ||
                     node.closest('[class*="field"], [class*="form"]')?.querySelector('label, legend, .question-text, p');
         return lab ? lab.innerText.trim() : (node.getAttribute('aria-label') || node.placeholder || '');
       },
-  "ff3cf7272cf88": ({ base, needle }) => {
+  "fb25e0dc1a058": ({ base, needle }) => {
       for (const inp of document.querySelectorAll('input[type="file"]')) {
         for (const f of inp.files || []) if (f.name === base) return true;
       }
       return document.body.innerText.includes(needle);
     },
-  "fafb2eb68b594": () => {
+  "faebbc1166893": () => {
         const t = document.body.innerText || '';
         if (/CV loading/i.test(t)) return false;              // still loading
         // ready once an Update/Change control or a file input is present
         return /\b(Update|Use a different CV|Change CV|Upload a different CV)\b/i.test(t)
                || !!document.querySelector('input[type="file"]');
       },
-  "fd60bec14bd73": () =>
+  "f30cfb3ebe467": () =>
         /CV update failed|something went wrong with your CV update|please try again/i.test(document.body?.innerText || ''),
   "f642b7c183b2a": el => { el.style.display = 'block'; el.style.visibility = 'visible'; },
-  "f1d96912812e2": () =>
+  "f23ea07b67875": () =>
       /your session has expired|session expired|please refresh the page to continue/i.test(document.body?.innerText || ''),
-  "f1f9c632d08cd": el => {
+  "f4f9ed79b7ab9": el => {
         const lab = el.closest('[class*="form"]')?.querySelector('label') ||
                     document.querySelector(`label[for="${el.id}"]`);
         return (lab ? lab.innerText : '').toLowerCase().trim();
       },
-  "fdfe42eb28f56": () => {
+  "feef341f0805e": () => {
       const els = Array.from(document.querySelectorAll(
         '.form-group--error, .field-validation-error, [class*="error-message"], [class*="validation-error"], [aria-invalid="true"], .qa-error'
       ));
       return els.some(el => el.offsetParent !== null && ((el.innerText || el.textContent || '').trim().length > 0 || el.getAttribute('aria-invalid') === 'true'));
     },
-  "f54f465ee36a5": el => {
+  "f76e08bca08c3": el => {
         const label = el.querySelector('legend, label, p, .question-text, h4');
         return label ? label.innerText.toLowerCase() : '';
       },
-  "f7a9b08f78da8": el => {
+  "fc47cad7f0a03": el => {
           const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label');
           return lab ? lab.innerText.toLowerCase().trim() : '';
         },
-  "fac5dc7d71ebd": el => {
+  "f7221f85817fd": el => {
                 const lab = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
                 (lab || el).click();
               },
-  "f23efee232d6f": el => {
+  "fda094ec18ea0": el => {
         const id = el.id;
         const lab = id ? document.querySelector(`label[for="${id}"]`) : null;
         return (lab ? lab.innerText : '').toLowerCase();
       },
-  "fbf5875dc9ddd": () => {
+  "ffe200d6ddf90": el =>
+        Array.from(el.options).map(o => ({ value: o.value, text: o.text.toLowerCase().trim() })),
+  "f726433653f07": () => {
     const btn = Array.from(document.querySelectorAll('button, input[type="submit"]')).find(el => {
       if (el.disabled) return false;
       const t = (el.innerText || el.value || '').trim().toLowerCase();

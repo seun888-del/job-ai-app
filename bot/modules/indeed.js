@@ -1112,6 +1112,13 @@ async function _trySubmit(page, job) {
     }
   }
 
+  // A greyed-out Submit behind an "I'm not a robot" box: skip the job, never solve it.
+  const blocked = await page.evaluate(() => {
+    const b = document.querySelector('[data-testid="submit-application-button"], button[data-testid="ia-submitButton"]');
+    return !!(b && b.disabled && document.querySelector('iframe[src*="recaptcha"], .g-recaptcha, iframe[src*="hcaptcha"]'));
+  }).catch(() => false);
+  if (blocked) throw new Error('Indeed asked for a captcha on the review page, skipped');
+
   const submitSelectors = [
     'button[data-testid="ia-submitButton"]',
     'button:has-text("Submit your application")',
