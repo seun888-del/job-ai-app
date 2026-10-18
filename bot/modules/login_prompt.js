@@ -40,17 +40,18 @@ async function setWindowState(page, windowState) {
 }
 
 // Returns true once signed in. Throws a plain "sign in needed" error when nobody can sign in now.
-async function promptLogin(page, { site, loginUrl, isSignedIn, minutes = 5 }) {
+// `message` replaces the default "Sign in to X" ask (e.g. accept new terms); no loginUrl = stay on this page.
+async function promptLogin(page, { site, loginUrl, isSignedIn, minutes = 5, message }) {
   if (process.env.JOBBOT_LOGIN_PROMPT !== '1') {
     console.log(`  [[JOBBOT_NOTIFY]] Sign in to ${site} needed. Press Start applying on your computer and sign in when the window opens.`);
     throw new Error(`${site}: sign in needed. Press Start applying on this computer and sign in when the ${site} window opens.`);
   }
   await acquireLock();
   try {
-    try { await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch (_) {}
+    if (loginUrl) { try { await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch (_) {} }
     await setWindowState(page, 'normal');
     try { await page.bringToFront(); } catch (_) {}
-    console.log(`  [[JOBBOT_NOTIFY]] Sign in to ${site} in the window that just opened. The agent starts as soon as you're signed in.`);
+    console.log(`  [[JOBBOT_NOTIFY]] ${message || `Sign in to ${site} in the window that just opened. The agent starts as soon as you're signed in.`}`);
     console.log(`  [${site}] Waiting for you to sign in (up to ${minutes} minutes)...`);
     const deadline = Date.now() + minutes * 60000;
     while (Date.now() < deadline) {

@@ -44,7 +44,7 @@ function aiEnabled() {
 
 // Second safety net — the callers already keep these on profile-only logic, but
 // refuse here too so a future mis-wiring can never send them to the model.
-const SENSITIVE_RE = /sponsor|right to work|work permit|\bvisa\b|authoris|authoriz|eligible.*work|entitled to work|permit to work|background check|criminal|\bdbs\b|security clearance|\bgender\b|\bsex\b|ethnic|\brace\b|racial|disab|veteran|sexual orientation|nationality|citizen|salary|compensation|remuneration/i;
+const SENSITIVE_RE = /sponsor|right to work|work permit|\bvisa\b|authoris|authoriz|eligible.*work|entitled to work|permit to work|background check|criminal|\bdbs\b|security clearance|\bgender\b|\bsex\b|ethnic|\brace\b|racial|disab|veteran|sexual orientation|nationality|citizen|salary|compensation|remuneration|pay rate|rate of pay|hourly rate|per hour|\/hr\b|\bwage/i;
 // Personal-name fields must come from the profile, never the model — otherwise the
 // LLM invents a random name (e.g. it filled a made-up middle name on LinkedIn).
 const NAME_RE = /\b(first|middle|last|given|family|sur|fore)\s*name\b|surname|forename|full name|your name|legal name|preferred name|middle initial/i;
@@ -123,7 +123,7 @@ async function aiPickOption({ question, options, job, kind = 'field' }) {
 
     const list = opts.map((o, i) => `${i + 1}. ${o.text}`).join('\n');
     const prompt =
-`You are completing a job application form for the candidate below. Choose the SINGLE best answer option for the question so this strong, employable candidate progresses in the application. For capability or willingness questions the candidate can reasonably meet, prefer an affirmative answer. For amount/experience questions, choose the option that matches the candidate's profile.
+`You are completing a job application form for the candidate below. Choose the SINGLE best answer option for the question so this strong, employable candidate progresses in the application. For capability or willingness questions the candidate can reasonably meet, prefer an affirmative answer. For amount/experience questions, choose the option that matches the candidate's profile. Never claim a spoken language other than English, a certification, a licence or a qualification that is not in the profile: for those pick the lowest / \"no\" / \"none\" option. Questions about where the candidate lives must match the Location in the profile.
 
 CANDIDATE PROFILE:
 ${_profileBlock(job)}

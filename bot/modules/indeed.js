@@ -3,6 +3,8 @@ const path    = require('path');
 const captcha = require('./captcha_solver');
 const { humanWarmup, waitForCloudflareSolve } = require('./browser_launcher');
 const { llmAvailable, llmChat } = require('../../src/services/llm');
+const { promptLogin } = require('./login_prompt');
+const ai = require('./question_ai'); // LLM fallback for unknown screening questions
 
 const SSDIR = cfg.SCREENSHOTS_DIR;
 const DELAY = ms => new Promise(r => setTimeout(r, ms));
@@ -14,20 +16,60 @@ function getBaseUrl() {
 // ── Login ──────────────────────────────────────────────────────────────────
 // Uses a persistent Chrome profile set up via the app's "Connect" button.
 // No form interaction — bot detection cannot fire during login.
+// Signed in = the header has no "Sign in" link (signed-out pages show one; signed-in
+// pages show the account / messages / notifications icons instead).
+async function indeedSignedIn(page) {
+  if (!/indeed\.com/.test(page.url()) || /\/account\/login|secure\.indeed\.com\/auth/.test(page.url())) return false;
+  return page.evaluate(() => {
+    const header = document.querySelector('header, #gnav-main-container, [data-testid="gnav"]') || document.body;
+    const links = [...header.querySelectorAll('a, button')].map(a => (a.innerText || '').trim().toLowerCase());
+    if (links.includes('sign in')) return false;
+    return !!header.querySelector('[data-gnav-element-name="Profile"], [data-gnav-element-name="Messages"], a[href*="/account/view"], a[href*="/myjobs"], [aria-label*="Profile" i], [aria-label*="Account" i]')
+      || links.some(t => t === 'sign out');
+  }).catch(() => false);
+}
+
+// Indeed blocks every page behind an "Updates to our Terms of Service" popup until the
+// account holder accepts. The agent never accepts terms for the user: it brings its
+// window forward and waits for them to click Accept Terms themselves.
+async function termsPopupShowing(page) {
+  return page.evaluate(() => /updates to our terms of service/i.test(document.body?.innerText || '')
+    && [...document.querySelectorAll('button')].some(b => /accept terms/i.test(b.innerText || ''))).catch(() => false);
+}
+async function handleTermsPopup(page) {
+  if (!(await termsPopupShowing(page))) return;
+  await promptLogin(page, {
+    site: 'Indeed', isSignedIn: async (p) => !(await termsPopupShowing(p)),
+    message: "Indeed has updated its Terms of Service. Read them in the Indeed window and click Accept Terms if you agree. The agent carries on once they're accepted.",
+  });
+}
+
 async function ensureLoggedIn(page) {
   const baseUrl = getBaseUrl();
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await waitForCloudflareSolve(page);
   await DELAY(2000);
-  const isLoggedIn = await page.evaluate(() => {
-    const t = (document.body?.innerText || '').toLowerCase();
-    return t.includes('welcome,') || t.includes('jobs for you') || t.includes('sign out') ||
-           !!document.querySelector('[data-gnav-element-name="SignOut"], [id*="UserDropdown"], [class*="UserDropdown"]');
-  }).catch(() => false);
-  if (!isLoggedIn) {
-    throw new Error('Indeed: not logged in. Go to Job Site Login → Connect Indeed Account first.');
+  if (!(await indeedSignedIn(page))) {
+    const co = cfg.APPLICANT.country === 'United States' ? 'US' : 'GB';
+    await promptLogin(page, {
+      site: 'Indeed',
+      loginUrl: `https://secure.indeed.com/account/login?co=${co}&continue=${encodeURIComponent(baseUrl + '/')}`,
+      isSignedIn: indeedSignedIn,
+    });
   }
+  await handleTermsPopup(page);
   console.log('  [Indeed] Session active');
+}
+
+// Indeed's own apply button. US pages render it as plain "Apply now" text (no stable id),
+// while external jobs say "Apply on company site".
+const APPLY_NOW_RE = /^(apply now|easily apply)$/i;
+async function findApplyNow(page) {
+  const byId = page.locator('#indeedApplyButton, button[class*="ia-IndeedApply-button"], button[data-testid="indeed-apply-button"]').first();
+  if (await byId.count().catch(() => 0) && await byId.isVisible().catch(() => false)) return byId;
+  const byText = page.getByText(APPLY_NOW_RE).first();
+  if (await byText.count().catch(() => 0) && await byText.isVisible().catch(() => false)) return byText;
+  return null;
 }
 
 // ── Search Jobs ────────────────────────────────────────────────────────────
@@ -119,6 +161,7 @@ async function getJobDescription(page, job) {
   await page.goto(viewUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitForCloudflareSolve(page);
   await DELAY(3000);
+  await handleTermsPopup(page);
 
   // Expand "Show more" if present
   const showMoreSelectors = [
@@ -153,7 +196,7 @@ async function getJobDescription(page, job) {
     // Detect Indeed Apply button (stays on indeed.com) vs external company apply
     const hasIndeedApplyBtn = !!document.querySelector(
       '#indeedApplyButton, [class*="ia-IndeedApply-button"], [data-testid="indeed-apply-button"], [class*="indeedApply"] button'
-    );
+    ) || [...document.querySelectorAll('button, a, [role="button"]')].some(b => /^(apply now|easily apply)$/i.test((b.innerText || '').trim()));
     const bodyText = (document.body?.innerText || '').toLowerCase();
     const isExternal = !hasIndeedApplyBtn && (
       bodyText.includes('apply on company site') ||
@@ -185,6 +228,7 @@ async function applyToJob(page, job, resumePath) {
   await page.goto(viewUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitForCloudflareSolve(page);
   await DELAY(4000);
+  await handleTermsPopup(page);
 
   // Check already applied
   const alreadyApplied = await page.evaluate(() => {
@@ -239,6 +283,19 @@ async function applyToJob(page, job, resumePath) {
   }
 
   if (!clicked) {
+    const btn = await findApplyNow(page);
+    if (btn) {
+      const [newPage] = await Promise.all([
+        page.context().waitForEvent('page', { timeout: 6000 }).catch(() => null),
+        btn.click().catch(() => {}),
+      ]);
+      if (newPage) { applyPage = newPage; await applyPage.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {}); }
+      await DELAY(4000);
+      clicked = true;
+    }
+  }
+
+  if (!clicked) {
     await page.screenshot({ path: path.join(SSDIR, 'indeed_no_apply_btn.png') }).catch(() => {});
     throw new Error('Indeed Apply button not found');
   }
@@ -260,6 +317,7 @@ async function applyToJob(page, job, resumePath) {
 async function fillEasyApplyForm(applyPage, job, resumePath) {
   let stepCount = 0;
   const MAX_STEPS = 12;
+  let lastUrl = '', sameUrl = 0;
 
   while (stepCount < MAX_STEPS) {
     stepCount++;
@@ -274,6 +332,15 @@ async function fillEasyApplyForm(applyPage, job, resumePath) {
     }
 
     await applyPage.screenshot({ path: path.join(SSDIR, `indeed_apply_step${stepCount}.png`) }).catch(() => {});
+    // Continue pressed but the page didn't move: report what the form complains about, then stop.
+    sameUrl = currentUrl === lastUrl ? sameUrl + 1 : 0; lastUrl = currentUrl;
+    if (sameUrl >= 2) {
+      const errs = await applyPage.evaluate(() => [...document.querySelectorAll('[role="alert"], [class*="error" i], [id*="error" i]')]
+        .map(e => (e.innerText || '').trim()).filter(t => t && t.length < 200)).catch(() => []);
+      console.log(`  [Indeed] Stuck on the same page.${errs.length ? ' Form says: ' + [...new Set(errs)].slice(0, 5).join(' | ') : ''}`);
+      await applyPage.screenshot({ path: path.join(SSDIR, 'indeed_stuck_full.png'), fullPage: true }).catch(() => {});
+      return false;
+    }
 
     // Solve Cloudflare Turnstile mid-form if it appears (blocks Continue/Submit)
     if (cfg.CAPSOLVER_KEY) {
@@ -308,9 +375,14 @@ async function fillEasyApplyForm(applyPage, job, resumePath) {
     }
 
     // Try continue/next
-    const advanced = await _tryContinue(applyPage);
+    let advanced = await _tryContinue(applyPage);
+    // A slow step leaves Continue disabled behind a spinner for a few seconds: wait, then retry once.
+    if (!advanced) { await DELAY(6000); advanced = await _tryContinue(applyPage); }
     if (!advanced) {
       console.log(`  [Indeed] Could not advance from step ${stepCount}.`);
+      const errs = await applyPage.evaluate(() => [...document.querySelectorAll('[role="alert"], [class*="error" i], [id*="error" i]')]
+        .map(e => (e.innerText || '').trim()).filter(t => t && t.length < 200)).catch(() => []);
+      if (errs.length) console.log(`  [Indeed] Form says: ${[...new Set(errs)].slice(0, 5).join(' | ')}`);
       await applyPage.screenshot({ path: path.join(SSDIR, `indeed_stuck_step${stepCount}.png`) }).catch(() => {});
       break;
     }
@@ -401,7 +473,24 @@ async function _fillContactFields(page) {
           const el = await frame.$(sel);
           if (el && await el.isVisible()) {
             const current = await el.inputValue();
-            if (!current) {
+            // Indeed pre-fills the phone from the account; a stale/invalid one blocks Continue,
+            // so replace it whenever its digits don't match the profile's number.
+            const isPhone = val === phone;
+            const digits = (x) => String(x || '').replace(/\D/g, '');
+            const national = digits(val).replace(/^(1(?=\d{10}$)|44(?=\d{10}$))/, '').replace(/^0(?=7\d{9}$)/, '');
+            if (isPhone) {
+              // Country code first (switching it can reformat the box), then always our number.
+              const cc = (_phoneCountry(val) || {}).code || '';
+              await _matchPhoneCountry(frame, el, val);
+              const want = cc ? '+' + cc + national : national;
+              if (digits(await el.inputValue().catch(() => '')) !== digits(want)) {
+                // Type it in international form: the box detects the country from the "+".
+                await el.click(); await el.fill(''); await DELAY(150);
+                await el.type(want, { delay: 55 + Math.random() * 75 });
+                await el.press('Tab').catch(() => {});
+                await DELAY(300 + Math.random() * 150);
+              }
+            } else if (!current) {
               await el.click(); await DELAY(80 + Math.random() * 120);
               await el.type(val, { delay: 55 + Math.random() * 75 });
               await DELAY(100 + Math.random() * 150);
@@ -415,7 +504,46 @@ async function _fillContactFields(page) {
   }
 }
 
-function _resolveRadio(question, labels) {
+// The phone box has a country-code picker that defaults to the site's country (+1 on
+// indeed.com). A UK mobile (07... / +44) under +1 is rejected, so pick the matching code.
+function _phoneCountry(raw) {
+  const t = String(raw || '').trim();
+  const d = t.replace(/\D/g, '');
+  if (/^\+?44/.test(t) || /^07\d{9}$/.test(d)) return { code: '44', iso: 'GB', name: 'United Kingdom' };
+  if (/^\+?1/.test(t) || /^\d{10}$/.test(d)) return { code: '1', iso: 'US', name: 'United States' };
+  return null;
+}
+async function _matchPhoneCountry(frame, telEl, raw) {
+  const want = _phoneCountry(raw);
+  if (!want) return;
+  try {
+    const box = await telEl.evaluateHandle((el) => {
+      let b = el.parentElement;
+      for (let i = 0; i < 5 && b && !b.querySelector('select, button, [role="combobox"]'); i++) b = b.parentElement;
+      return b;
+    });
+    const sel = await box.$('select');
+    if (sel) {
+      const val = await sel.evaluate((s, w) => {
+        const re = new RegExp(`\\+${w.code}(\\D|$)|^${w.iso}$|${w.name}`, 'i');
+        const o = [...s.options].find(o => re.test(o.text) || re.test(o.value));
+        return o ? o.value : null;
+      }, want);
+      if (val && val !== await sel.inputValue()) { await sel.selectOption(val); console.log(`  [Indeed] Phone country set to +${want.code}`); }
+      return;
+    }
+    const btn = await box.$('button, [role="combobox"]');
+    if (!btn) return;
+    const shown = (await btn.innerText().catch(() => '')) || '';
+    if (shown.includes('+' + want.code)) return;
+    await btn.click(); await DELAY(600);
+    const opt = frame.locator('[role="option"], li').filter({ hasText: new RegExp(`${want.name}|\\+${want.code}\\b`) }).first();
+    if (await opt.count()) { await opt.click(); console.log(`  [Indeed] Phone country set to +${want.code}`); }
+    else console.log('  [Indeed] Phone country picker: option not found');
+  } catch (e) { console.log(`  [Indeed] Phone country picker: ${e.message.slice(0, 80)}`); }
+}
+
+function _resolveRadio(question, labels, { allowUnknown = true } = {}) {
   const q = (question || '').toLowerCase();
   const { requiresSponsorship, willingToRelocate, drivingLicence, eeoGender, eeoDisability, eeoVeteran, eeoEthnicity } = cfg.APPLICANT;
 
@@ -428,6 +556,14 @@ function _resolveRadio(question, labels) {
     return requiresSponsorship ? find(/^yes/i) : find(/^no/i);
   }
   if (/reloc/i.test(q)) return willingToRelocate ? find(/^yes/i) : find(/^no/i);
+  // Marketing / job-alert opt-ins (often a third party's terms): never sign the user up.
+  if (/opt.?in|newsletter|marketing|receiv\w* (email|text|sms)|text messages|contacted by (text|sms)|email notifications|job alerts/i.test(q) && !/required|must/i.test(q)) {
+    return find(/^no/i) || labels[labels.length - 1];
+  }
+  // Spoken languages other than English: never claim a skill the profile doesn't list.
+  if (/(speak|fluen|proficien|bilingual|language)/i.test(q) && /spanish|french|german|portuguese|italian|mandarin|chinese|japanese|korean|arabic|russian|hindi|polish|dutch|vietnamese|tagalog|bilingual/i.test(q)) {
+    return find(/^(no|none|not|cannot|i cannot|i can't|beginner|basic|elementary)/i) || find(/no|none|cannot|not /i) || labels[labels.length - 1];
+  }
   if (/commut|travel.*office|willing.*office|able.*office/i.test(q)) return find(/^yes/i);
   if (/driving.*licen|licen.*driving/i.test(q)) return drivingLicence ? find(/^yes/i) : find(/^no/i);
   if (/gender/i.test(q)) {
@@ -456,6 +592,7 @@ function _resolveRadio(question, labels) {
   }
   // For "do you currently X / are you bound by / have you ever" questions, "No" is the safe default.
   // For "are you comfortable / willing / able" questions, "Yes" is right.
+  if (!allowUnknown) return null;
   const isNegativePattern = /do you currently|are you bound|have you ever|non.?compete|restrict|conflict|partner.*compan|compan.*partner|nda|lawsuit|terminat/i.test(q);
   const fallback = isNegativePattern
     ? (find(/^no/i) || labels[labels.length - 1])
@@ -542,6 +679,8 @@ async function _buildTextAnswer(question, job) {
 
   // Known patterns — handled without AI
   if (/cover letter|covering letter/i.test(q)) return job?.coverLetter || '';
+  // "Do you know anyone here / were you referred? If not, please enter N/A."
+  if (/(if (not|no)|otherwise)[^.?]{0,40}\bn\/?a\b/i.test(q) || /(friend|family|relative|related to|know anyone).{0,60}(employ|work)/i.test(q)) return 'N/A';
   if (/notice period|availability|when can you start|available to start/i.test(q)) {
     return AVAIL_MAP[availability || 'immediately'] || 'Immediately available';
   }
@@ -555,11 +694,11 @@ async function _buildTextAnswer(question, job) {
   }
 
   // Current employment / work situation
-  if (/current.*work.*situation|work.*situation|currently.*employ|employment.*status|current.*role|current.*position/i.test(q)) {
+  if (/current.*work.*situation|work.*situation|employment.*status|are you currently employed\s*\??\*?$|current.*role\b|current.*position\b/i.test(q) && !/employed by|worked (for|at)/i.test(q)) {
     if (!availability || availability === 'immediately') {
-      return 'I am currently between roles and immediately available, actively seeking my next opportunity in IT support and technical services.';
+      return 'I am currently between roles and immediately available, actively seeking my next opportunity.';
     }
-    return `I am currently employed in an IT support role and open to new opportunities. My notice period is ${AVAIL_MAP[availability] || availability}.`;
+    return `I am currently employed and open to new opportunities. My notice period is ${AVAIL_MAP[availability] || availability}.`;
   }
 
   // Why this role / what interests you
@@ -567,11 +706,11 @@ async function _buildTextAnswer(question, job) {
     const title   = job?.title   || 'this role';
     const company = job?.company || 'your organisation';
     const yrs = yearsExperience > 0 ? `${yearsExperience} years of` : 'solid';
-    return `The ${title} position at ${company} closely aligns with my ${yrs} experience in IT support and technical services. I am drawn to the opportunity to contribute my skills and continue growing in a forward-thinking environment.`;
+    return `The ${title} position at ${company} closely aligns with my ${yrs} experience. I am drawn to the opportunity to contribute my skills and continue growing in a forward-thinking environment.`;
   }
 
   if (/additional|tell us more|anything else|comments|message/i.test(q)) {
-    return 'Please see my CV for a full overview of my experience. I am available for interview at your earliest convenience.';
+    return `Please see my ${cfg.APPLICANT.country === 'United States' ? 'resume' : 'CV'} for a full overview of my experience. I am available for interview at your earliest convenience.`;
   }
 
   // Pronouns — leave blank (optional field, personal choice)
@@ -664,7 +803,8 @@ async function _answerCheckboxGroups(frame, job) {
         for (let i = 0; i < 6; i++) {
           if (!node) break;
           if (node.querySelectorAll('input[type="checkbox"]').length >= 2) {
-            groupKey = node.className || node.id || `depth-${i}`;
+            if (!node.dataset.jbGroup) node.dataset.jbGroup = 'g' + Math.random().toString(36).slice(2);
+            groupKey = node.dataset.jbGroup;
             break;
           }
           node = node.parentElement;
@@ -713,6 +853,11 @@ async function _answerCheckboxGroups(frame, job) {
 
       // Try rule-based first
       let toCheck = _resolveCheckboxGroup(question, optionLabels);
+      if (!toCheck && (/(ever|previously|before).{0,40}(employed|worked)|employed by .* before/i.test(question)
+          || optionLabels.some(l => /not previously been employed|have never (been employed|worked)/i.test(l)))) {
+        const never = optionLabels.find(l => /have not|haven't|never|not previously|none of (the|these)/i.test(l));
+        if (never) toCheck = [never];
+      }
 
       // Fall back to Claude for unknown groups
       if (!toCheck) {
@@ -774,13 +919,25 @@ async function _answerQuestions(page, job) {
       for (const [, radios] of radioGroups) {
         // Walk up the DOM from the first radio to find the question text
         const question = await radios[0].evaluate(el => {
+          const fs = el.closest('fieldset');
+          const legend = fs && fs.querySelector('legend');
+          if (legend && (legend.innerText || '').trim()) return legend.innerText.trim();
+          const group = el.closest('[role="radiogroup"]');
+          const lbId = group && group.getAttribute('aria-labelledby');
+          const lb = lbId && document.getElementById(lbId.split(' ')[0]);
+          if (lb && (lb.innerText || '').trim()) return lb.innerText.trim();
+          // Otherwise the nearest text above that isn't one of this group's own option labels.
+          const name = el.getAttribute('name');
+          const optionLabels = new Set([...document.querySelectorAll(`input[type="radio"]${name ? `[name="${CSS.escape(name)}"]` : ''}`)]
+            .map(r => ((document.querySelector(`label[for="${r.id}"]`) || r.closest('label') || {}).innerText || '').trim()));
           let node = el.parentElement;
           for (let i = 0; i < 8; i++) {
             if (!node) break;
-            for (const tag of ['legend', 'h1', 'h2', 'h3', 'p', 'label']) {
+            for (const tag of ['legend', 'h1', 'h2', 'h3', 'p', 'label', 'span']) {
               for (const l of node.querySelectorAll(tag)) {
+                if (l.querySelector('input[type="radio"]') || (tag === 'label' && l.htmlFor && document.getElementById(l.htmlFor)?.type === 'radio')) continue;
                 const t = (l.innerText || '').trim();
-                if (t.length > 8 && !/^(yes|no|true|false)$/i.test(t)) return t;
+                if (t.length > 8 && !optionLabels.has(t) && !/^(yes|no|true|false)$/i.test(t)) return t;
               }
             }
             node = node.parentElement;
@@ -797,7 +954,16 @@ async function _answerQuestions(page, job) {
           options.push({ radio: r, label });
         }
 
-        const targetLabel = _resolveRadio(question, options.map(o => o.label));
+        const labels = options.map(o => o.label);
+        // A lone option ("I understand") is an acknowledgement: it must be ticked to continue.
+        let targetLabel = labels.length === 1 ? labels[0] : _resolveRadio(question, labels, { allowUnknown: false });
+        if (!targetLabel && question) {
+          // Unknown question: let the AI pick from the candidate's profile (sensitive
+          // questions are refused inside aiPickOption), else the old default.
+          const picked = await ai.aiPickOption({ question, options: labels.map(text => ({ text })), job, kind: 'radio' }).catch(() => null);
+          if (picked) console.log(`  [Indeed] AI answered radio: "${question.substring(0, 70)}" → "${picked.text}"`);
+          targetLabel = picked ? picked.text : _resolveRadio(question, labels);
+        }
         if (targetLabel) {
           const target = options.find(o => o.label === targetLabel);
           if (target) {
@@ -957,6 +1123,11 @@ async function _trySubmit(page, job) {
       try {
         const btn = await frame.$(sel);
         if (btn && await btn.isVisible() && await btn.isEnabled()) {
+          if (process.env.JOBBOT_NO_SUBMIT === '1') {
+            console.log(`  [Indeed] TEST MODE: reached Submit, not pressing it: ${job?.title}`);
+            await page.screenshot({ path: path.join(SSDIR, 'indeed_before_submit.png') }).catch(() => {});
+            return true;
+          }
           console.log(`  [Indeed] Submitting: ${job?.title} @ ${job?.company}`);
           await page.screenshot({ path: path.join(SSDIR, 'indeed_before_submit.png') }).catch(() => {});
           await btn.click();
@@ -1020,4 +1191,4 @@ async function _tryContinue(page) {
   return false;
 }
 
-module.exports = { ensureLoggedIn, searchJobs, getJobDescription, applyToJob, fillEasyApplyForm };
+module.exports = { ensureLoggedIn, searchJobs, getJobDescription, applyToJob, fillEasyApplyForm, indeedSignedIn };
