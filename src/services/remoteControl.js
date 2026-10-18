@@ -19,12 +19,12 @@ const botManager = require('./botManager');
 const { machineId } = require('./machineId');
 
 const WAIT_S = 20, RETRY_MS = 15000, EXTRA_MIN_MS = 15000, EXTRA_RESEND_MS = 15 * 60 * 1000;
-const LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', greenhouse: 'Company sites' };
+const LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', greenhouse: 'Company sites' };
 // What the dashboard shows (and which boxes are ticked); the renderer keeps this current.
 let prefs = { keys: ['trac', 'reed', 'linkedin', 'greenhouse'], enabled: null };
 let deps = null, running = false, waitCtl = null, nudgeTimer = null, extraSent = '', extraSentAt = 0, extraBuiltAt = 0;
 const TRAC_APPS_URL = 'https://apps.trac.jobs/applicationlist';
-const SITE = { reed: 'Reed', linkedin: 'LinkedIn', trac: 'NHS', greenhouse: 'Company site', ats: 'Company site', indeed: 'Indeed', dice: 'Dice' };
+const SITE = { reed: 'Reed', linkedin: 'LinkedIn', trac: 'NHS', greenhouse: 'Company site', ats: 'Company site', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound' };
 const STAGES = ['applied', 'phone_screen', 'interview', 'offer', 'rejected', 'withdrawn'];
 const cleanTitle = (t) => (String(t || '').split('\n').map((x) => x.trim()).find(Boolean) || '').replace(/\s+with verification$/i, '');
 const toIso = (v) => { if (!v) return ''; const d = new Date(String(v).replace(' ', 'T') + (/[zZ+]/.test(String(v)) || String(v).length <= 10 ? '' : 'Z')); return isNaN(d) ? '' : d.toISOString(); };

@@ -150,14 +150,16 @@ Respond with ONLY JSON: {"choice": "<the exact option text you picked>"}. The va
 // Free-text answer for a text input or textarea. `long` → allow a short
 // paragraph (textarea); otherwise keep it to a few words / a number (single-line
 // input). Returns a string, or null (caller keeps its own fallback).
-async function aiTextAnswer({ question, job, long = false }) {
+// `context` (e.g. the job advert) goes into the prompt only; the sensitive-question check
+// looks at the question alone, since adverts mention pay and visas all the time.
+async function aiTextAnswer({ question, job, long = false, context = '' }) {
   try {
     if (!aiEnabled()) return null;
     const q = (question || '').trim();
     if (q.length < 3) return null;
     if (isSensitiveQuestion(q)) return null;
 
-    const ck = _key(long ? 'ta' : 'txt', q, null);
+    const ck = _key(long ? 'ta' : 'txt', context ? q + '|' + String(context).slice(0, 300) : q, null);
     if (_cache.has(ck)) return _cache.get(ck);
 
     const shape = long
@@ -169,7 +171,10 @@ async function aiTextAnswer({ question, job, long = false }) {
 CANDIDATE PROFILE:
 ${_profileBlock(job)}
 
-QUESTION: ${q}
+${context ? `JOB ADVERT (use only facts from it, never invent details about the company):
+${String(context).slice(0, 3000)}
+
+` : ''}QUESTION: ${q}
 
 Respond with ONLY the answer text — no preamble, no quotes, no labels.`;
 

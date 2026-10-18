@@ -199,10 +199,10 @@ app.whenReady().then(async () => {
   mainWindow.on('session-end', () => computerPrefs.markQuitting());
   refreshLicense('startup'); // recover a reinstated/renewed licence on relaunch, no re-paste
 
-  const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent', greenhouse: 'Auto-Apply Agent', uc: 'Universal Credit Agent' };
+  const BOT_DISPLAY = { reed: 'Reed Agent', scorer: 'Scorer Agent', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', wellfound: 'Wellfound Agent', glassdoor: 'Glassdoor Agent', cvlibrary: 'CV-Library Agent', totaljobs: 'Totaljobs Agent', cwjobs: 'CWJobs Agent', greenhouse: 'Auto-Apply Agent', uc: 'Universal Credit Agent' };
   // The user-facing job-site agents. The scorer runs alongside them but is an
   // internal helper, so it never triggers a "finished" notification of its own.
-  const JOB_SITE_KEYS = ['reed', 'linkedin', 'greenhouse', 'indeed', 'dice'];
+  const JOB_SITE_KEYS = ['reed', 'linkedin', 'greenhouse', 'indeed', 'dice', 'wellfound'];
   // Persist agent logs to disk so real runs can be inspected after the fact
   // (the in-app Agent tab only shows the live session). One file per UTC day.
   const agentLogFile = () => path.join(app.getPath('userData'), 'logs', `agents-${new Date().toISOString().slice(0, 10)}.log`);
@@ -1221,7 +1221,7 @@ ipcMain.handle('site:connect', async (event, { site, loginUrl }) => {
 
     const proc = execFile(browserPath, [
       `--user-data-dir=${profileDir}`,
-      ...(site === 'indeed' || site === 'dice' ? [] : [`--remote-debugging-port=${port}`]),
+      ...(['indeed', 'dice', 'wellfound'].includes(site) ? [] : [`--remote-debugging-port=${port}`]),
       '--profile-directory=Default',
       '--no-first-run',
       '--no-default-browser-check',
@@ -1244,7 +1244,7 @@ ipcMain.handle('site:connect', async (event, { site, loginUrl }) => {
 // `{site}_profile` Chrome folder — so we detect connection by that folder's
 // populated "Default" profile, OR (for password sites like Reed) a saved login.
 function connectedSitesStatus() {
-  const sites = ['reed', 'linkedin', 'glassdoor', 'cvlibrary', 'totaljobs', 'cwjobs', 'indeed', 'dice'];
+  const sites = ['reed', 'linkedin', 'glassdoor', 'cvlibrary', 'totaljobs', 'cwjobs', 'indeed', 'dice', 'wellfound'];
   const status = {};
   for (const site of sites) {
     let connected = false;
