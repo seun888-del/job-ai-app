@@ -247,14 +247,14 @@ module.exports = {
       const cb = widget?.getAttribute('data-callback');
       if (cb && typeof window[cb] === 'function') window[cb](t);
     },
-  "f6c98063473e7": () => {
+  "f278086faf9b7": () => {
     const links = [...document.querySelectorAll('header a, header button, nav a, nav button')].map(a => (a.innerText || '').trim().toLowerCase());
     if (links.includes('login') || links.includes('log in') || links.includes('sign in')) return false;
     return !!document.querySelector('a[href*="/dashboard/profile"], a[href*="/logout"], [data-testid*="avatar" i], [aria-label*="profile" i], [aria-label*="account" i]')
       || links.some(t => /log ?out|sign ?out|profile|my jobs/.test(t));
   },
   "f4c56983362de": () => window.scrollBy(0, 900),
-  "f4011460fd51b": (lim) => {
+  "f85c71c23f76f": (lim) => {
     const seen = new Set(); const out = [];
     for (const a of document.querySelectorAll('a[data-testid="job-search-job-detail-link"], a[href*="/job-detail/"]')) {
       const m = (a.getAttribute('href') || '').match(/\/job-detail\/([0-9a-f-]{36})/i);
@@ -271,7 +271,7 @@ module.exports = {
     }
     return out;
   },
-  "f8ca812197e05": () => {
+  "f9fa901a32fcb": () => {
     const desc = document.querySelector('[data-testid="jobDescriptionHtml"], [class*="jobDescription"], #jobDescription');
     const company = document.querySelector('a[href*="/company-profile/"], [data-cy="companyNameLink"]');
     // Dice's own apply goes to /job-applications/{id}; anything else leaves Dice.
@@ -285,14 +285,14 @@ module.exports = {
       alreadyApplied: applied,
     };
   },
-  "f80a2a2a628d0": ([css, src, tok]) => {
+  "f6f9cb8fdea56": ([css, src, tok]) => {
     const re = new RegExp(src, 'i');
     const el = [...document.querySelectorAll(css)].find(e => e.offsetParent !== null && re.test(((e.innerText || e.getAttribute('aria-label') || '') + '').trim()));
     if (!el) return false;
     el.setAttribute('data-jbclick', tok);
     return true;
   },
-  "fa90887c0e2f2": () => {
+  "fc6ca92edff20": () => {
     const vis = [...document.querySelectorAll('button, a, span')].filter(b => b.offsetParent !== null).map(b => (b.innerText || '').trim());
     return { applied: vis.some(t => /^applied$|^application submitted$/i.test(t)), canApply: vis.some(t => /^(easy apply|apply now|continue application)$/i.test(t)) };
   },
@@ -302,7 +302,7 @@ module.exports = {
   "f62f30cef2966": () => /resume\s*\*/i.test(document.body.innerText || '') && !/review your application/i.test(document.body.innerText || ''),
   "fc7e4f66dd4df": re => ((document.body.innerText || '').match(new RegExp(re, 'i')) || [])[1] || '',
   "fb01e722dc612": () => [...document.querySelectorAll('[role="menuitem"], [role="menu"] button, [role="menu"] a, li button')].filter(e => e.offsetParent !== null).map(e => (e.innerText || '').trim()).filter(Boolean),
-  "f473084bf17ea": () => {
+  "fe08dca83387d": () => {
     const vis = e => e.offsetParent !== null || (e.type === 'radio' && e.closest('label') && e.closest('label').offsetParent !== null);
     const qText = el => {
       const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
@@ -1705,13 +1705,6 @@ module.exports = {
       alreadyApplied: vis.some(t => /^applied$/i.test(t)),
       salaryText: [...document.querySelectorAll('span, div')].map(e => e.children.length ? '' : (e.innerText || '').trim()).find(t => /^\$\d/.test(t)) || '',
     };
-  },
-  "f6f9cb8fdea56": ([css, src, tok]) => {
-    const re = new RegExp(src, 'i');
-    const el = [...document.querySelectorAll(css)].find(e => e.offsetParent !== null && re.test(((e.innerText || e.getAttribute('aria-label') || '') + '').trim()));
-    if (!el) return false;
-    el.setAttribute('data-jbclick', tok);
-    return true;
   },
   "f758dd580184b": n => (document.body.innerText || '').includes(n),
   "f45b36990667c": () => {

@@ -26,8 +26,10 @@ async function diceSignedIn(page) {
 
 async function ensureLoggedIn(page) {
   await page.goto(`${BASE}/home/home-feed`, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
-  await DELAY(3000);
-  if (!(await diceSignedIn(page))) {
+  // Dice draws its header late; give it up to 15 s before deciding the user is signed out.
+  let signedIn = false;
+  for (let i = 0; i < 5 && !signedIn; i++) { await DELAY(3000); signedIn = await diceSignedIn(page); }
+  if (!signedIn) {
     await promptLogin(page, { site: 'Dice', loginUrl: `${BASE}/dashboard/login`, isSignedIn: diceSignedIn });
   }
   console.log('  [Dice] Session active');
