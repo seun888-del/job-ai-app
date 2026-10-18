@@ -1332,7 +1332,7 @@ async function renderLicense() {
 }
 
 // â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent' };
+const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent' };
 
 let botLogUnsub = null;
 let botStatusUnsub = null;
@@ -1547,8 +1547,9 @@ const CONNECT_URLS = {
   reed:     'https://secure.reed.co.uk/login',
   linkedin: 'https://www.linkedin.com/login',
   trac:     'https://apps.trac.jobs/',
+  indeed:   'https://secure.indeed.com/account/login',
 };
-const CRED_SITE_NAMES = { reed: 'Reed.co.uk', linkedin: 'LinkedIn', trac: 'NHS Trac' };
+const CRED_SITE_NAMES = { reed: 'Reed.co.uk', linkedin: 'LinkedIn', trac: 'NHS Trac', indeed: 'Indeed' };
 
 // Some stored job titles contain the whole scraped card blob (title + company +
 // location + "Easy Apply" …). The real title is the first non-empty line — show
@@ -1916,7 +1917,8 @@ async function renderDashboard() {
   const dashCreds = { reed: reedCred, linkedin: liCred, glassdoor: gdCred, cvlibrary: cvlibCred, totaljobs: tjCred, cwjobs: cwCred };
   // Application agents shown on the dashboard (the Scorer is hidden — it auto-runs
   // alongside these and is surfaced only as the "AI tailoring" pill).
-  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !(isUS && (k === 'reed' || k === 'trac')));
+  // USA: no Reed / NHS; Indeed (indeed.com) is USA-only for now.
+  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !(isUS && (k === 'reed' || k === 'trac')) && !(!isUS && k === 'indeed'));
   // Tell phone control (tryjobai.com/app) which agents this dashboard shows and which are ticked.
   const shareAgentPrefs = () => { try { window.api.remote.setPrefs({ keys: appAgentKeys, enabled: appAgentKeys.filter(k => localStorage.getItem('agent_enabled_' + k) !== '0') }); } catch (_) {} };
   shareAgentPrefs();

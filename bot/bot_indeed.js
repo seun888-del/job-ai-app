@@ -137,6 +137,8 @@ async function phase1_searchAndQueue(page) {
         queue.add({ ...jobDetails, source: 'indeed', workType });
         console.log(`  [Indeed Agent] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
       } catch (err) {
+        // Sign-in / Terms prompts that timed out, or a closed window: stop, don't repeat per job.
+        if (/^Indeed: |closed/i.test(err.message || '')) throw err;
         console.error(`  [Indeed Agent] Error on "${job.title}": ${err.message}`);
       }
 
@@ -243,6 +245,8 @@ async function phase2_applyReadyCVs(page) {
 async function main() {
   await cfg.init();
   await queue.init(process.env.JOBBOT_USERDATA);
+  // Scorer holds Indeed jobs until the sign-in is confirmed below.
+  queue.markSessionChecking('indeed');
 
   const country = cfg.APPLICANT.country || 'United Kingdom';
   const domain  = country === 'United States' ? 'indeed.com' : 'uk.indeed.com';
@@ -267,7 +271,13 @@ async function main() {
   const indeedPage = await context.newPage();
 
   try {
-    await indeed.ensureLoggedIn(indeedPage);
+    try {
+      await indeed.ensureLoggedIn(indeedPage);
+    } catch (err) {
+      queue.markSessionDead('indeed'); // sign-in failed → Scorer stops tailoring Indeed jobs
+      throw err;
+    }
+    queue.markSessionHealthy('indeed');
     while (true) {
       await phase1_searchAndQueue(indeedPage);
       await phase2_applyReadyCVs(indeedPage);

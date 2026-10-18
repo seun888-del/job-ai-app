@@ -63,7 +63,7 @@ function getStatus() {
 
 // Bots that produce jobs the Scorer must tailor CVs for (so the Scorer is
 // auto-started alongside them and auto-stopped when the last one exits).
-const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse', 'trac']);
+const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse', 'trac', 'indeed']);
 
 function anyJobSiteBotRunning() {
   return [...JOB_SITE_BOTS].some(name => bots[name].proc !== null);

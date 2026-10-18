@@ -1220,7 +1220,7 @@ ipcMain.handle('site:connect', async (event, { site, loginUrl }) => {
 
     const proc = execFile(browserPath, [
       `--user-data-dir=${profileDir}`,
-      `--remote-debugging-port=${port}`,
+      ...(site === 'indeed' ? [] : [`--remote-debugging-port=${port}`]),
       '--profile-directory=Default',
       '--no-first-run',
       '--no-default-browser-check',
