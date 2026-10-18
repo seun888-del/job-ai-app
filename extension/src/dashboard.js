@@ -7,6 +7,7 @@ import { extractText, toBase64 } from './lib/cvtext.js';
 import { TracAgent } from './agents/trac.js';
 import { ReedAgent } from './agents/reed.js';
 import { LinkedInAgent } from './agents/linkedin.js';
+import { IndeedAgent } from './agents/indeed.js';
 import { DiceAgent } from './agents/dice.js';
 import { WellfoundAgent } from './agents/wellfound.js';
 import { AtsAgent, feedJobs, fetchJD } from './agents/ats.js';
@@ -111,12 +112,30 @@ async function recheckLicence() {
 }
 
 // ── Agents ───────────────────────────────────────────────────────────────────
+// The shared agent code asks the user for things only a person may do (a "not a robot" box,
+// a sign-in) with a [[JOBBOT_NOTIFY]] line. The app turns those into desktop alerts; here they
+// go into the activity log, and the tab title flags it until the dashboard is looked at.
+{
+  const origLog = console.log.bind(console);
+  console.log = (...a) => {
+    origLog(...a);
+    const m = String(a[0] || '').match(/\[\[JOBBOT_NOTIFY\]\]\s*(.*)/);
+    if (!m) return;
+    store.log('⚠ ' + m[1]);
+    if (document.hidden) {
+      const t = document.title;
+      if (!/^\(!\)/.test(t)) document.title = '(!) ' + t;
+      const back = () => { if (!document.hidden) { document.title = document.title.replace(/^\(!\) /, ''); document.removeEventListener('visibilitychange', back); } };
+      document.addEventListener('visibilitychange', back);
+    }
+  };
+}
 const onChange = () => { if (current === 'dashboard') renderDashboard(); remoteNudge(); computerSync(); };
 const agents = {
   trac: new TracAgent({ onChange }),
   reed: new ReedAgent({ onChange }),
   linkedin: new LinkedInAgent({ onChange }),
-  // Indeed (agents/indeed.js) waits: its review page showed a captcha in a test browser. Check in real Chrome first.
+  indeed: new IndeedAgent({ onChange }),
   dice: new DiceAgent({ onChange }),
   wellfound: new WellfoundAgent({ onChange }),
   ats: new AtsAgent({ onChange }),
@@ -126,6 +145,7 @@ const AGENTS = [
   ['trac', 'Trac (NHS) Agent', 'https://apps.trac.jobs/', 'Sign in to Trac'],
   ['reed', 'Reed Agent', 'https://www.reed.co.uk/account/signin', 'Sign in to Reed'],
   ['linkedin', 'LinkedIn Agent', 'https://www.linkedin.com/login', 'Sign in to LinkedIn'],
+  ['indeed', 'Indeed Agent', 'https://secure.indeed.com/auth', 'Sign in to Indeed'],
   ['dice', 'Dice Agent', 'https://www.dice.com/dashboard/login', 'Sign in to Dice'],
   ['wellfound', 'Wellfound Agent', 'https://wellfound.com/login', 'Sign in to Wellfound'],
   ['ats', 'Company Sites Agent', '', ''],

@@ -347,4 +347,4 @@ function watchForManualClose(context, label) {
   return guard;
 }
 
-module.exports = { launchPersistentContext, connectToRunningChrome, spawnChromeWithCdp, findChromeExecutable, humanWarmup, waitForCloudflareSolve, BROWSER_CLOSED_RE, watchForManualClose };
+module.exports = { launchPersistentContext, connectToRunningChrome, spawnChromeWithCdp, findChromeExecutable, humanWarmup, waitForCloudflareSolve, restoreWindow, BROWSER_CLOSED_RE, watchForManualClose };

@@ -1,7 +1,7 @@
 const cfg     = require('../config');
 const path    = require('path');
 const captcha = require('./captcha_solver');
-const { humanWarmup, waitForCloudflareSolve } = require('./browser_launcher');
+const { humanWarmup, waitForCloudflareSolve, restoreWindow } = require('./browser_launcher');
 const { llmAvailable, llmChat } = require('../../src/services/llm');
 const { promptLogin } = require('./login_prompt');
 const ai = require('./question_ai'); // LLM fallback for unknown screening questions
@@ -1117,12 +1117,20 @@ async function _trySubmit(page, job) {
     }
   }
 
-  // A greyed-out Submit behind an "I'm not a robot" box: skip the job, never solve it.
-  const blocked = await page.evaluate(() => {
+  // A greyed-out Submit behind an "I'm not a robot" box. The agent never solves it: it shows
+  // the window and waits for the user to tick the box (3 minutes), else skips the job.
+  const isBlocked = () => page.evaluate(() => {
     const b = document.querySelector('[data-testid="submit-application-button"], button[data-testid="ia-submitButton"]');
     return !!(b && b.disabled && document.querySelector('iframe[src*="recaptcha"], .g-recaptcha, iframe[src*="hcaptcha"]'));
   }).catch(() => false);
-  if (blocked) throw new Error('Indeed asked for a captcha on the review page, skipped');
+  if (await isBlocked()) {
+    console.log(`  [[JOBBOT_NOTIFY]] Indeed wants a quick check for "${job.title}". Tick "I'm not a robot" in the Indeed window and Job-AI sends the application.`);
+    await restoreWindow(page).catch(() => {});
+    let cleared = false;
+    for (let i = 0; i < 60 && !cleared; i++) { await DELAY(3000); cleared = !(await isBlocked()); }
+    if (!cleared) throw new Error('Indeed asked for a captcha on the review page and it was not ticked, skipped');
+    console.log('  [Indeed] Check done, sending.');
+  }
 
   const submitSelectors = [
     'button[data-testid="ia-submitButton"]',

@@ -16,4 +16,13 @@ async function waitForCloudflareSolve(page, { maxWaitMs = 120000 } = {}) {
 async function humanWarmup() {}
 async function setWindowState() {}
 
-module.exports = { waitForCloudflareSolve, humanWarmup, setWindowState };
+// Shows the agent's (minimised) window so the user can do a step only a person may do.
+async function restoreWindow(page) {
+  try {
+    const t = await chrome.tabs.get(page.tabId);
+    await chrome.windows.update(t.windowId, { state: 'normal', focused: true });
+    await chrome.tabs.update(page.tabId, { active: true });
+  } catch (_) {}
+}
+
+module.exports = { waitForCloudflareSolve, humanWarmup, setWindowState, restoreWindow };
