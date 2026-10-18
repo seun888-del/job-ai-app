@@ -120,9 +120,89 @@ const SUBSCRIBE_URL = 'https://tryjobai.com/subscribe';
 async function openSubscribe() {
   let key = '';
   try { key = (await window.api.license.get())?.license_key || ''; } catch (_) {}
-  const url = key ? `${SUBSCRIBE_URL}?lk=${encodeURIComponent(key)}` : SUBSCRIBE_URL;
-  window.api.shell.openExternal(url);
+  const qs = [key ? `lk=${encodeURIComponent(key)}` : '', _isUKUser ? '' : 'region=us'].filter(Boolean).join('&');
+  window.api.shell.openExternal(qs ? `${SUBSCRIBE_URL}?${qs}` : SUBSCRIBE_URL);
 }
+
+// ── Region (UK / USA) ───────────────────────────────────────────────────────
+// The region picks which agents the dashboard shows (USA hides Reed, NHS and
+// Universal Credit), where LinkedIn searches, the prices shown and the wording
+// ("resume" not "CV"). New installs in an America/* timezone start on USA.
+function tzLooksUS() {
+  try { return (Intl.DateTimeFormat().resolvedOptions().timeZone || '').startsWith('America/'); } catch (_) { return false; }
+}
+async function setRegion(country) {
+  const us = country === 'United States';
+  await window.api.profile.save({ country });
+  // Swap the default search location to match, but never overwrite a city the user typed.
+  try {
+    const prefs = await window.api.searchPrefs.get();
+    const loc = (prefs.location || '').trim();
+    if (!loc || loc === 'United Kingdom' || loc === 'United States') {
+      await window.api.searchPrefs.save({ location: us ? 'United States' : 'United Kingdom' });
+    }
+  } catch (_) {}
+  try { localStorage.setItem('region_autoset', '1'); } catch (_) {}
+  applyRegionWording(us);
+}
+async function autoSetRegionOnce() {
+  try { if (localStorage.getItem('region_autoset')) return; localStorage.setItem('region_autoset', '1'); } catch (_) { return; }
+  if (!tzLooksUS()) return;
+  const p = await window.api.profile.get();
+  // Only a fresh profile: someone who already set things up keeps their choice.
+  if (p.country === 'United States' || p.first_name) return;
+  await setRegion('United States');
+}
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.region-opt');
+  if (!btn || btn.classList.contains('active')) return;
+  await setRegion(btn.dataset.region);
+  if (_currentView === 'dashboard') render('dashboard');
+});
+
+// US users read "resume" instead of "CV". Rewrites visible text and placeholders
+// as views render, skipping file names (My CV.pdf) and anything the user typed.
+let _regionWordingObs = null;
+function usWord(t) {
+  if (/\.(pdf|docx?|txt)\b/i.test(t)) return t;
+  return t
+    // UK-only sites in lists of agents/sites: US users only have LinkedIn + company sites.
+    .replace(/NHS \(Trac\), Reed, LinkedIn and company/g, 'LinkedIn and company')
+    .replace(/Reed, LinkedIn, NHS jobs \(through Trac\) and company/g, 'LinkedIn and company')
+    .replace(/(the )?Reed, LinkedIn and company/g, (m, a) => (a || '') + 'LinkedIn and company')
+    .replace(/\b4 Agents\b/g, '2 Agents')
+    .replace(/\bCVs\b(?= [A-Z])/g, 'Resumes').replace(/\bCV\b(?= [A-Z])/g, 'Resume')
+    .replace(/\bCVs\b/g, 'resumes').replace(/\bCV\b/g, 'resume')
+    .replace(/(^|[.!?]\s+)resume/g, (m, a) => a + 'Resume').replace(/^([^A-Za-z]*)resume/, '$1Resume');
+}
+const US_WORD_HINT = /CV|Reed|4 Agents/;
+function rewordTree(root) {
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => (n.parentElement && n.parentElement.closest('textarea,input,script,style,[contenteditable],.agent-log,.log-box')) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    if (US_WORD_HINT.test(n.nodeValue)) { const v = usWord(n.nodeValue); if (v !== n.nodeValue) n.nodeValue = v; }
+  }
+  if (root.querySelectorAll) root.querySelectorAll('[placeholder*="CV"],[title*="CV"]').forEach(el => {
+    for (const a of ['placeholder', 'title']) { const v = el.getAttribute(a); if (v && v.includes('CV')) el.setAttribute(a, usWord(v)); }
+  });
+}
+function applyRegionWording(us) {
+  if (_regionWordingObs) { _regionWordingObs.disconnect(); _regionWordingObs = null; }
+  if (!us) return;
+  rewordTree(document.body);
+  _regionWordingObs = new MutationObserver(muts => {
+    for (const m of muts) for (const n of m.addedNodes) {
+      if (n.nodeType === 1) rewordTree(n);
+      else if (n.nodeType === 3 && US_WORD_HINT.test(n.nodeValue)) n.nodeValue = usWord(n.nodeValue);
+    }
+  });
+  _regionWordingObs.observe(document.body, { childList: true, subtree: true });
+}
+autoSetRegionOnce().then(() => window.api.profile.get()).then(p => {
+  _isUKUser = (p.country || 'United Kingdom') !== 'United States';
+  applyRegionWording(!_isUKUser);
+}).catch(() => {});
 
 // The "daily limit reached" dialog, shown at Start when today's cap is used up.
 // Trial users get a Subscribe call-to-action; paid users just acknowledge it.
@@ -436,6 +516,7 @@ async function renderPersonal() {
 
   document.getElementById('save').addEventListener('click', async () => {
     const selectedEmpTypes = Array.from(document.querySelectorAll('input[name="employment_type"]:checked')).map(cb => cb.value).join(',');
+    await setRegion(document.getElementById('country').value);
     await window.api.profile.save({
       country: document.getElementById('country').value,
       first_name: document.getElementById('first_name').value,
@@ -1910,6 +1991,10 @@ async function renderDashboard() {
       <div>
         <h2 class="dash-greeting">${greeting}</h2>
         <p class="dash-sub">${dashboardHasLicense ? 'Your agents are ready. Applications run automatically each day.' : 'Monitor agent activity and track your application progress.'}</p>
+        <div class="region-switch" role="group" aria-label="Job market">
+          <button class="region-opt${isUS ? '' : ' active'}" data-region="United Kingdom">UK</button>
+          <button class="region-opt${isUS ? ' active' : ''}" data-region="United States">USA</button>
+        </div>
       </div>
       <div class="dash-cta">
         <span class="scorer-pill${scorerRunning ? ' scorer-pill-active' : ''}" id="scorer-pill" data-status="${status.scorer || 'stopped'}"

@@ -35,8 +35,60 @@ async function deviceId() {
 }
 
 // Load everything the agents need from local storage.
+// ── Region (UK / USA), same as the app ───────────────────────────────────────
+// USA hides the Reed, NHS and Universal Credit cards, searches LinkedIn in the US,
+// says "resume" not "CV" and shows dollar prices. First run picks it from the timezone.
+const tzLooksUS = () => { try { return (Intl.DateTimeFormat().resolvedOptions().timeZone || '').startsWith('America/'); } catch (_) { return false; } };
+const isUS = (settings) => (settings && settings.region) === 'us';
+async function setRegion(region) {
+  await store.patch('settings', { region });
+  const profile = await store.get('profile');
+  const loc = (profile.searchLocation || '').trim();
+  if (!loc || loc === 'United Kingdom' || loc === 'United States') await store.patch('profile', { searchLocation: region === 'us' ? 'United States' : 'United Kingdom' });
+  applyRegionWording(region === 'us');
+}
+let regionWordingObs = null;
+function usWord(t) {
+  if (/\.(pdf|docx?|txt)\b/i.test(t)) return t;
+  return t
+    // UK-only sites in lists of agents/sites: US users only have LinkedIn + company sites.
+    .replace(/NHS \(Trac\), Reed, LinkedIn and company/g, 'LinkedIn and company')
+    .replace(/Reed, LinkedIn, NHS jobs \(through Trac\) and company/g, 'LinkedIn and company')
+    .replace(/(the )?Reed, LinkedIn and company/g, (m, a) => (a || '') + 'LinkedIn and company')
+    .replace(/\b4 Agents\b/g, '2 Agents')
+    .replace(/\bCVs\b(?= [A-Z])/g, 'Resumes').replace(/\bCV\b(?= [A-Z])/g, 'Resume')
+    .replace(/\bCVs\b/g, 'resumes').replace(/\bCV\b/g, 'resume')
+    .replace(/(^|[.!?]\s+)resume/g, (m, a) => a + 'Resume').replace(/^([^A-Za-z]*)resume/, '$1Resume');
+}
+const US_WORD_HINT = /CV|Reed|4 Agents/;
+function rewordTree(root) {
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement && n.parentElement.closest('textarea,input,script,style,[contenteditable]')) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    if (US_WORD_HINT.test(n.nodeValue)) { const v = usWord(n.nodeValue); if (v !== n.nodeValue) n.nodeValue = v; }
+  }
+  if (root.querySelectorAll) root.querySelectorAll('[placeholder*="CV"],[title*="CV"]').forEach((el) => {
+    for (const a of ['placeholder', 'title']) { const v = el.getAttribute(a); if (v && v.includes('CV')) el.setAttribute(a, usWord(v)); }
+  });
+}
+function applyRegionWording(us) {
+  if (regionWordingObs) { regionWordingObs.disconnect(); regionWordingObs = null; }
+  if (!us) return;
+  rewordTree(document.body);
+  regionWordingObs = new MutationObserver((muts) => {
+    for (const m of muts) for (const n of m.addedNodes) {
+      if (n.nodeType === 1) rewordTree(n);
+      else if (n.nodeType === 3 && US_WORD_HINT.test(n.nodeValue)) n.nodeValue = usWord(n.nodeValue);
+    }
+  });
+  regionWordingObs.observe(document.body, { childList: true, subtree: true });
+}
+
 async function loadConfig() {
+  if (!(await store.get('settings')).region) await setRegion(tzLooksUS() ? 'us' : 'uk');
   const [license, profile, trac, settings] = await Promise.all([store.get('license'), store.get('profile'), store.get('trac'), store.get('settings')]);
+  applyRegionWording(isUS(settings));
   globalThis.__jobaiLicense = license.key || '';
   globalThis.__jobaiDevice = await deviceId();
   cfg.load({ profile, trac, settings, license });
@@ -352,7 +404,8 @@ VIEWS.dashboard = async function renderDashboardView() {
     const inQueue = all.filter((j) => ['pending', 'cv_ready', 'applying'].includes(j.status));
     const tailoring = all.some((j) => j.status === 'processing');
     const reviewing = all.filter((j) => j.status === 'awaiting_review');
-    const ucOn = (profile.country || 'United Kingdom') === 'United Kingdom';
+    const us = isUS(settings);
+    const ucOn = !us && (profile.country || 'United Kingdom') === 'United Kingdom';
     const ucPending = all.filter((j) => j.status === 'applied' && !j.ucLoggedAt);
     const hasLicence = licenceActive(license);
     const setupDone = {
@@ -362,7 +415,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       trac: !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length),
     };
     const base = hasLicence && setupDone.cvs;
-    const canRun = { trac: base && setupDone.trac, reed: base && setupDone.search, linkedin: base && setupDone.search, ats: base && setupDone.search };
+    const canRun = { trac: !us && base && setupDone.trac, reed: !us && base && setupDone.search, linkedin: base && setupDone.search, ats: base && setupDone.search };
     const running = anyRunning();
     const hour = new Date().getHours();
     const name = profile.firstName || trac.firstName || '';
@@ -402,6 +455,10 @@ VIEWS.dashboard = async function renderDashboardView() {
         <div>
           <h2 class="dash-greeting">Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}${name ? ', ' + esc(name) : ''}</h2>
           <p class="dash-sub">${running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Monitor agent activity and track your application progress.'}</p>
+          <div class="region-switch" role="group" aria-label="Job market">
+            <button class="region-opt${us ? '' : ' active'}" data-region="uk">UK</button>
+            <button class="region-opt${us ? ' active' : ''}" data-region="us">USA</button>
+          </div>
         </div>
         <div class="dash-cta">
           <span class="scorer-pill${tailoring ? ' scorer-pill-active' : ''}" title="The AI tailors your CV while the agents work, so you don't start it yourself.">${tailoring ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
@@ -430,7 +487,7 @@ VIEWS.dashboard = async function renderDashboardView() {
           <button class="preflight-link${setupDone.personal ? ' is-done' : ''}" data-view="personal">${setupDone.personal ? '✓' : '👤'} Personal details</button>
           <button class="preflight-link${setupDone.search ? ' is-done' : ''}" data-view="search">${setupDone.search ? '✓' : '⚙️'} Search preferences</button>
           <button class="preflight-link${setupDone.cvs ? ' is-done' : ''}" data-view="cvs">${setupDone.cvs ? '✓' : '📄'} CVs</button>
-          <button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>
+          ${us ? '' : `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>`}
           <button class="preflight-link${hasLicence ? ' is-done' : ''}" data-view="license">${hasLicence ? '✓' : '🔑'} License</button>
         </div>
       </div>
@@ -458,7 +515,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         <div class="dash-col-main">
           <div class="dash-col-title">Your agents</div>
           <p class="bot-controls-hint">Tick the agents you want, then press <strong>Start applying</strong>. Or start one on its own card.</p>
-          <div class="bot-controls">${AGENTS.map(card).join('')}</div>
+          <div class="bot-controls">${AGENTS.filter(([k]) => !us || (k !== 'trac' && k !== 'reed')).map(card).join('')}</div>
         </div>
         <div class="dash-col-side">
           <div class="dash-col-title">Applications (last 14 days)</div>
@@ -493,6 +550,12 @@ VIEWS.dashboard = async function renderDashboardView() {
       setTimeout(renderDashboard, 300);
     });
     $('#stop-all').addEventListener('click', () => { Object.values(agents).forEach((a) => a.stop()); renderDashboard(); });
+    $$('.region-opt').forEach((b) => b.addEventListener('click', async () => {
+      if (b.classList.contains('active')) return;
+      // UK-only agents can't keep running once their cards are hidden.
+      if (b.dataset.region === 'us') { agents.trac.stop(); agents.reed.stop(); }
+      await setRegion(b.dataset.region); renderDashboard();
+    }));
     $$('.preflight-link[data-view]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
     $$('.cv-fill-btn').forEach((b) => b.addEventListener('click', () => pickCv('#gs-cv-st', cvToPersonal)));
     $$('.signin').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.url)));
@@ -815,7 +878,7 @@ VIEWS.search = async function renderSearch() {
       <div class="field"><label>Job titles to search (one per line)</label><textarea id="s-terms" class="tracd" rows="5" placeholder="e.g. IT Support Analyst">${esc((profile.searchTerms || []).join('\n'))}</textarea></div>
       <div class="field"><label>Skip jobs with these words in the title (one per line)</label><textarea id="s-exclude" class="tracd" rows="5" placeholder="e.g. Senior">${esc((profile.excludeKeywords || []).join('\n'))}</textarea></div>
       <div class="field"><label>Blocked companies (one per line)</label><textarea id="s-block" class="tracd" rows="5" placeholder="e.g. Agency name">${esc((profile.blockedCompanies || []).join('\n'))}</textarea></div>
-      <div class="field"><label>Search location</label><input id="s-where" type="text" value="${esc(profile.searchLocation || 'United Kingdom')}"></div>
+      <div class="field"><label>Search location</label><input id="s-where" type="text" value="${esc(profile.searchLocation || (isUS(settings) ? 'United States' : 'United Kingdom'))}"></div>
       <div class="field"><label>Maximum job posting age</label><select id="s-age">${[['r86400', 'Past 24 hours'], ['r604800', 'Past week'], ['r1209600', 'Past 2 weeks'], ['r2592000', 'Past month']].map(([v, l]) => `<option value="${v}" ${(profile.jobAge || 'r1209600') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label>Minimum CV match (%)</label><input id="s-min" type="number" min="45" max="100" placeholder="Any" value="${esc(profile.minScore || '')}"><small class="muted">Leave empty to apply to every job that fits your CV.</small></div>
       <div class="field"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="s-wt" value="${v}" ${(profile.workTypePriority || ['remote', 'hybrid', 'onsite']).includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>

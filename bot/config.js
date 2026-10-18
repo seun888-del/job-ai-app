@@ -148,7 +148,10 @@ const cfg = {
       } catch {
         cfg.WORK_TYPE_PRIORITY = ['remote', 'hybrid', 'onsite'];
       }
-      cfg.LOCATION = prefs.location || 'United Kingdom';
+      // A US user still on the UK default searches the US instead.
+      const usUser = (profile.country || '') === 'United States';
+      cfg.LOCATION = (usUser && (!prefs.location || prefs.location === 'United Kingdom')) ? 'United States'
+        : (prefs.location || 'United Kingdom');
       cfg.CONTRACT_TYPE = prefs.contract_type || 'any';
       cfg.JOB_AGE = prefs.job_age || 'r1209600';
 

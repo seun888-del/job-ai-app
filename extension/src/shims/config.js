@@ -63,7 +63,7 @@ const cfg = {
     cfg.TITLE_BLOCKLIST = (profile.excludeKeywords || []).map((k) => String(k).toLowerCase());
     cfg.COMPANY_BLOCKLIST = (profile.blockedCompanies || []).map((k) => String(k).toLowerCase());
     cfg.WORK_TYPE_PRIORITY = Array.isArray(profile.workTypePriority) && profile.workTypePriority.length ? profile.workTypePriority : ['remote', 'hybrid', 'onsite'];
-    cfg.LOCATION = profile.searchLocation || 'United Kingdom';
+    cfg.LOCATION = profile.searchLocation || ((settings && settings.region) === 'us' ? 'United States' : 'United Kingdom');
     cfg.CONTRACT_TYPE = profile.contractType || 'any';
     cfg.JOB_AGE = profile.jobAge || 'r1209600';
     cfg.SKIP_EXTERNAL_SITES = profile.skipExternalSites !== false;
