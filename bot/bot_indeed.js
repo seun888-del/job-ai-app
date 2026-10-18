@@ -269,6 +269,12 @@ async function main() {
   const context = await launchPersistentContext(profileDir);
   await stealth.applyToContext(context);
   const indeedPage = await context.newPage();
+  // A crashed tab never answers, so the agent would wait forever. Close it: the pending step then
+  // fails with "closed" and the agent stops with a clear message instead of hanging.
+  indeedPage.on('crash', () => {
+    console.error('  [Indeed Agent] The Indeed page crashed (often low memory). Stopping, press Start to try again.');
+    indeedPage.close().catch(() => {});
+  });
 
   try {
     try {

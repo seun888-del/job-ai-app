@@ -154,7 +154,7 @@ async function applyToJob(page, job, resumePath) {
       await page.locator(submit).first().click();
       for (let i = 0; i < 20; i++) {
         await DELAY(1000);
-        const ok = await page.evaluate(() => /application (has been |was )?(submitted|sent)|successfully applied|thanks for applying/i.test(document.body.innerText || '') || /\/success|confirmation/i.test(location.href)).catch(() => false);
+        const ok = await page.evaluate(() => /application (has been |was )?(submitted|sent)|application is on its way|successfully applied|thanks for applying/i.test(document.body.innerText || '') || /\/success|confirmation/i.test(location.href)).catch(() => false);
         if (ok) { console.log('  [Dice] Application submitted.'); return true; }
       }
       await page.screenshot({ path: path.join(SSDIR, 'dice_after_submit.png'), fullPage: true }).catch(() => {});

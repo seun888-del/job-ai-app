@@ -370,6 +370,9 @@ async function fillEasyApplyForm(applyPage, job, resumePath) {
     if (submitted) {
       console.log('  [Indeed] ✓ Application submitted!');
       await DELAY(3000);
+      // Some employers (e.g. hospital groups) want one more step on their own site afterwards.
+      const extra = await applyPage.evaluate(() => /one more step|complete additional step/i.test(document.body?.innerText || '')).catch(() => false);
+      if (extra) console.log(`  [[JOBBOT_NOTIFY]] ${job?.company || 'The employer'} asks for one more step on their own site for "${job?.title}". Indeed has messaged you the link.`);
       await applyPage.screenshot({ path: path.join(SSDIR, 'indeed_submitted.png') }).catch(() => {});
       return true;
     }
@@ -378,6 +381,8 @@ async function fillEasyApplyForm(applyPage, job, resumePath) {
     let advanced = await _tryContinue(applyPage);
     // A slow step leaves Continue disabled behind a spinner for a few seconds: wait, then retry once.
     if (!advanced) { await DELAY(6000); advanced = await _tryContinue(applyPage); }
+    // The page moved on by itself (e.g. straight to the review page): go round again.
+    if (!advanced && applyPage.url() !== currentUrl) continue;
     if (!advanced) {
       console.log(`  [Indeed] Could not advance from step ${stepCount}.`);
       const errs = await applyPage.evaluate(() => [...document.querySelectorAll('[role="alert"], [class*="error" i], [id*="error" i]')]
@@ -1072,8 +1077,8 @@ function _allFrames(page) {
 }
 
 async function _trySubmit(page, job) {
-  // Wait up to 20s for "Preparing review" loading spinner to clear
-  for (let i = 0; i < 10; i++) {
+  // Wait up to 90s for the "Preparing review" spinner to clear (slow on busy computers)
+  for (let i = 0; i < 45; i++) {
     const loading = await page.evaluate(() => {
       const t = (document.body?.innerText || '').toLowerCase();
       return t.includes('preparing review') || t.includes('loading');
