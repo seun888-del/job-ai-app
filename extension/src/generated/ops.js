@@ -247,14 +247,14 @@ module.exports = {
       const cb = widget?.getAttribute('data-callback');
       if (cb && typeof window[cb] === 'function') window[cb](t);
     },
-  "f278086faf9b7": () => {
+  "f6c98063473e7": () => {
     const links = [...document.querySelectorAll('header a, header button, nav a, nav button')].map(a => (a.innerText || '').trim().toLowerCase());
     if (links.includes('login') || links.includes('log in') || links.includes('sign in')) return false;
     return !!document.querySelector('a[href*="/dashboard/profile"], a[href*="/logout"], [data-testid*="avatar" i], [aria-label*="profile" i], [aria-label*="account" i]')
       || links.some(t => /log ?out|sign ?out|profile|my jobs/.test(t));
   },
   "f4c56983362de": () => window.scrollBy(0, 900),
-  "f85c71c23f76f": (lim) => {
+  "f4011460fd51b": (lim) => {
     const seen = new Set(); const out = [];
     for (const a of document.querySelectorAll('a[data-testid="job-search-job-detail-link"], a[href*="/job-detail/"]')) {
       const m = (a.getAttribute('href') || '').match(/\/job-detail\/([0-9a-f-]{36})/i);
@@ -271,7 +271,7 @@ module.exports = {
     }
     return out;
   },
-  "f9fa901a32fcb": () => {
+  "f8ca812197e05": () => {
     const desc = document.querySelector('[data-testid="jobDescriptionHtml"], [class*="jobDescription"], #jobDescription');
     const company = document.querySelector('a[href*="/company-profile/"], [data-cy="companyNameLink"]');
     // Dice's own apply goes to /job-applications/{id}; anything else leaves Dice.
@@ -285,24 +285,24 @@ module.exports = {
       alreadyApplied: applied,
     };
   },
-  "f6f9cb8fdea56": ([css, src, tok]) => {
+  "f80a2a2a628d0": ([css, src, tok]) => {
     const re = new RegExp(src, 'i');
     const el = [...document.querySelectorAll(css)].find(e => e.offsetParent !== null && re.test(((e.innerText || e.getAttribute('aria-label') || '') + '').trim()));
     if (!el) return false;
     el.setAttribute('data-jbclick', tok);
     return true;
   },
-  "fc6ca92edff20": () => {
+  "fa90887c0e2f2": () => {
     const vis = [...document.querySelectorAll('button, a, span')].filter(b => b.offsetParent !== null).map(b => (b.innerText || '').trim());
     return { applied: vis.some(t => /^applied$|^application submitted$/i.test(t)), canApply: vis.some(t => /^(easy apply|apply now|continue application)$/i.test(t)) };
   },
   "f1ce4b4de9fb8": () => ((document.body.innerText.match(/step \d+ of \d+/i) || [''])[0]) + '|' + [...document.querySelectorAll('form')].map(f => f.innerText).join('|').slice(0, 1500),
-  "f4206c2633837": () => /application (has been |was )?(submitted|sent)|successfully applied|thanks for applying/i.test(document.body.innerText || '') || /\/success|confirmation/i.test(location.href),
+  "f49fb833a7002": () => /application (has been |was )?(submitted|sent)|application is on its way|successfully applied|thanks for applying/i.test(document.body.innerText || '') || /\/success|confirmation/i.test(location.href),
   "f0a6254bc1dcb": () => [...document.querySelectorAll('[role="alert"], [class*="error" i]')].map(e => (e.innerText || '').trim()).filter(t => t && t.length < 200),
   "f62f30cef2966": () => /resume\s*\*/i.test(document.body.innerText || '') && !/review your application/i.test(document.body.innerText || ''),
   "fc7e4f66dd4df": re => ((document.body.innerText || '').match(new RegExp(re, 'i')) || [])[1] || '',
   "fb01e722dc612": () => [...document.querySelectorAll('[role="menuitem"], [role="menu"] button, [role="menu"] a, li button')].filter(e => e.offsetParent !== null).map(e => (e.innerText || '').trim()).filter(Boolean),
-  "fe08dca83387d": () => {
+  "f473084bf17ea": () => {
     const vis = e => e.offsetParent !== null || (e.type === 'radio' && e.closest('label') && e.closest('label').offsetParent !== null);
     const qText = el => {
       const fs = el.closest('fieldset'); const lg = fs && fs.querySelector('legend');
@@ -599,6 +599,7 @@ module.exports = {
         !!document.querySelector('.cf-turnstile, [data-sitekey][class*="turnstile"]') ||
         !!document.querySelector('iframe[src*="turnstile"]') ||
         (document.body?.innerText || '').toLowerCase().includes('verify you are human'),
+  "f2648d6098dab": () => /one more step|complete additional step/i.test(document.body?.innerText || ''),
   "f5e73d16e452f": (el) => {
       let b = el.parentElement;
       for (let i = 0; i < 5 && b && !b.querySelector('select, button, [role="combobox"]'); i++) b = b.parentElement;

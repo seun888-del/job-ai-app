@@ -542,12 +542,16 @@ VIEWS.dashboard = async function renderDashboardView() {
       ${ucOn ? `<div class="card bot-card uc-card"><div class="bot-card-header"><strong>📋 Universal Credit journal</strong></div>
         <p style="font-size:13px;color:var(--text-muted);margin:6px 0 12px">Keeps a running log of every job Job-AI has applied to, each with the real date, ready to add to your Universal Credit "log your work search" journal. ${ucPending.length ? `<strong>${ucPending.length}</strong> application${ucPending.length === 1 ? '' : 's'} ready to log.` : 'Your journal is up to date.'}</p>
         <div class="bot-card-actions"><button class="primary" id="uc-copy" ${ucPending.length ? '' : 'disabled'}>View / copy my work search log</button></div></div>` : ''}
+      ${us ? `<div class="card bot-card wsl-card"><div class="bot-card-header"><strong>📋 Work search log</strong></div>
+        <p style="font-size:13px;color:var(--text-muted);margin:6px 0 12px">Unemployment benefits ask for work search contacts each week. Job-AI logs every job it really applied to, with the real date, ready for your state's weekly form. <strong>${wslByWeek(all.filter((j) => j.status === 'applied')).filter((w) => w.start === wslWeekStart(new Date()).getTime()).reduce((n, w) => n + w.rows.length, 0)}</strong> this week.</p>
+        <div class="bot-card-actions"><button class="primary" id="wsl-open">View my work search log</button></div></div>` : ''}
       ${recentHtml(all, settings.recentClearedAt)}`;
 
     $$('.start').forEach((b) => b.addEventListener('click', () => startAgent(b.dataset.bot)));
     $$('.rv-ok').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'cv_ready' }); renderDashboard(); }));
     $$('.rv-skip').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'skipped', reason: 'Skipped in review' }); renderDashboard(); }));
     $('#uc-copy')?.addEventListener('click', () => showUcLog(ucPending));
+    $('#wsl-open')?.addEventListener('click', () => showWorkSearchLog(all.filter((j) => j.status === 'applied')));
     $('#recent-clear')?.addEventListener('click', async () => { await store.patch('settings', { recentClearedAt: new Date().toISOString() }); renderDashboard(); });
     $$('.stop').forEach((b) => b.addEventListener('click', () => { agents[b.dataset.bot].stop(); renderDashboard(); }));
     $('#start-all').addEventListener('click', async () => {
@@ -652,6 +656,58 @@ function showUcLog(list) {
   $('#uc-cp').onclick = (e) => navigator.clipboard.writeText(text).then(() => { e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1500); }).catch(() => {});
   $('#uc-mark').disabled = !lines.length;
   $('#uc-mark').onclick = async () => { const at = new Date().toISOString(); for (const j of list) await store.updateJob(j.jobId, { ucLoggedAt: at }); o.style.display = 'none'; renderDashboard(); };
+  o.style.display = 'flex';
+}
+
+// ── US work search log (same as the app): benefit weeks run Sunday to Saturday ──
+const WSL_SITE = { linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', ats: 'company website', reed: 'Reed' };
+function wslWeekStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - x.getDay()); return x; }
+function wslByWeek(list) {
+  const weeks = new Map();
+  for (const j of list) {
+    const d = new Date(j.appliedAt || ''); if (isNaN(d)) continue;
+    const start = wslWeekStart(d).getTime();
+    if (!weeks.has(start)) weeks.set(start, { start, rows: [] });
+    weeks.get(start).rows.push({ ...j, date: d });
+  }
+  for (const w of weeks.values()) w.rows.sort((a, b) => b.date - a.date);
+  return [...weeks.values()].sort((a, b) => b.start - a.start);
+}
+function showWorkSearchLog(list) {
+  const weeks = wslByWeek(list);
+  const fmt = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const row = (j) => ({ date: j.date.toLocaleDateString('en-US'), employer: j.company || 'Unknown employer', position: j.title || '', method: `Online application via ${WSL_SITE[j.source] || 'job site'}`, contact: String(j.url || '').split(/[?#]/)[0], result: 'Application submitted' });
+  const text = weeks.length ? weeks.map((w) => {
+    const end = new Date(w.start); end.setDate(end.getDate() + 6);
+    return `Week of ${fmt(w.start)} to ${fmt(end)} (${w.rows.length} contact${w.rows.length === 1 ? '' : 's'})\n` + w.rows.map(row).map((r) => `${r.date} | ${r.employer} | ${r.position} | ${r.method} | ${r.result}${r.contact ? ' | ' + r.contact : ''}`).join('\n');
+  }).join('\n\n') : 'No applications yet. Once the agents apply to jobs, they appear here with the real date.';
+  const cell = (v) => '"' + String(v).replace(/"/g, '""') + '"';
+  const csv = ['Week starting,Date,Employer,Position,How you applied,Website,Result']
+    .concat(weeks.flatMap((w) => w.rows.map(row).map((r) => [new Date(w.start).toLocaleDateString('en-US'), r.date, r.employer, r.position, r.method, r.contact, r.result].map(cell).join(',')))).join('\r\n');
+  let o = $('#wsl-modal');
+  if (!o) {
+    o = document.createElement('div'); o.id = 'wsl-modal';
+    o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
+    o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:760px;width:100%;max-height:82vh;border-radius:12px;display:flex;flex-direction:column;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border,#e6e1d6)"><div><b>Your work search log</b><div id="wsl-sub" class="muted" style="font-size:12px"></div></div><button id="wsl-x" class="secondary">Close</button></div>
+      <div id="wsl-body" style="padding:20px;overflow:auto;white-space:pre-wrap;line-height:1.6;font-size:13px"></div>
+      <div style="padding:12px 20px;border-top:1px solid var(--border,#e6e1d6);display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+        <span class="muted" style="font-size:12px;flex:1;min-width:180px">Enter these on your state's weekly claim. Weeks run Sunday to Saturday.</span>
+        <div class="ext-inline"><button id="wsl-csv" class="secondary">Download spreadsheet</button><button id="wsl-cp" class="primary">Copy</button></div></div></div>`;
+    document.body.appendChild(o);
+    o.addEventListener('click', (e) => { if (e.target === o || e.target.id === 'wsl-x') o.style.display = 'none'; });
+  }
+  $('#wsl-sub').textContent = list.length ? `${list.length} application${list.length === 1 ? '' : 's'} in ${weeks.length} week${weeks.length === 1 ? '' : 's'}` : '';
+  $('#wsl-body').textContent = text;
+  $('#wsl-cp').disabled = $('#wsl-csv').disabled = !weeks.length;
+  $('#wsl-cp').onclick = (e) => navigator.clipboard.writeText(text).then(() => { e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1500); }).catch(() => {});
+  $('#wsl-csv').onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' }));
+    a.download = `work-search-log-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
   o.style.display = 'flex';
 }
 
