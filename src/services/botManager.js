@@ -11,6 +11,7 @@ const BOT_SCRIPTS = {
   scorer:     'bot_scorer.js',
   linkedin:   'bot_linkedin.js',
   indeed:     'bot_indeed.js',
+  dice:       'bot_dice.js',
   glassdoor:  'bot_glassdoor.js',
   cvlibrary:  'bot_cvlibrary.js',
   totaljobs:  'bot_totaljobs.js',
@@ -25,6 +26,7 @@ const bots = {
   scorer:     { proc: null, status: 'stopped', stopping: false },
   linkedin:   { proc: null, status: 'stopped', stopping: false },
   indeed:     { proc: null, status: 'stopped', stopping: false },
+  dice:       { proc: null, status: 'stopped', stopping: false },
   glassdoor:  { proc: null, status: 'stopped', stopping: false },
   cvlibrary:  { proc: null, status: 'stopped', stopping: false },
   totaljobs:  { proc: null, status: 'stopped', stopping: false },
@@ -51,6 +53,7 @@ function getStatus() {
     scorer:     bots.scorer.status,
     linkedin:   bots.linkedin.status,
     indeed:     bots.indeed.status,
+    dice:       bots.dice.status,
     glassdoor:  bots.glassdoor.status,
     cvlibrary:  bots.cvlibrary.status,
     totaljobs:  bots.totaljobs.status,
@@ -63,7 +66,7 @@ function getStatus() {
 
 // Bots that produce jobs the Scorer must tailor CVs for (so the Scorer is
 // auto-started alongside them and auto-stopped when the last one exits).
-const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse', 'trac', 'indeed']);
+const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse', 'trac', 'indeed', 'dice']);
 
 function anyJobSiteBotRunning() {
   return [...JOB_SITE_BOTS].some(name => bots[name].proc !== null);

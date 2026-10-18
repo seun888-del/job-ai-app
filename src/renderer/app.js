@@ -1332,7 +1332,7 @@ async function renderLicense() {
 }
 
 // â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent' };
+const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent' };
 
 let botLogUnsub = null;
 let botStatusUnsub = null;
@@ -1504,7 +1504,7 @@ function statusLabel(status, reason) {
 // Dashboard headline numbers, built from the queue summary. Skipped jobs are left out on
 // purpose (routine filtering reads as failure; the breakdown lives in Analytics), and
 // "CVs tailored" is folded into "In queue" because NHS/Trac jobs never use a CV.
-const SOURCE_LABELS = { linkedin: 'LinkedIn', reed: 'Reed', trac: 'NHS', indeed: 'Indeed', glassdoor: 'Glassdoor', cvlibrary: 'CV-Library', totaljobs: 'Totaljobs', cwjobs: 'CWJobs', ats: 'Company Sites' };
+const SOURCE_LABELS = { linkedin: 'LinkedIn', reed: 'Reed', trac: 'NHS', indeed: 'Indeed', dice: 'Dice', glassdoor: 'Glassdoor', cvlibrary: 'CV-Library', totaljobs: 'Totaljobs', cwjobs: 'CWJobs', ats: 'Company Sites' };
 function dashboardStats(summary) {
   const c = {}, by = {};
   (summary || []).forEach((r) => {
@@ -1548,8 +1548,9 @@ const CONNECT_URLS = {
   linkedin: 'https://www.linkedin.com/login',
   trac:     'https://apps.trac.jobs/',
   indeed:   'https://secure.indeed.com/account/login',
+  dice:     'https://www.dice.com/dashboard/login',
 };
-const CRED_SITE_NAMES = { reed: 'Reed.co.uk', linkedin: 'LinkedIn', trac: 'NHS Trac', indeed: 'Indeed' };
+const CRED_SITE_NAMES = { reed: 'Reed.co.uk', linkedin: 'LinkedIn', trac: 'NHS Trac', indeed: 'Indeed', dice: 'Dice' };
 
 // Some stored job titles contain the whole scraped card blob (title + company +
 // location + "Easy Apply" …). The real title is the first non-empty line — show
@@ -1917,8 +1918,8 @@ async function renderDashboard() {
   const dashCreds = { reed: reedCred, linkedin: liCred, glassdoor: gdCred, cvlibrary: cvlibCred, totaljobs: tjCred, cwjobs: cwCred };
   // Application agents shown on the dashboard (the Scorer is hidden — it auto-runs
   // alongside these and is surfaced only as the "AI tailoring" pill).
-  // USA: no Reed / NHS; Indeed (indeed.com) is USA-only for now.
-  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !(isUS && (k === 'reed' || k === 'trac')) && !(!isUS && k === 'indeed'));
+  // USA: no Reed / NHS; Indeed (indeed.com) and Dice are USA-only for now.
+  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !(isUS && (k === 'reed' || k === 'trac')) && !(!isUS && (k === 'indeed' || k === 'dice')));
   // Tell phone control (tryjobai.com/app) which agents this dashboard shows and which are ticked.
   const shareAgentPrefs = () => { try { window.api.remote.setPrefs({ keys: appAgentKeys, enabled: appAgentKeys.filter(k => localStorage.getItem('agent_enabled_' + k) !== '0') }); } catch (_) {} };
   shareAgentPrefs();
@@ -2865,7 +2866,7 @@ async function renderTracker() {
       ${TRACKER_STAGES.map(s => `<option value="${s}" ${s === currentStage ? 'selected' : ''}>${STAGE_LABELS[s]}</option>`).join('')}
     </select>`;
 
-  const SOURCE_BADGE = { reed: '#2563eb', linkedin: '#0077b5', indeed: '#2164f3', glassdoor: '#0caa41', cvlibrary: '#ff5c35', totaljobs: '#E84B2A', cwjobs: '#003057', greenhouse: '#24a47f', ats: '#7c3aed' };
+  const SOURCE_BADGE = { reed: '#2563eb', linkedin: '#0077b5', indeed: '#2164f3', dice: '#cc0000', glassdoor: '#0caa41', cvlibrary: '#ff5c35', totaljobs: '#E84B2A', cwjobs: '#003057', greenhouse: '#24a47f', ats: '#7c3aed' };
 
   document.getElementById('tracker-body').innerHTML = !entries.length ? `
       <div class="card"><div class="empty-state">No applications tracked yet. The tracker syncs automatically once Agents start applying.</div></div>
@@ -2992,7 +2993,7 @@ async function renderAnalytics() {
     </div>`;
   };
 
-  const SOURCE_COLORS = { reed: '#2563eb', linkedin: '#0077b5', indeed: '#2164f3', glassdoor: '#0caa41', cvlibrary: '#ff5c35', totaljobs: '#E84B2A', cwjobs: '#003057', greenhouse: '#24a47f', ats: '#7c3aed' };
+  const SOURCE_COLORS = { reed: '#2563eb', linkedin: '#0077b5', indeed: '#2164f3', dice: '#cc0000', glassdoor: '#0caa41', cvlibrary: '#ff5c35', totaljobs: '#E84B2A', cwjobs: '#003057', greenhouse: '#24a47f', ats: '#7c3aed' };
   const maxSource = bySource[0]?.count || 1;
   const maxCV     = byCV[0]?.count || 1;
   const maxSkip   = skipReasons[0]?.count || 1;
