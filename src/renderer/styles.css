@@ -1292,3 +1292,7 @@ textarea.tracd { resize: vertical; }
 .tracd-warn { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: #fef3c7; color: #92400e; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tracd-warn { background: #3b2f12; color: #fcd34d; } }
 :root[data-theme="dark"] .tracd-warn { background: #3b2f12; color: #fcd34d; }
+
+/* USA region: NHS (Trac) applications are UK-only. */
+.region-us #nhs-apps-section,
+.region-us #card-ready { display: none !important; }

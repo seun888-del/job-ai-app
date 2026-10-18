@@ -188,6 +188,8 @@ function rewordTree(root) {
   });
 }
 function applyRegionWording(us) {
+  // NHS (Trac) drafts and their "Ready to submit" count are UK-only (styles.css hides them).
+  document.body.classList.toggle('region-us', !!us);
   if (_regionWordingObs) { _regionWordingObs.disconnect(); _regionWordingObs = null; }
   if (!us) return;
   rewordTree(document.body);
