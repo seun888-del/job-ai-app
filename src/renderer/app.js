@@ -329,10 +329,8 @@ async function render(view) {
 // â”€â”€ 1. Personal Details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function renderPersonal() {
   const p = await window.api.profile.get();
-  const country = p.country || 'European Union';
-  // Region is a binary US / non-US switch. Normalise any non-US value (including
-  // the legacy 'United Kingdom') to 'European Union' so the picker stays correct.
-  const region = country === 'United States' ? 'United States' : 'European Union';
+  // The region (UK / USA) is set with the "Find jobs in" switch on the dashboard and in
+  // Search Preferences, not here.
   const empTypes = (p.employment_type || '').split(',').filter(Boolean);
 
   const needsDetails = !(p.first_name && p.last_name && p.email && p.phone);
@@ -349,22 +347,6 @@ async function renderPersonal() {
       <button class="primary" id="cv-fill">Upload CV</button>
       <span class="status-msg" id="cv-fill-status"></span>
     </div>` : ''}
-
-    <div class="card">
-      <h3>Your Region</h3>
-      <p class="card-hint">Determines which job sites are available and how employer screening questions are answered.</p>
-      <div class="country-picker">
-        <button class="country-btn${region === 'European Union' ? ' active' : ''}" data-country="European Union">
-          <span class="country-flag">🇪🇺</span>
-          <span class="country-name">European Union</span>
-        </button>
-        <button class="country-btn${region === 'United States' ? ' active' : ''}" data-country="United States">
-          <span class="country-flag">🇺🇸</span>
-          <span class="country-name">United States</span>
-        </button>
-      </div>
-      <input type="hidden" id="country" value="${region}">
-    </div>
 
     <div class="card">
       <h3>Contact Information</h3>
@@ -517,19 +499,9 @@ async function renderPersonal() {
     btn.disabled = false;
   });
 
-  content.querySelectorAll('.country-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      content.querySelectorAll('.country-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('country').value = btn.dataset.country;
-    });
-  });
-
   document.getElementById('save').addEventListener('click', async () => {
     const selectedEmpTypes = Array.from(document.querySelectorAll('input[name="employment_type"]:checked')).map(cb => cb.value).join(',');
-    await setRegion(document.getElementById('country').value);
     await window.api.profile.save({
-      country: document.getElementById('country').value,
       first_name: document.getElementById('first_name').value,
       middle_name: document.getElementById('middle_name').value.trim(),
       last_name: document.getElementById('last_name').value,
