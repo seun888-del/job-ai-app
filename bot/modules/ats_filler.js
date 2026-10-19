@@ -661,6 +661,9 @@ async function _buildAnswer(question, fieldType, job) {
     '1month': '1 month notice', '2months': '2 months notice', '3months': '3 months notice',
   };
 
+  const fact = _workFact(question);
+  if (fact !== undefined) return fact;
+
   if (/cover letter|covering letter/i.test(q) || fieldType === 'textarea') {
     return `Please see my attached CV for full details of my experience and qualifications. I am genuinely excited about the ${job.title} role at ${job.company} and believe my background makes me a strong fit. I am ${AVAIL_MAP[availability || 'immediately'] || 'immediately available'} and welcome the opportunity to discuss further.`;
   }
@@ -694,6 +697,13 @@ async function _buildAnswer(question, fieldType, job) {
   try {
     if (await llmAvailable()) {
       const avail = AVAIL_MAP[availability || 'immediately'] || 'Immediately available';
+      const home = cfg.APPLICANT.country === 'United States' ? 'US' : 'UK';
+      const homeRe = home === 'US' ? /\bus\b|usa|united states|america/i : /uk|united kingdom|britain/i;
+      // Work history and education, so "Company", "Title", "School" and their dates (the
+      // work/education sections many ATS forms repeat) come from real data, newest first.
+      const D = cfg.TRAC_DETAILS || {};
+      const jobs = (D.employment || []).slice(0, 5).map((e) => `- ${e.jobTitle || ''} at ${e.employer || ''} (${e.start || '?'} to ${e.end || 'present'})`).join('\n');
+      const edu = (D.education || []).slice(0, 3).map((e) => `- ${[e.qualification || e.subject, e.institution || e.school || e.place, e.end || e.year].filter(Boolean).join(', ')}`).join('\n');
       const prompt =
 `You are completing a job application form on behalf of ${firstName} ${lastName}.
 
@@ -701,15 +711,21 @@ Candidate facts:
 - ${yearsExperience} years of experience
 - Location: ${location}
 - Availability: ${avail}
-- Right to work in UK: ${(rightToWorkCountries || []).some(c => /uk|united kingdom/i.test(c)) ? 'Yes' : 'No'}
+- Right to work in ${home}: ${(rightToWorkCountries || []).some(c => homeRe.test(c)) ? 'Yes' : 'No'}
 - Requires visa sponsorship: ${_yesNoForQuestion('do you require sponsorship') === 'yes' ? 'Yes' : 'No'}
-
+${jobs ? `Work history (newest first):\n${jobs}\n` : ''}${edu ? `Education:\n${edu}\n` : ''}
 Job: ${job.title} at ${job.company}
 
 Form question: "${question}"
 
-Write a short, professional answer (1-3 sentences). Sound natural and human. No bullet points. No mention of AI. Answer directly.`;
+Rules:
+- Use only the facts above. Never invent employers, job titles, dates, schools, links, numbers or experience.
+- A short field (company, job title, school, degree, a date, month, year, number or URL) takes just the value, nothing else. Fields about a job or school with no other context mean the most recent one.
+- Company, employer, job title and date fields in a work-history section are about the candidate's OWN past jobs, never the job being applied for. A job with no end date is current: its end date fields get SKIP.
+- An open question gets 1 to 3 natural, professional sentences. No bullet points, no mention of AI.
+- If the facts don't answer it, reply with exactly: SKIP`;
       const answer = await llmChat(prompt);
+      if (/^\W*skip\W*$/i.test(String(answer || '').trim())) { console.log(`  [ATS] Not in your details, left blank: "${question.substring(0, 50)}"`); return ''; }
       if (answer?.trim()) {
         console.log(`  [ATS] AI: "${question.substring(0, 50)}" → "${answer.substring(0, 60)}"`);
         return answer.trim();
@@ -783,8 +799,17 @@ async function _answerComboboxes(page, job) {
       if (!options.length) { console.log(`  [ATS] ⚠ No options for dropdown: "${q.substring(0, 50)}"`); await box.press('Escape').catch(() => {}); continue; }
 
       let chosen = null;
+      const fact = _workFact(q);
+      if (fact !== undefined) {
+        const f = String(fact).toLowerCase().trim();
+        chosen = f ? (options.find(t => t.toLowerCase() === f) || options.find(t => t.toLowerCase().includes(f) || (f.length > 3 && f.includes(t.toLowerCase())))) || null : null;
+        if (!chosen) { console.log(`  [ATS] Not in your details, left blank: "${q.substring(0, 50)}"`); await box.press('Escape').catch(() => {}); continue; }
+      }
       if (isLocation) chosen = options[0];
       else if (DEMOGRAPHIC_RE.test(q)) chosen = options.find(t => /prefer not|decline|don.?t wish|do not wish|rather not|not to (say|answer|disclose)/i.test(t)) || null;
+      // The agent found it online: never claim a referral, recruiter or event.
+      else if (/how did you (hear|find|learn)|where did you (hear|see|find)|source of (this )?application/i.test(q))
+        chosen = options.find(t => /career(s)? (page|site)|company (web)?site|job board|online|website|internet|search/i.test(t)) || options.find(t => /^other\b/i.test(t)) || null;
       if (!chosen) chosen = _pickDropdownOption(q, options.map(t => ({ val: t, text: t })));
       if (!chosen && !DEMOGRAPHIC_RE.test(q)) chosen = await _aiPickOption(q, options, job);
       if (!chosen) { console.log(`  [ATS] ⚠ No answer for dropdown: "${q.substring(0, 50)}" [${options.slice(0, 4).join(' / ').substring(0, 80)}]`); await box.press('Escape').catch(() => {}); continue; }
@@ -847,6 +872,36 @@ function _pickRadioOption(question, optionTexts) {
   return null;
 }
 
+// Work-history and education fields ("Company name", "Title", "Start date month", "School"
+// in the repeating sections Greenhouse and others add): answered from the candidate's own
+// most recent job and qualification in code, not the AI, which confused them with the job
+// being applied for. Returns undefined when the label isn't one of these fields, '' when it
+// is but the data doesn't give it (left blank), otherwise the value.
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function _workFact(question) {
+  const q = String(question || '').toLowerCase().replace(/[*:]/g, '').trim();
+  const D = cfg.TRAC_DETAILS || {};
+  const job = (D.employment || [])[0] || {};
+  const edu = (D.education || [])[0] || {};
+  const part = (d, kind) => {
+    const m = String(d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})|(\d{4})-(\d{2})|^(\d{4})$/);
+    if (!m) return '';
+    const month = m[2] ? +m[2] : m[5] ? +m[5] : 0, year = m[3] || m[4] || m[6] || '';
+    return kind === 'year' ? year : (month ? MONTHS[month - 1] : '');
+  };
+  if (/^(company( name)?|employer( name)?|current (company|employer))$/.test(q)) return job.employer || '';
+  if (/^(title|job title|position|role)$/.test(q)) return job.jobTitle || '';
+  const date = q.match(/^(start|end|from|to) date (month|year)$/);
+  if (date) {
+    const end = /^(end|to)$/.test(date[1]);
+    if (end && !job.end) return ''; // current job: no end date
+    return part(end ? job.end : job.start, date[2]);
+  }
+  if (/^(school|university|institution|college)( name)?$/.test(q)) return edu.institution || edu.school || edu.place || '';
+  if (/^(discipline|field of study|major|subject)$/.test(q)) return edu.subject || edu.qualification || '';
+  return undefined;
+}
+
 // ── AI option picker ───────────────────────────────────────────────────────
 async function _aiPickOption(question, optionTexts, job) {
   if (!question || !optionTexts.length) return null;
@@ -854,15 +909,17 @@ async function _aiPickOption(question, optionTexts, job) {
     if (!await llmAvailable()) return null;
     const { firstName, lastName, yearsExperience, availability, rightToWorkCountries, country } = cfg.APPLICANT;
     const home = country === 'United States' ? 'US' : 'UK';
-    const homeRe = home === 'US' ? /us|usa|united states|america/i : /uk|united kingdom|britain/i;
+    const homeRe = home === 'US' ? /\bus\b|usa|united states|america/i : /uk|united kingdom|britain/i;
     const AVAIL_MAP = { 'immediately': 'Immediately', '1week': '1 week', '2weeks': '2 weeks', '1month': '1 month', '3months': '3 months' };
     const prompt =
 `You are completing a job application for ${firstName} ${lastName} (${yearsExperience} yrs experience, availability: ${AVAIL_MAP[availability] || 'immediately'}, right to work ${home}: ${(rightToWorkCountries||[]).some(c=>homeRe.test(c))}, requires visa sponsorship: ${_yesNoForQuestion('require sponsorship') === 'yes'}).
 
+${(() => { const D = cfg.TRAC_DETAILS || {}; const w = (D.employment || []).slice(0, 5).map((e) => `- ${e.jobTitle || ''} at ${e.employer || ''} (${e.start || '?'} to ${e.end || 'present'})`).join('\n'); const ed = (D.education || []).slice(0, 3).map((e) => `- ${[e.qualification || e.subject, e.institution || e.school || e.place, e.end || e.year].filter(Boolean).join(', ')}`).join('\n'); return (w ? `Work history (newest first):\n${w}\n` : '') + (ed ? `Education:\n${ed}\n` : ''); })()}
 Question: "${question}"
 Options:
 ${optionTexts.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
+A question about a specific date, month, year, school, degree or employer must come from the facts above (fields about a job or school with no other context mean the candidate's own most recent one, never the job being applied for; a job with no end date is current, so its end date is SKIP); if the facts don't give it, reply with exactly: SKIP
 Answer truthfully. For a willingness, availability or commitment question the candidate can reasonably meet (e.g. willing to work on-site, able to commute), choose the affirmative option. For a rating of their own skill or knowledge, pick a modest middle level unless the details above show real expertise; never overstate. Never claim a licence, certificate, clearance or past employer the details don't show. Reply with ONLY the exact text of the best option. No explanation.`;
     // The model occasionally returns an empty/garbled reply; a blank required
     // radio blocks the whole submission, so retry a couple of times before giving
@@ -871,6 +928,7 @@ Answer truthfully. For a willingness, availability or commitment question the ca
       const reply = await llmChat(prompt);
       const cleaned = (reply || '').trim().replace(/^\d+\.\s*/, '');
       if (!cleaned) { await J(300, 600); continue; }
+      if (/^\W*skip\W*$/i.test(cleaned)) { console.log(`  [ATS] Not in your details, left blank: "${question.substring(0, 50)}"`); return null; }
       const lc = cleaned.toLowerCase();
       const match = optionTexts.find(t => t.toLowerCase() === lc)
         || optionTexts.find(t => t.toLowerCase().startsWith(lc) || lc.startsWith(t.toLowerCase()))

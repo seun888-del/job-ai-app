@@ -1,7 +1,10 @@
 // Company-sites agent for the extension: the same jobs feed, form filler and Recruitee direct
 // submit as the desktop app's Auto-Apply agent (bot/bot_greenhouse.js), run in the user's Chrome.
 // Jobs come from the Job-AI feed (Greenhouse, Lever, Recruitee and other company career pages).
-// Company-site applications are always submitted once the form is complete.
+// Recruitee sends over plain HTTP. The other sites (Greenhouse, Workable, Lever, Ashby,
+// SmartRecruiters) guard Submit with a captcha or bot check: with "Send for me" on the agent
+// presses Submit and anything that shows a check waits in Ready to send; with it off they
+// all wait there for the user's Fill and open (fillAndOpen below).
 import cfg from '../shims/config.js';
 import * as store from '../lib/store.js';
 import { Page } from '../driver/page.js';
@@ -32,7 +35,7 @@ export async function feedJobs(country) {
   const url = `${BACKEND}/v1/jobs/candidates?country=${country}&limit=100` + (terms ? `&terms=${encodeURIComponent(terms)}` : '');
   const data = await getJson(url, { headers: llm.headers() });
   return (data.jobs || [])
-    .filter((j) => j && j.auto_apply && j.apply_url)
+    .filter((j) => j && (j.auto_apply || j.assist) && j.apply_url)
     .map((j) => ({ jobId: 'gh_' + String(j.id || '').split(':').pop(), title: j.title, company: j.company, url: j.apply_url, description: j.description || '', ats: j.source || 'greenhouse' }))
     .filter((j) => j.jobId !== 'gh_');
 }
@@ -67,12 +70,8 @@ export class AtsAgent extends SiteAgent {
 
   async search() {
     if (!(cfg.JOB_SEARCHES || []).length) { this.log('Add search terms on the Setup page to find jobs.'); return; }
-    // Only the countries the user can work in (UK by default), and only titles that fit their terms.
-    const where = [cfg.APPLICANT.country, ...(cfg.APPLICANT.rightToWorkCountries || [])].join(' ').toLowerCase();
-    const countries = [];
-    if (!where.trim() || /united kingdom|\buk\b|britain|england|scotland|wales|northern ireland/.test(where)) countries.push('GB');
-    if (/united states|\busa?\b|america/.test(where)) countries.push('US');
-    if (!countries.length) countries.push('GB');
+    // Only the user's own region (the UK/USA switch), and only titles that fit their terms.
+    const countries = [cfg.APPLICANT.country === 'United States' ? 'US' : 'GB'];
     const matchers = titleMatch.compile(cfg.JOB_SEARCHES);
     let jobs = [];
     for (const c of countries) {
@@ -92,48 +91,92 @@ export class AtsAgent extends SiteAgent {
     }
   }
 
-  // Company sites always submit (the old fill-only "Submit for me" switch was removed).
-  async submitOn() { return true; }
+  // "Send for me" switch on the Company sites card. On by default.
+  async submitOn() { const st = (await store.get('settings')) || {}; return !(st.autoSubmit && st.autoSubmit.ats === false); }
+
+  // Park a job for the user: it shows under Ready to send with Fill and open.
+  async park(job, why) {
+    await store.updateJob(job.jobId, { status: 'ready', reason: (why ? why + ' ' : '') + READY });
+    this.log(`Ready for you to send: ${job.title} @ ${job.company}${why ? ' (' + why.replace(/\.$/, '') + ')' : ''}`);
+    this.onChange();
+    return 'ready';
+  }
 
   async apply(job) {
     const ats = atsFiller.detectATS(job.url);
-    const submit = await this.submitOn();
-    const httpFn = submit && (httpSubmit.httpSubmitterFor(ats) || httpSubmit.httpSubmitterFor(job.ats));
+    const httpFn = httpSubmit.httpSubmitterFor(ats) || httpSubmit.httpSubmitterFor(job.ats);
     if (httpFn) {
       const A = cfg.APPLICANT;
       const r = await httpFn({ url: job.url, cvPath: job.cvPath, coverLetter: job.coverLetter || '', dryRun: false, applicant: {
-        firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone,
+        firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone, country: A.country,
         rightToWorkCountries: A.rightToWorkCountries, requiresSponsorship: A.requiresSponsorship,
         salaryExpectation: A.salaryExpectation, yearsExperience: A.yearsExperience, availability: A.availability,
       } });
       if (r.submitted) return true;
+      // A required question the profile can't answer: never guess, hand it over.
+      if (r.reason === 'needs_you') return this.park(job, 'A question needs your answer.');
       return { error: `${ats} did not accept the application (${r.reason}${r.status ? ' ' + r.status : ''})` };
     }
-    if (submit) {
-      await this.ensurePage();
-      await this.page.goto(job.url);
-      await sleep(1500 + Math.random() * 1500);
-      if (await blocked(this.page)) return 'Site asked for a verification check';
-      const r = await atsFiller.fillExternalForm(this.page, job, job.cvPath, ats, { submit: true });
-      return r === true ? true : { error: `${ats} form could not be completed` };
-    }
-    // Fill-only: do it in a normal tab the user can see, and leave it open for them to send.
-    const tab = await Page.open(job.url, { active: false });
+    // SmartRecruiters puzzles a browser after a few automated visits, so it always waits for the user.
+    if (!(await this.submitOn()) || ats === 'smartrecruiters') return this.park(job, '');
+    await this.ensurePage();
+    await this.page.goto(atsFiller.formUrl(job.url));
     await sleep(1500 + Math.random() * 1500);
-    if (await blocked(tab)) { await tab.close(); return 'Site asked for a verification check'; }
-    const r = await atsFiller.fillExternalForm(tab, job, job.cvPath, ats, { submit: false });
-    // Only call it filled if the form really has our answers in it.
-    const state = await formState(tab).catch(() => ({ filled: 0 }));
-    if ((r === 'dry_run' || r === true) && state.filled >= 2) {
-      await store.updateJob(job.jobId, { status: 'ready', reason: 'Filled in. Open the tab, check it and press Submit.' });
-      this.log(`Filled, waiting for you to submit: ${job.title} @ ${job.company}`);
-      this.onChange();
-      return 'ready';
-    }
-    if (await blocked(tab)) { await tab.close(); return 'Site asked for a verification check'; }
-    await tab.close();
-    return { error: `${ats} form could not be completed` };
+    if (await blocked(this.page)) return this.park(job, 'The site asked for a human check.');
+    const r = await atsFiller.fillExternalForm(this.page, job, job.cvPath, ats, { submit: true });
+    if (r === true) return true;
+    const why = { captcha: 'The site asked for a human check.', validation: 'A question needs your answer.', empty: 'A question needs your answer.', unconfirmed: "The site didn't confirm it. Check your email before sending again." }[atsFiller.lastSubmitOutcome()] || 'Needs you to finish it.';
+    return this.park(job, why);
   }
 
   async record(job, r) { if (r !== 'ready') return super.record(job, r); }
+}
+
+const READY = 'Ready for you: press Fill and open, check it, then Submit.';
+// Confirmation text the sites show after a real submission.
+const SENT_RE = /application (has been )?(received|submitted|sent)|thank you for (applying|your application|your interest)|thanks for applying|successfully (applied|submitted)|we('| ha)ve received your application|application complete/i;
+
+// Fill and open: fill one waiting job in a tab the user can see and leave Submit to them.
+// Watches the tab and marks the job applied when the site confirms; closing the tab leaves
+// it in the list. Never presses Submit.
+export async function fillAndOpen(jobId, onChange = () => {}) {
+  const job = (await store.jobs()).find((j) => j.jobId === jobId && j.status === 'ready');
+  if (!job) return { ok: false, message: 'That application is no longer waiting.' };
+  const ats = atsFiller.detectATS(job.url);
+  const tab = await Page.open(atsFiller.formUrl(job.url), { active: true });
+  await sleep(2500);
+  let note = 'Filled. Check the form, pass any check, then press Submit.';
+  try {
+    if (await blocked(tab)) note = 'Pass the check on the page, then fill in and submit the form.';
+    else {
+      await atsFiller.fillExternalForm(tab, job, job.cvPath, ats, { submit: false });
+      const filled = await formState(tab).catch(() => ({ filled: 0 }));
+      if (filled.filled < 2) note = "Couldn't fill this form. Press Apply on the page, fill it in, then press Submit.";
+    }
+  } catch (_) { note = "Couldn't fill everything. Finish it on the page, then press Submit."; }
+  store.log('⚠ ' + note);
+  const pageState = () => tab.evaluate(() => ({
+    url: location.href,
+    text: (document.body ? document.body.innerText : '').slice(0, 20000),
+    submit: [...document.querySelectorAll('button, input[type="submit"]')].some((b) => (b.offsetParent || b.getClientRects().length) && /submit|send application|apply/i.test(b.innerText || b.value || '')),
+  }));
+  const before = await pageState().catch(() => ({ text: '', submit: true }));
+  const hadText = SENT_RE.test(before.text);
+  // Sent = a confirmation URL, or confirmation text that wasn't on the form before (an advert
+  // can say "thank you for your interest") or that shows once the Submit button has gone.
+  (async () => {
+    const until = Date.now() + 30 * 60 * 1000;
+    while (Date.now() < until && !tab.isClosed()) {
+      await sleep(2000);
+      const st = await pageState().catch(() => null);
+      if (!st) continue;
+      if (/\/confirmation|\/thank[-_]?you|\/success/i.test(st.url) || (SENT_RE.test(st.text) && (!hadText || !st.submit))) {
+        await store.updateJob(job.jobId, { status: 'applied', appliedAt: new Date().toISOString(), reason: 'Sent by you' });
+        store.log(`✓ Sent: ${job.title} @ ${job.company}`);
+        onChange();
+        return;
+      }
+    }
+  })();
+  return { ok: true, message: note };
 }

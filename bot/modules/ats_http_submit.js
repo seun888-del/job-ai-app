@@ -35,7 +35,7 @@ function answerRecruiteeQuestion(q, a = {}) {
   const body = String(q.body || '').replace(/<[^>]+>/g, ' ').toLowerCase();
   const rtw = a.rightToWorkCountries || [];
   const us = a.country === 'United States';
-  const home = us ? /us|usa|united states|america/i : /uk|united kingdom|britain/i;
+  const home = us ? /\bus\b|usa|united states|america/i : /uk|united kingdom|britain/i;
   const hasRtW = Array.isArray(rtw) ? rtw.some((c) => home.test(c)) : home.test(String(rtw));
   const needsSponsor = typeof a.requiresSponsorship === 'boolean' ? a.requiresSponsorship : !hasRtW;
   if (q.kind === 'boolean') {

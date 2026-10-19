@@ -10,7 +10,7 @@ import { LinkedInAgent } from './agents/linkedin.js';
 import { IndeedAgent } from './agents/indeed.js';
 import { DiceAgent } from './agents/dice.js';
 import { WellfoundAgent } from './agents/wellfound.js';
-import { AtsAgent, feedJobs, fetchJD } from './agents/ats.js';
+import { AtsAgent, feedJobs, fetchJD, fillAndOpen } from './agents/ats.js';
 import { Page } from './driver/page.js';
 import { scoreJob } from './agents/scorer.js';
 
@@ -450,8 +450,12 @@ VIEWS.dashboard = async function renderDashboardView() {
     const hour = new Date().getHours();
     const name = profile.firstName || trac.firstName || '';
     const apps = [...needs, ...ready].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    // Only the NHS agent has a "Submit for me" switch; company sites always submit.
-    const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac) };
+    // "Submit for me" switches: NHS is off by default, company sites on by default.
+    const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac), ats: !(settings.autoSubmit && settings.autoSubmit.ats === false) };
+    const SUBMIT_HINT = {
+      trac: (on) => on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.',
+      ats: (on) => on ? 'Sends them for you. Sites that ask you to prove you\'re human wait under Ready to send.' : 'Off: each one waits under Ready to send for you to check and submit.',
+    };
     // Which agents "Start applying" runs (tick box on each card, like the app). All ticked by default.
     const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
     const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites' };
@@ -461,7 +465,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       const on = agents[key].running;
       const toggle = key in submitOn ? `<label class="agent-submit-toggle">
           <input type="checkbox" class="auto" data-bot="${key}" ${submitOn[key] ? 'checked' : ''}>
-          <span><strong>Submit for me</strong><br><small>${submitOn[key] ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.'}</small></span>
+          <span><strong>${key === 'ats' ? 'Send for me' : 'Submit for me'}</strong><br><small>${SUBMIT_HINT[key](submitOn[key])}</small></span>
         </label>` : '';
       return `<div class="card bot-card${on ? ' bot-card-running' : ''}" id="bot-card-${key}">
         <div class="bot-card-header">
@@ -532,9 +536,9 @@ VIEWS.dashboard = async function renderDashboardView() {
       </div>
 
       ${waiting.length ? `<div class="card card-wide nhs-apps-card">
-        <h3 style="margin:0 0 4px">Filled in, waiting for you</h3>
-        <p class="nhs-apps-hint">Each form is open in a tab. Check it and press Submit on the site.</p>
-        ${waiting.map((a) => `<div class="nhs-app"><div class="nhs-app-main"><div class="nhs-app-title">${esc(a.title)}</div><div class="nhs-app-meta">${esc(a.company || '')}</div></div><span class="badge badge-warning">Waiting for you</span><div class="nhs-app-actions"><button class="primary open-url" data-url="${esc(a.url)}">Open form</button><button class="secondary mark-sent" data-id="${esc(a.jobId)}">I submitted it</button></div></div>`).join('')}
+        <h3 style="margin:0 0 4px">Ready to send (${waiting.length})</h3>
+        <p class="nhs-apps-hint">These company sites ask a person to press Submit. Fill and open fills it in for you: check it, tick any box, then press Submit.</p>
+        ${waiting.map((a) => { const why = String(a.reason || '').split(' Ready for you:')[0]; return `<div class="nhs-app"><div class="nhs-app-main"><div class="nhs-app-title">${esc(a.title)}</div><div class="nhs-app-meta">${esc(a.company || '')}</div>${why && !/^(Ready for you:|Filled in\.)/.test(why) ? `<div class="nhs-app-missing">${esc(why)}</div>` : ''}</div><span class="badge badge-success">Ready to send</span><div class="nhs-app-actions"><button class="primary fill-open" data-id="${esc(a.jobId)}">Fill and open</button><button class="secondary mark-sent" data-id="${esc(a.jobId)}">I sent it</button><button class="secondary skip-send" data-id="${esc(a.jobId)}">Skip</button></div></div>`; }).join('')}
       </div>` : ''}
 
       ${apps.length ? `<div class="card card-wide nhs-apps-card">
@@ -599,7 +603,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       const on = e.target.checked; const key = e.target.dataset.bot;
       if (on && key === 'trac' && !confirm('Let the NHS agent submit applications for you?\n\nIt only submits when every section on Trac is complete, and never forms that ask about AI use.')) { e.target.checked = false; return; }
       const s = await store.get('settings');
-      s.autoSubmit = { ...(s.autoSubmit || {}), trac: on };
+      s.autoSubmit = { ...(s.autoSubmit || {}), [key]: on };
       await store.set('settings', s); renderDashboard();
     }));
     $$('.pc').forEach((el) => el.addEventListener('change', async (e) => { await store.patch('settings', { [e.target.dataset.k]: e.target.checked }); computerSync(); remoteNudge(); }));
@@ -608,7 +612,14 @@ VIEWS.dashboard = async function renderDashboardView() {
       s.enabled = { ...(s.enabled || {}), [e.target.dataset.bot]: e.target.checked };
       await store.set('settings', s); renderDashboard();
     }));
-    $$('.mark-sent').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'applied', appliedAt: new Date().toISOString(), reason: '' }); renderDashboard(); }));
+    $$('.mark-sent').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'applied', appliedAt: new Date().toISOString(), reason: 'Sent by you' }); renderDashboard(); }));
+    $$('.skip-send').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'skipped', reason: 'Not sent (your choice)' }); renderDashboard(); }));
+    $$('.fill-open').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true; b.textContent = 'Opening...';
+      const r = await fillAndOpen(b.dataset.id, () => renderDashboard()).catch((e) => ({ ok: false, message: e.message }));
+      b.disabled = false; b.textContent = 'Fill and open';
+      if (r && !r.ok && r.message) store.log('⚠ ' + r.message);
+    }));
     $$('.open-url, .nhs-open').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.url)));
     $$('.nhs-statement').forEach((b) => b.addEventListener('click', () => { const p = $('#nhs-st-' + b.dataset.i); p.hidden = !p.hidden; b.textContent = p.hidden ? 'Supporting statement' : 'Hide supporting statement'; }));
   } finally { dashBusy = false; }
@@ -1452,7 +1463,7 @@ async function remoteExtra() {
     });
   }
   for (const j of all.filter((x) => x.status === 'ready').sort(newest)) {
-    inbox.push({ id: j.jobId, kind: 'waiting', title: j.title || '', company: j.company || '', note: 'The form is filled in and open in Chrome on your computer. Check it there and press Submit.', url: safeUrl(j.url) || '', at: j.updatedAt || '' });
+    inbox.push({ id: j.jobId, kind: 'waiting', title: j.title || '', company: j.company || '', note: 'Ready to send. On your computer, press Fill and open in Job-AI, check it and press Submit.', url: safeUrl(j.url) || '', at: j.updatedAt || '' });
   }
   const tracker = all.filter((j) => j.status === 'applied').sort((a, b) => String(b.appliedAt || b.updatedAt).localeCompare(String(a.appliedAt || a.updatedAt))).slice(0, 150)
     .map((j) => ({ id: j.jobId, title: j.title || '', company: j.company || '', source: REMOTE_SITE[j.source] || '', at: j.appliedAt || j.updatedAt || '', stage: REMOTE_STAGES.includes(j.stage) ? j.stage : 'applied', url: safeUrl(j.url) || '' }));
@@ -1612,7 +1623,7 @@ async function remotePost(path, body, signal) {
 // Test builds only (node build.mjs --test): lets automated tests drive the same objects.
 // Release builds leave this out, so nothing internal is exposed on the page.
 if (process.env.JOBAI_TEST === '1') {
-  globalThis.__jobaiTest = { scoreJob, agent, agents, mods: { reed: require('../../bot/modules/reed'), linkedin: require('../../bot/modules/linkedin'), indeed: require('../../bot/modules/indeed'), dice: require('../../bot/modules/dice'), wellfound: require('../../bot/modules/wellfound'), ats: require('../../bot/modules/ats_filler'), feedJobs, fetchJD }, store, cfg, loadConfig, Page, vfs, vfsReady, trac: require('../../bot/modules/trac_source'), apply: require('../../bot/modules/trac_apply'), parseCV: require('../../bot/modules/cv_parser').parseCV, pdf: require('../../bot/modules/cv_pdf_writer') };
+  globalThis.__jobaiTest = { scoreJob, agent, agents, mods: { reed: require('../../bot/modules/reed'), linkedin: require('../../bot/modules/linkedin'), indeed: require('../../bot/modules/indeed'), dice: require('../../bot/modules/dice'), wellfound: require('../../bot/modules/wellfound'), ats: require('../../bot/modules/ats_filler'), feedJobs, fetchJD, fillAndOpen }, store, cfg, loadConfig, Page, vfs, vfsReady, trac: require('../../bot/modules/trac_source'), apply: require('../../bot/modules/trac_apply'), parseCV: require('../../bot/modules/cv_parser').parseCV, pdf: require('../../bot/modules/cv_pdf_writer') };
 }
 
 navigate('dashboard');

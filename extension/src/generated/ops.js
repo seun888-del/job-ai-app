@@ -114,9 +114,10 @@ module.exports = {
     const el = document.querySelector('input[name="cf-turnstile-response"], input[name*="turnstile" i], input[name="g-recaptcha-response"]');
     return !!(el && el.value && el.value.length > 20);
   },
-  "f91e3b4532ab4": () => {
-    return !!document.querySelector('#turnstile-script, [id^="turnstile-container"], .cf-turnstile, [data-sitekey], iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], iframe[src*="recaptcha"], .g-recaptcha')
-      || /verify you are human/i.test(document.body?.innerText || '');
+  "ffc9ff588cfa3": () => {
+    const shown = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 60 && r.height > 60 && cs.visibility !== 'hidden' && cs.display !== 'none' && cs.opacity !== '0'; };
+    const challenge = [...document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[title*="challenge" i], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"], iframe[src*="captcha-delivery"]')].some(shown);
+    return challenge || /verify you are human|slide right to secure|are you a robot/i.test(document.body?.innerText || '');
   },
   "f635c2c739280": () => {
     let fields = 0, radios = 0, boxes = 0;

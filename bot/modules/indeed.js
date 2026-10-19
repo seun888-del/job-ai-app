@@ -562,12 +562,12 @@ function _resolveRadio(question, labels, { allowUnknown = true } = {}) {
   }
   if (/reloc/i.test(q)) return willingToRelocate ? find(/^yes/i) : find(/^no/i);
   // Marketing / job-alert opt-ins (often a third party's terms): never sign the user up.
-  if (/opt.?in|newsletter|marketing|receiv\w* (email|text|sms)|text messages|contacted by (text|sms)|email notifications|job alerts/i.test(q) && !/required|must/i.test(q)) {
+  if (/opt.?in|newsletter|marketing|receiv\w* (email|text|sms)|text messages|contacted by (text|sms)|email notifications|job alerts/i.test(q) && !/required|\bmust\b/i.test(q)) {
     return find(/^no/i) || labels[labels.length - 1];
   }
   // Spoken languages other than English: never claim a skill the profile doesn't list.
   if (/(speak|fluen|proficien|bilingual|language)/i.test(q) && /spanish|french|german|portuguese|italian|mandarin|chinese|japanese|korean|arabic|russian|hindi|polish|dutch|vietnamese|tagalog|bilingual/i.test(q)) {
-    return find(/^(no|none|not|cannot|i cannot|i can't|beginner|basic|elementary)/i) || find(/no|none|cannot|not /i) || labels[labels.length - 1];
+    return find(/^(no|none|not|cannot|i cannot|i can't|beginner|basic|elementary)/i) || find(/\bno\b|none|cannot|not /i) || labels[labels.length - 1];
   }
   if (/commut|travel.*office|willing.*office|able.*office/i.test(q)) return find(/^yes/i);
   if (/driving.*licen|licen.*driving/i.test(q)) return drivingLicence ? find(/^yes/i) : find(/^no/i);
