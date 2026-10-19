@@ -24,20 +24,27 @@ async function isRelevantRole({ jobTitle, jdText, targetRoles }) {
   if (!roles.length) return { relevant: true, reason: 'no target roles configured' };
   if (!jobTitle || !jobTitle.trim()) return { relevant: true, reason: 'no job title' };
 
+  // The title already names one of the user's own target roles ("Lead AI Engineer" for
+  // "AI Engineer"): that's the job they asked for, no need to ask the LLM.
+  const norm = (t) => ` ${String(t).toLowerCase().replace(/[^a-z0-9+#]+/g, ' ').trim()} `;
+  const title = norm(jobTitle);
+  const hit = roles.find((r) => norm(r).trim() && title.includes(norm(r)));
+  if (hit) return { relevant: true, reason: `matches "${hit}"` };
+
   let available = false;
   try { available = await llmAvailable(); } catch (_) { available = false; }
   if (!available) return { relevant: true, reason: 'LLM unavailable — fail open' };
 
   const jd = String(jdText || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
-  const prompt = `A job seeker is applying only for roles in their own profession. Their target job titles are:
+  const prompt = `A job seeker is applying for the target job titles below. They may be open to SEVERAL different fields (for example both IT support and AI roles), so treat each title on its own.
 ${roles.slice(0, 25).map(r => `- ${r}`).join('\n')}
 
 Here is a job they were shown:
 TITLE: ${jobTitle}
 DESCRIPTION: ${jd}
 
-Question: Is this job in the SAME occupation / professional field as the target job titles above?
-Judge the actual profession, NOT shared generic skills (communication, customer service, teamwork, documentation exist in every field and do NOT make two jobs the same occupation).
+Question: Is this job in the same occupation / professional field as AT LEAST ONE of the target job titles above?
+It does not need to match all of them. Judge the actual profession, NOT shared generic skills (communication, customer service, teamwork, documentation exist in every field and do NOT make two jobs the same occupation).
 
 Answer with EXACTLY one line, no other text:
 RELEVANT: YES
