@@ -150,8 +150,9 @@ const AGENTS = [
   ['wellfound', 'Wellfound Agent', 'https://wellfound.com/login', 'Sign in to Wellfound'],
   ['ats', 'Company Sites Agent', '', ''],
 ];
-// UK: Trac and Reed. USA: Indeed, Dice and Wellfound. LinkedIn and company sites run in both.
-const inRegion = (k, us) => (us ? k !== 'trac' && k !== 'reed' : k !== 'indeed' && k !== 'dice' && k !== 'wellfound');
+// UK: Trac and Reed. USA: Dice and Wellfound. LinkedIn and company sites run in both.
+// Indeed is hidden: its Cloudflare check loops even when a person passes it.
+const inRegion = (k, us) => k !== 'indeed' && (us ? k !== 'trac' && k !== 'reed' : k !== 'dice' && k !== 'wellfound');
 const anyRunning = () => Object.values(agents).some((a) => a.running);
 // ── Setup-step beacon ───────────────────────────────────────────────────────
 // Where new users stall before their first application (activated, CV added, job

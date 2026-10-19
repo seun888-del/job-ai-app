@@ -28,24 +28,26 @@ function attachCv(fd, field, cvPath) {
 
 // Answer one Recruitee required open question from the applicant profile.
 // Deterministic (no LLM — this module is shared app+web): covers the common
-// right-to-work / sponsorship / salary / eligibility questions; unknown booleans
-// default affirmative (the candidate is applying), unknown text is left blank.
+// right-to-work / sponsorship / salary / availability questions from the profile.
+// Anything else comes back unknown:true, and the caller hands the job to the user
+// instead of sending a guess (a "Yes" to a skill or licence they don't have).
 function answerRecruiteeQuestion(q, a = {}) {
   const body = String(q.body || '').replace(/<[^>]+>/g, ' ').toLowerCase();
   const rtw = a.rightToWorkCountries || [];
-  const hasUKRtW = Array.isArray(rtw) ? rtw.some((c) => /uk|united kingdom|britain/i.test(c)) : /uk|united kingdom/i.test(String(rtw));
-  const needsSponsor = typeof a.requiresSponsorship === 'boolean' ? a.requiresSponsorship : !hasUKRtW;
+  const us = a.country === 'United States';
+  const home = us ? /us|usa|united states|america/i : /uk|united kingdom|britain/i;
+  const hasRtW = Array.isArray(rtw) ? rtw.some((c) => home.test(c)) : home.test(String(rtw));
+  const needsSponsor = typeof a.requiresSponsorship === 'boolean' ? a.requiresSponsorship : !hasRtW;
   if (q.kind === 'boolean') {
-    let yes = true;
-    if (/sponsor/.test(body)) yes = needsSponsor;                                   // "require sponsorship?"
-    else if (/right to work|based in|located in|resid|eligible to work|authoris|legally.*work/.test(body)) yes = hasUKRtW;
-    // else willingness / capability / eligibility → affirmative (applicant wants the role)
-    return { id: q.id, kind: 'boolean', answer: yes };
+    if (/sponsor/.test(body)) return { id: q.id, kind: 'boolean', answer: needsSponsor };
+    if (/right to work|eligible to work|authori[sz]|legally.*work/.test(body)) return { id: q.id, kind: 'boolean', answer: hasRtW };
+    if (/privacy|consent|data protection|gdpr|i (confirm|agree|accept)|terms/.test(body)) return { id: q.id, kind: 'boolean', answer: true };
+    return { id: q.id, kind: 'boolean', answer: null, unknown: true };
   }
-  if (q.kind === 'salary') return { id: q.id, kind: 'salary', answer: a.salaryExpectation || '30000' };
-  if (/notice period|availability|when can you start/.test(body)) return { id: q.id, kind: q.kind, answer: a.availability || 'Immediately available' };
-  if (/year.*experience|how many year/.test(body)) return { id: q.id, kind: q.kind, answer: String(a.yearsExperience ?? '') };
-  return { id: q.id, kind: q.kind, answer: '' };
+  if (q.kind === 'salary') return a.salaryExpectation ? { id: q.id, kind: 'salary', answer: a.salaryExpectation } : { id: q.id, kind: 'salary', answer: '', unknown: true };
+  if (/notice period|availability|when can you start/.test(body) && a.availability) return { id: q.id, kind: q.kind, answer: a.availability };
+  if (/year.*experience|how many year/.test(body) && a.yearsExperience != null && a.yearsExperience !== '') return { id: q.id, kind: q.kind, answer: String(a.yearsExperience) };
+  return { id: q.id, kind: q.kind, answer: '', unknown: true };
 }
 
 // ── Recruitee — documented open POST (no auth) ──────────────────────────────
@@ -70,6 +72,9 @@ async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions,
       }
     } catch (_) { /* fall through — submit without answers, may 422 (creates nothing) */ }
   }
+
+  // A required question the profile can't answer: don't guess, let the user send it.
+  if (Array.isArray(questions) && questions.some((q) => q && q.unknown)) return { ok: false, reason: 'needs_you' };
 
   const fd = new FormData();
   const name = `${applicant.firstName || ''} ${applicant.lastName || ''}`.trim();

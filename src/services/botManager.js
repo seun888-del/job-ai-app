@@ -256,7 +256,30 @@ function stop(botName) {
   }
 }
 
+// "Fill and open": fill one waiting company-site application in a visible window and
+// let the user submit it (bot/assist_fill.js). One at a time; a second press while a
+// window is open just reports it.
+let assistProc = null;
+function assistFill(jobId, userDataPath) {
+  if (assistProc) return { ok: false, reason: 'busy' };
+  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', JOBBOT_USERDATA: userDataPath };
+  const license = db.getLicense();
+  if (license && license.license_key) {
+    env.JOBBOT_BACKEND_URL = JOBBOT_BACKEND_URL;
+    env.JOBBOT_LICENSE_KEY = license.license_key;
+  }
+  const proc = spawn(process.execPath, [path.join(BOT_DIR, 'assist_fill.js'), String(jobId)], { cwd: BOT_DIR, env });
+  assistProc = proc;
+  proc.stdout.on('data', chunk => { if (logHandler) logHandler('greenhouse', 'stdout', chunk.toString()); });
+  proc.stderr.on('data', chunk => { if (logHandler) logHandler('greenhouse', 'stderr', chunk.toString()); });
+  proc.on('exit', () => { assistProc = null; });
+  proc.on('error', err => { assistProc = null; if (logHandler) logHandler('greenhouse', 'stderr', `Fill and open failed: ${err.message}
+`); });
+  return { ok: true };
+}
+
 function stopAll() {
+  if (assistProc) { try { assistProc.kill(); } catch (_) {} }
   for (const botName of Object.keys(bots)) stop(botName);
 }
 
@@ -264,6 +287,7 @@ module.exports = {
   start,
   stop,
   stopAll,
+  assistFill,
   getStatus,
   setLogHandler,
   setStatusHandler,

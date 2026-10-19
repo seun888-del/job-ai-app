@@ -317,12 +317,13 @@ function printStatus() {
 }
 
 // Persistent record of job IDs ever applied — survives queue clears
-// Jobs already tailored and waiting to be sent (fresh ones only: anything untouched for
+// Jobs already tailored and waiting to be sent, including company-site jobs waiting for the
+// user to press Send (fresh ones only: anything untouched for
 // 2 days is likely closed or belongs to an agent that isn't running, so it must not
 // block new tailoring forever).
 function countReadyBacklog() {
   return withDb((db) => {
-    const stmt = db.prepare("SELECT COUNT(*) AS c FROM queue WHERE status IN ('cv_ready','awaiting_review','applying') AND updated_at >= datetime('now','-2 day')");
+    const stmt = db.prepare("SELECT COUNT(*) AS c FROM queue WHERE (status IN ('cv_ready','awaiting_review','applying') OR (status = 'ready_to_submit' AND source = 'ats')) AND updated_at >= datetime('now','-2 day')");
     const c = stmt.step() ? (stmt.getAsObject().c || 0) : 0;
     stmt.free();
     return c;

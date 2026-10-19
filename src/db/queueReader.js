@@ -131,6 +131,30 @@ function getReviewQueue(limit = 100) {
   }, []);
 }
 
+// Company-site applications the agent tailored and parked for the user to send
+// ("Fill it, you press Send"). Newest first.
+function getAssistQueue(limit = 100) {
+  return withQueueDb(db => {
+    try {
+      return all(db, `SELECT job_id, title, company, url, cv_path, cover_letter, updated_at FROM queue
+        WHERE source = 'ats' AND status = 'ready_to_submit' ORDER BY updated_at DESC LIMIT ?`, [limit]);
+    } catch (_) { return []; }
+  }, []);
+}
+// The user chose not to send it.
+async function skipAssist(jobId) {
+  if (!dbPath || !fs.existsSync(dbPath) || !jobId) return false;
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(readDbFile(dbPath));
+  try {
+    db.run("UPDATE queue SET status = 'skipped', reason = 'Not sent (your choice)', updated_at = datetime('now') WHERE job_id = ? AND source = 'ats' AND status = 'ready_to_submit'", [String(jobId)]);
+    writeDbFile(dbPath, Buffer.from(db.export()));
+    return true;
+  } finally {
+    db.close();
+  }
+}
+
 function getReviewCount() {
   return withQueueDb(db => {
     try {
@@ -417,4 +441,4 @@ function getReconnectNeeded() {
   }, []);
 }
 
-module.exports = { init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview };
+module.exports = { init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview, getAssistQueue, skipAssist };

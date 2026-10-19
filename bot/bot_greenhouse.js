@@ -67,7 +67,10 @@ async function getSiteContext(profile, loginFn) {
 async function closeSiteContexts() {
   for (const k of Object.keys(_ctxPool)) { try { await _ctxPool[k].context.close(); } catch (_) {} delete _ctxPool[k]; }
 }
-const SUBMIT        = process.env.JOBBOT_ATS_SUBMIT === '1' || process.env.JOBBOT_GREENHOUSE_SUBMIT === '1'; // off = dry run
+// Recruitee's open POST is proven (real HTTP 201), so it sends for real. JOBBOT_ATS_DRYRUN=1
+// builds the request without sending, for tests.
+const SUBMIT        = process.env.JOBBOT_ATS_DRYRUN !== '1';
+const READY_REASON  = 'Ready for you: press Fill and open, check it, then Submit.';
 // Headless mode: launch NO browser at all. Apply only to pure-HTTP ATSes
 // (Recruitee) and skip anything that needs a browser. This is what makes the agent
 // work on macOS, where the Playwright browser gets blocked — the HTTP apply path
@@ -201,10 +204,10 @@ async function phase1_sourceAndQueue(page) {
   console.log('  [Auto-Apply] Phase 1 — sourcing auto-appliable ATS jobs from the feed');
   console.log('══════════════════════════════════════════════════════');
 
+  // Only the user's own region: a UK user can't take a US job and the reverse.
+  const country = (cfg.APPLICANT || {}).country === 'United States' ? 'US' : 'GB';
   let jobs = [];
-  for (const country of ['GB', 'US']) {
-    try { jobs = jobs.concat(await jobFeed.fetchAtsJobs({ country, limit: 40 })); } catch (_) {}
-  }
+  try { jobs = await jobFeed.fetchAtsJobs({ country, limit: 80 }); } catch (_) {}
   // Router step 2: also fold in Reed (browser board) when enabled. Reed stubs
   // carry a reed.co.uk URL, so the Phase-2 router applies them via reed.applyToJob.
   if (REED_ENABLED) {
@@ -259,20 +262,6 @@ async function phase2_applyReadyCVs(browser) {
       }
       if (!isRelevantTitle(job.title)) { queue.update(job.jobId, { status: 'skipped', reason: 'Title filter (post-queue)' }); continue; }
 
-      // Headless mode: only jobs with a pure-HTTP submitter (Recruitee) can be
-      // applied without a browser. Skip everything else (SmartRecruiters, Reed…)
-      // rather than crash on a null page — this is what keeps macOS working.
-      if (HEADLESS_ONLY) {
-        const _ats = atsFiller.detectATS(job.url);
-        const _httpFn = httpSubmit.httpSubmitterFor(_ats) || httpSubmit.httpSubmitterFor(job.source);
-        if (!_httpFn) {
-          queue.update(job.jobId, { status: 'skipped', reason: 'Needs a browser — skipped in headless mode' });
-          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Headless: browser-required ATS');
-          console.log(`  [Auto-Apply] Headless — skipping browser-required job: ${job.title} @ ${job.company}`);
-          continue;
-        }
-      }
-
       // ── Reed strategy (browser board, own profile + result mapping) ─────────
       if (REED_ENABLED && isReedJob(job)) {
         queue.update(job.jobId, { status: 'applying' });
@@ -310,55 +299,49 @@ async function phase2_applyReadyCVs(browser) {
       }
 
       const ats = atsFiller.detectATS(job.url);
-      // Prefer a pure-HTTP submitter (open ATSes like Recruitee): no browser,
-      // no fragile form-fill. Falls through to the browser for the rest.
       const httpFn = httpSubmit.httpSubmitterFor(ats) || httpSubmit.httpSubmitterFor(job.source);
+      // Every other company site guards Submit with a captcha or bot check, so the agent
+      // doesn't try: it parks the job for the user, who presses Fill and open in the app,
+      // checks the filled form and submits it themselves (bot/assist_fill.js).
+      if (!httpFn) {
+        queue.update(job.jobId, { status: 'ready_to_submit', reason: READY_REASON });
+        logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'READY', `${ats}: ready for you to send`);
+        console.log(`  [Auto-Apply] Ready for you to send [${ats}]: ${job.title} @ ${job.company}`);
+        continue;
+      }
       queue.update(job.jobId, { status: 'applying' });
-      console.log(`  [Auto-Apply] Applying${SUBMIT ? '' : ' (DRY RUN)'} [${ats}${httpFn ? ' · HTTP' : ''}]: ${job.title} @ ${job.company}`);
+      console.log(`  [Auto-Apply] Applying${SUBMIT ? '' : ' (DRY RUN)'} [${ats} · HTTP]: ${job.title} @ ${job.company}`);
       try {
-        let result;
-        if (httpFn) {
-          const A = cfg.APPLICANT || {};
-          const r = await httpFn({ url: job.url, applicant: {
-            firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone,
-            // Needed to auto-answer Recruitee's required questions (RTW/sponsorship/salary).
-            rightToWorkCountries: A.rightToWorkCountries, requiresSponsorship: A.requiresSponsorship,
-            salaryExpectation: A.salaryExpectation, yearsExperience: A.yearsExperience, availability: A.availability,
-          }, cvPath: job.cvPath, coverLetter: job.coverLetter || '', dryRun: !SUBMIT });
-          if (!r.ok && !r.dryRun) console.log(`  [Auto-Apply] HTTP submit not accepted (${r.reason}${r.status ? ' ' + r.status : ''})`);
-          result = r.submitted ? true : (r.dryRun ? 'dry_run' : false);
-        } else {
-          const page = await browser.page();
-          await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-          await DELAY(1500 + Math.random() * 1500);
-          result = await atsFiller.fillExternalForm(page, job, job.cvPath, ats, { submit: SUBMIT });
-        }
+        const A = cfg.APPLICANT || {};
+        const r = await httpFn({ url: job.url, applicant: {
+          firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone, country: A.country,
+          // Needed to auto-answer Recruitee's required questions (RTW/sponsorship/salary).
+          rightToWorkCountries: A.rightToWorkCountries, requiresSponsorship: A.requiresSponsorship,
+          salaryExpectation: A.salaryExpectation, yearsExperience: A.yearsExperience, availability: A.availability,
+        }, cvPath: job.cvPath, coverLetter: job.coverLetter || '', dryRun: !SUBMIT });
 
-        if (result === true) {
+        if (r.submitted) {
           queue.update(job.jobId, { status: 'applied' });
           queue.markApplied(job.jobId);
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLIED', ats);
           console.log(`  [Auto-Apply] ✓ Applied [${ats}]: ${job.title}`);
-        } else if (result === 'dry_run') {
+        } else if (r.dryRun) {
           queue.update(job.jobId, { status: 'skipped', reason: 'Dry run (submit disabled)' });
-          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', `Dry run — ${ats} form filled, not submitted`);
-          console.log(`  [Auto-Apply] ✓ Dry run — filled, NOT submitted [${ats}]: ${job.title}`);
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', `Dry run — ${ats} not submitted`);
+          console.log(`  [Auto-Apply] ✓ Dry run — NOT submitted [${ats}]: ${job.title}`);
+        } else if (r.reason === 'needs_you') {
+          // A required question isn't covered by the profile: never guess it, hand it over.
+          queue.update(job.jobId, { status: 'ready_to_submit', reason: READY_REASON });
+          console.log(`  [Auto-Apply] A question needs your answer, ready for you to send: ${job.title}`);
         } else {
-          queue.update(job.jobId, { status: 'apply_failed' });
-          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLY_FAILED', `${ats} form could not be completed`);
-          console.log(`  [Auto-Apply] ✗ Apply failed [${ats}]: ${job.title}`);
+          queue.update(job.jobId, { status: 'apply_failed', error: `${r.reason}${r.status ? ' ' + r.status : ''}` });
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLY_FAILED', `${ats} not accepted (${r.reason})`);
+          console.log(`  [Auto-Apply] ✗ Not accepted [${ats}] (${r.reason}${r.status ? ' ' + r.status : ''}): ${job.title}`);
         }
       } catch (err) {
-        if (err.launchFailed) { queue.update(job.jobId, { status: 'cv_ready' }); throw err; }
-        const isPageClosed = /Target page.*closed|context.*closed|browser.*closed|page.*closed/i.test(err.message);
-        if (isPageClosed) {
-          queue.update(job.jobId, { status: 'cv_ready', error: null });
-          await browser.newPage(); // throws if the context is dead → caught by main()
-        } else {
-          queue.update(job.jobId, { status: 'apply_failed', error: err.message });
-          logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
-          console.error(`  [Auto-Apply] Error applying to "${job.title}": ${err.message}`);
-        }
+        queue.update(job.jobId, { status: 'apply_failed', error: err.message });
+        logger.log(job.title, job.company, job.url, 'N/A', 0, 'ERROR', err.message.substring(0, 100));
+        console.error(`  [Auto-Apply] Error applying to "${job.title}": ${err.message}`);
       }
       await DELAY(8000 + Math.random() * 7000);
     }
@@ -419,7 +402,7 @@ async function main() {
   // The browser opens only when a job needs a form filled. Sourcing uses the feed
   // and plain HTTP, and Recruitee applies over HTTP, so most runs never open one.
   let context = null, page = null, guard = null, chromeProc = null;
-  if (HEADLESS_ONLY) console.log('  [Auto-Apply] Headless mode — no browser. Applies HTTP-only ATSes (e.g. Recruitee); browser-required jobs are skipped.');
+  if (HEADLESS_ONLY) console.log('  [Auto-Apply] Headless mode — no browser. Applies HTTP-only ATSes (e.g. Recruitee); the rest wait for you to send.');
   const browser = {
     async page() {
       if (page && !page.isClosed()) return page;

@@ -175,16 +175,21 @@ let _regionWordingObs = null;
 function usWord(t) {
   if (/\.(pdf|docx?|txt)\b/i.test(t)) return t;
   return t
-    // UK-only sites in lists of agents/sites: US users only have LinkedIn + company sites.
-    .replace(/NHS \(Trac\), Reed, LinkedIn and company/g, 'LinkedIn and company')
-    .replace(/Reed, LinkedIn, NHS jobs \(through Trac\) and company/g, 'LinkedIn and company')
-    .replace(/(the )?Reed, LinkedIn and company/g, (m, a) => (a || '') + 'LinkedIn and company')
-    .replace(/\b4 Agents\b/g, '2 Agents')
+    // UK-only sites in lists of agents/sites: US users have LinkedIn, Dice, Wellfound + company sites.
+    .replace(/NHS \(Trac\), Reed, LinkedIn and company/g, 'LinkedIn, Dice, Wellfound and company')
+    .replace(/Reed, LinkedIn, NHS jobs \(through Trac\) and company/g, 'LinkedIn, Dice, Wellfound and company')
+    .replace(/(the )?Reed, LinkedIn and company/g, (m, a) => (a || '') + 'LinkedIn, Dice, Wellfound and company')
+    .replace(/Both Reed and LinkedIn are ticked/g, 'LinkedIn, Dice and Wellfound are all ticked')
+    .replace(/Leave both ticked to run Reed and LinkedIn/g, 'Leave them ticked to run LinkedIn, Dice and Wellfound')
+    .replace(/Both the Reed and LinkedIn Agents/g, 'All the Agents')
+    .replace(/\b2 Job Sites\b/g, '3 Job Sites')
+    .replace(/Reed and LinkedIn/g, 'LinkedIn, Dice and Wellfound')
+    .replace(/Reed or LinkedIn/g, 'LinkedIn, Dice or Wellfound')
     .replace(/\bCVs\b(?= [A-Z])/g, 'Resumes').replace(/\bCV\b(?= [A-Z])/g, 'Resume')
     .replace(/\bCVs\b/g, 'resumes').replace(/\bCV\b/g, 'resume')
     .replace(/(^|[.!?]\s+)resume/g, (m, a) => a + 'Resume').replace(/^([^A-Za-z]*)resume/, '$1Resume');
 }
-const US_WORD_HINT = /CV|Reed|4 Agents/;
+const US_WORD_HINT = /CV|Reed|2 Job Sites/;
 function rewordTree(root) {
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: n => (n.parentElement && n.parentElement.closest('textarea,input,script,style,[contenteditable],.agent-log,.log-box')) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
@@ -722,7 +727,7 @@ async function renderSearch() {
     <div class="card">
       <h3>Search Criteria</h3>
       ${regionSwitchHtml((regionProfile && regionProfile.country) === 'United States')}
-      <p class="field-hint" style="margin:4px 0 14px">Picks the job sites the agents use. USA: LinkedIn, Indeed, Dice and Wellfound. UK: LinkedIn, Reed and NHS jobs.</p>
+      <p class="field-hint" style="margin:4px 0 14px">Picks the job sites the agents use. USA: LinkedIn, Dice, Wellfound and company sites. UK: LinkedIn, Reed, NHS jobs and company sites.</p>
       <div class="field-row">
         <div class="field">
           <label>Location</label>
@@ -1768,6 +1773,50 @@ async function renderNhsApps() {
   }));
 }
 
+// ── Ready to send: company-site applications the user submits ─────────────────
+// Greenhouse, Workable, Lever, Ashby and SmartRecruiters put a captcha or bot check on
+// Submit, so the agent tailors the CV and waits. Fill and open fills the form in a window
+// and the user checks it and presses Submit; the app marks it applied when it's sent.
+function sendAppsHtml(apps) {
+  if (!apps || !apps.length) return '';
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const rows = apps.map((a) => `<div class="nhs-app">
+      <div class="nhs-app-main">
+        <div class="nhs-app-title">${e(cleanTitle(a.title))}</div>
+        <div class="nhs-app-meta">${e(a.company || 'Company site')}</div>
+      </div>
+      <span class="badge badge-success">Ready to send</span>
+      <div class="nhs-app-actions">
+        <button class="primary send-open" data-id="${e(a.job_id)}">Fill and open</button>
+        <button class="secondary send-skip" data-id="${e(a.job_id)}">Skip</button>
+      </div>
+    </div>`).join('');
+  return `<div class="card card-wide nhs-apps-card">
+    <h3 style="margin:0 0 4px">Ready to send (${apps.length})</h3>
+    <p class="nhs-apps-hint">These company sites ask a person to press Submit. Fill and open fills it in for you: check it, tick any box, then press Submit.</p>
+    ${rows}
+  </div>`;
+}
+async function renderSendApps() {
+  const box = document.getElementById('send-apps-section');
+  if (!box || !window.api.queue.assistList) return;
+  let apps = [];
+  try { apps = (await window.api.queue.assistList()) || []; } catch (_) { return; }
+  const html = sendAppsHtml(apps);
+  if (box._lastHtml === html) return;
+  box._lastHtml = html;
+  box.innerHTML = html;
+  box.querySelectorAll('.send-open').forEach((b) => b.addEventListener('click', async () => {
+    const r = await window.api.queue.assistOpen(b.dataset.id).catch(() => null);
+    if (r && r.ok) { b.textContent = 'Opening...'; b.disabled = true; setTimeout(() => { b.textContent = 'Fill and open'; b.disabled = false; }, 15000); }
+    else if (r && r.reason === 'busy') b.textContent = 'Finish the open one first';
+  }));
+  box.querySelectorAll('.send-skip').forEach((b) => b.addEventListener('click', async () => {
+    await window.api.queue.assistSkip(b.dataset.id).catch(() => {});
+    box._lastHtml = ''; renderSendApps();
+  }));
+}
+
 function recentRowsHtml(recent) {
   (recent || []).forEach(r => {
     if (r.cover_letter && r.job_id) {
@@ -1995,8 +2044,9 @@ async function renderDashboard() {
   const dashCreds = { reed: reedCred, linkedin: liCred, glassdoor: gdCred, cvlibrary: cvlibCred, totaljobs: tjCred, cwjobs: cwCred };
   // Application agents shown on the dashboard (the Scorer is hidden — it auto-runs
   // alongside these and is surfaced only as the "AI tailoring" pill).
-  // USA: no Reed / NHS; Indeed (indeed.com), Dice and Wellfound are USA-only for now.
-  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !(isUS && (k === 'reed' || k === 'trac')) && !(!isUS && (k === 'indeed' || k === 'dice' || k === 'wellfound')));
+  // USA: no Reed / NHS; Dice and Wellfound are USA-only for now. Indeed is hidden in both
+  // regions: its Cloudflare check loops even when a person passes it, so users got stuck.
+  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && k !== 'indeed' && !(isUS && (k === 'reed' || k === 'trac')) && !(!isUS && (k === 'dice' || k === 'wellfound')));
   // Tell phone control (tryjobai.com/app) which agents this dashboard shows and which are ticked.
   const shareAgentPrefs = () => { try { window.api.remote.setPrefs({ keys: appAgentKeys, enabled: appAgentKeys.filter(k => localStorage.getItem('agent_enabled_' + k) !== '0') }); } catch (_) {} };
   shareAgentPrefs();
@@ -2109,6 +2159,7 @@ ${statCardsHtml(summary)}
     </div>
 
     <div id="review-section"></div>
+    <div id="send-apps-section"></div>
     <div id="nhs-apps-section"></div>
 
     <div class="dash-cols">
@@ -2191,6 +2242,7 @@ ${statCardsHtml(summary)}
   `;
 
   renderNhsApps();
+  renderSendApps();
   wireComputerCard();
   const tracAutoBox = document.getElementById('trac-auto-submit');
   if (tracAutoBox) tracAutoBox.addEventListener('change', async () => {
@@ -2523,6 +2575,7 @@ ${statCardsHtml(summary)}
       }
       updateStatCards(summary);
       renderNhsApps();
+      renderSendApps();
       // Refresh Recent Activity only when it actually changed (avoids clobbering
       // the table — and its scroll — on every tick)
       const body = document.getElementById('recent-activity-body');

@@ -718,7 +718,7 @@ Write a short, professional answer (1-3 sentences). Sound natural and human. No 
 // whose options only exist while the menu is open. Open it, read the options, pick one with the
 // same rules/AI as native selects, then click it. Mouse events are dispatched in the page so this
 // works the same in Playwright and in the Chrome extension.
-const DEMOGRAPHIC_RE = /gender|ethnic|race|sexual|orientation|disab|neurodiver|veteran|pronoun|religio|age range|transgender|identity/i;
+const DEMOGRAPHIC_RE = /gender|ethnic|race|hispanic|latin[oax]|sexual|orientation|disab|neurodiver|veteran|pronoun|religio|age range|transgender|identity/i;
 async function _answerComboboxes(page, job) {
   // Re-find the dropdowns before each one: picking an answer re-renders the form, which can
   // replace later inputs and leave stale handles behind.
@@ -844,16 +844,18 @@ async function _aiPickOption(question, optionTexts, job) {
   if (!question || !optionTexts.length) return null;
   try {
     if (!await llmAvailable()) return null;
-    const { firstName, lastName, yearsExperience, availability, rightToWorkCountries } = cfg.APPLICANT;
+    const { firstName, lastName, yearsExperience, availability, rightToWorkCountries, country } = cfg.APPLICANT;
+    const home = country === 'United States' ? 'US' : 'UK';
+    const homeRe = home === 'US' ? /us|usa|united states|america/i : /uk|united kingdom|britain/i;
     const AVAIL_MAP = { 'immediately': 'Immediately', '1week': '1 week', '2weeks': '2 weeks', '1month': '1 month', '3months': '3 months' };
     const prompt =
-`You are completing a job application for ${firstName} ${lastName} (${yearsExperience} yrs experience, availability: ${AVAIL_MAP[availability] || 'immediately'}, right to work UK: ${(rightToWorkCountries||[]).some(c=>/uk/i.test(c))}, requires visa sponsorship: ${_yesNoForQuestion('require sponsorship') === 'yes'}).
+`You are completing a job application for ${firstName} ${lastName} (${yearsExperience} yrs experience, availability: ${AVAIL_MAP[availability] || 'immediately'}, right to work ${home}: ${(rightToWorkCountries||[]).some(c=>homeRe.test(c))}, requires visa sponsorship: ${_yesNoForQuestion('require sponsorship') === 'yes'}).
 
 Question: "${question}"
 Options:
 ${optionTexts.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
-For a capability, willingness, availability, or commitment question the candidate can reasonably meet (e.g. willing to work on-site, comfortable with the environment, able to commute), choose the affirmative option so this strong candidate progresses. Reply with ONLY the exact text of the best option. No explanation.`;
+Answer truthfully. For a willingness, availability or commitment question the candidate can reasonably meet (e.g. willing to work on-site, able to commute), choose the affirmative option. For a rating of their own skill or knowledge, pick a modest middle level unless the details above show real expertise; never overstate. Never claim a licence, certificate, clearance or past employer the details don't show. Reply with ONLY the exact text of the best option. No explanation.`;
     // The model occasionally returns an empty/garbled reply; a blank required
     // radio blocks the whole submission, so retry a couple of times before giving
     // up (each blank answer is a lost application otherwise).

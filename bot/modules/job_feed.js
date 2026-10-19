@@ -78,7 +78,7 @@ async function fetchAtsJobs({ country = 'GB', limit = 100 } = {}) {
     const data = await res.json().catch(() => ({}));
     const jobs = (data && data.jobs) || [];
     const out = jobs
-      .filter((j) => j && j.auto_apply && j.apply_url)
+      .filter((j) => j && (j.auto_apply || j.assist) && j.apply_url)
       .map((j) => ({
         jobId: 'gh_' + String(j.id || '').split(':').pop(),
         title: j.title,
@@ -86,6 +86,7 @@ async function fetchAtsJobs({ country = 'GB', limit = 100 } = {}) {
         url: j.apply_url,
         description: j.description || '',
         source: j.source || 'greenhouse',
+        assist: !!j.assist, // fill it, the user presses Send
       }))
       .filter((s) => s.jobId !== 'gh_' && s.url);
     console.log(`  [Feed] ${out.length} auto-appliable ATS job(s) from the feed (${terms || 'no terms'})`);
