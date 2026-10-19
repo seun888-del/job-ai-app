@@ -76,6 +76,8 @@ const READY_REASON  = 'Ready for you: press Fill and open, check it, then Submit
 // work on macOS, where the Playwright browser gets blocked — the HTTP apply path
 // isn't affected by that block. botManager sets this automatically on macOS.
 const HEADLESS_ONLY = process.env.JOBBOT_HEADLESS_ONLY === '1';
+// "Send for me" (Search Preferences): the agent presses Submit on browser-only sites too.
+const AUTO_SUBMIT   = SUBMIT && process.env.JOBBOT_ATS_AUTOSUBMIT === '1' && !HEADLESS_ONLY;
 // CDP-spawn mode: instead of letting Playwright launch Chrome (which macOS blocks
 // via the automation-permission prompt), SPAWN the user's real Chrome with a debug
 // port and attach over CDP. Uses the user's real (imported) profile — no separate
@@ -303,6 +305,38 @@ async function phase2_applyReadyCVs(browser) {
       // Every other company site guards Submit with a captcha or bot check, so the agent
       // doesn't try: it parks the job for the user, who presses Fill and open in the app,
       // checks the filled form and submits it themselves (bot/assist_fill.js).
+      // "Send for me" on: fill it and press Submit in the agent's own browser. A site that
+      // shows a human check (or a form it couldn't finish) goes to Ready to send instead;
+      // the agent never tries to get past a check. SmartRecruiters is left to the user:
+      // its bot check puzzles a browser after a few automated visits.
+      if (!httpFn && AUTO_SUBMIT && ats !== 'smartrecruiters') {
+        queue.update(job.jobId, { status: 'applying' });
+        console.log(`  [Auto-Apply] Applying [${ats}]: ${job.title} @ ${job.company}`);
+        let sent = false, outcome = null;
+        try {
+          const page = await browser.page();
+          await page.goto(atsFiller.formUrl(job.url), { waitUntil: 'domcontentloaded', timeout: 45000 });
+          await DELAY(1500 + Math.random() * 1500);
+          sent = (await atsFiller.fillExternalForm(page, job, job.cvPath, ats, { submit: true })) === true;
+          outcome = atsFiller.lastSubmitOutcome();
+        } catch (err) {
+          if (err.launchFailed) { queue.update(job.jobId, { status: 'cv_ready' }); throw err; }
+          outcome = 'error: ' + err.message.slice(0, 60);
+        }
+        if (sent) {
+          queue.update(job.jobId, { status: 'applied' });
+          queue.markApplied(job.jobId);
+          logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLIED', ats);
+          console.log(`  [Auto-Apply] ✓ Applied [${ats}]: ${job.title}`);
+        } else {
+          // 'unconfirmed' may have gone through: say so, so it isn't sent twice blindly.
+          const why = { captcha: 'The site asked for a human check.', validation: 'A question needs your answer.', empty: 'A question needs your answer.', unconfirmed: "The site didn't confirm it. Check your email before sending again." }[outcome] || 'Needs you to finish it.';
+          queue.update(job.jobId, { status: 'ready_to_submit', reason: why + ' ' + READY_REASON });
+          console.log(`  [Auto-Apply] Not sent (${outcome || 'unknown'}), ready for you to send: ${job.title}`);
+        }
+        await DELAY(8000 + Math.random() * 7000);
+        continue;
+      }
       if (!httpFn) {
         queue.update(job.jobId, { status: 'ready_to_submit', reason: READY_REASON });
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'READY', `${ats}: ready for you to send`);

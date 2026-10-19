@@ -856,6 +856,16 @@ async function renderSearch() {
     </div>
 
     <div class="card">
+      <h3>Company sites</h3>
+      <p class="card-hint">Greenhouse, Workable, Lever and Ashby jobs. When on, the agent fills the form and presses Submit for you. If a site asks you to prove you're human, the job waits under <strong>Ready to send</strong> on the dashboard instead.</p>
+      <div class="checkbox-field">
+        <input id="ats_auto_submit" type="checkbox" ${prefs.ats_auto_submit !== 0 ? 'checked' : ''}>
+        <label for="ats_auto_submit">Send company site applications for me</label>
+      </div>
+      <div class="status-msg" id="status-ats-auto-submit"></div>
+    </div>
+
+    <div class="card">
       <h3>Review before applying</h3>
       <p class="card-hint">When on, Job-AI tailors your CV and cover letter for each job and then <strong>holds it for your approval</strong> instead of applying straight away. You review the tailored CV and letter on the dashboard, then Approve to send or Skip. When off, applications are sent automatically (the default).</p>
       <div class="checkbox-field">
@@ -1049,6 +1059,22 @@ async function renderSearch() {
         showToast('Saved');
       } catch (e) {
         reedRouteToggle.checked = !reedRouteToggle.checked; // revert on failure
+      }
+    });
+  }
+
+  // Company sites "Send for me" toggle — saves immediately on change.
+  const atsAutoToggle = document.getElementById('ats_auto_submit');
+  if (atsAutoToggle) {
+    atsAutoToggle.addEventListener('change', async () => {
+      try {
+        await window.api.searchPrefs.save({ ats_auto_submit: atsAutoToggle.checked ? 1 : 0 });
+        showStatus(document.getElementById('status-ats-auto-submit'), atsAutoToggle.checked
+          ? 'On. The agent sends them for you. Restart the Agents to apply the change.'
+          : 'Off. Each one waits under Ready to send for you to check and submit.');
+        showToast('Saved');
+      } catch (e) {
+        atsAutoToggle.checked = !atsAutoToggle.checked;
       }
     });
   }
@@ -1784,6 +1810,7 @@ function sendAppsHtml(apps) {
       <div class="nhs-app-main">
         <div class="nhs-app-title">${e(cleanTitle(a.title))}</div>
         <div class="nhs-app-meta">${e(a.company || 'Company site')}</div>
+        ${(() => { const why = String(a.reason || '').split(' Ready for you:')[0]; return why && !/^Ready for you:/.test(why) ? `<div class="nhs-app-missing">${e(why)}</div>` : ''; })()}
       </div>
       <span class="badge badge-success">Ready to send</span>
       <div class="nhs-app-actions">

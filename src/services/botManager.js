@@ -182,6 +182,7 @@ function start(botName, userDataPath, opts = {}) {
     // Supervised test: fold Reed into the router (sources + applies Reed). When
     // on, Reed applies FOR REAL (no dry-run mode) — Recruitee/SmartRecruiters
     // still respect JOBBOT_ATS_SUBMIT separately.
+    try { if (db.getSearchPreferences().ats_auto_submit !== 0) env.JOBBOT_ATS_AUTOSUBMIT = '1'; } catch (_) { env.JOBBOT_ATS_AUTOSUBMIT = '1'; }
     try {
       if (db.getSearchPreferences().autoapply_reed) {
         env.JOBBOT_AUTOAPPLY_REED = '1';

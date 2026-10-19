@@ -495,14 +495,22 @@ async function _captchaBlocks(page) {
     return !!(el && el.value && el.value.length > 20);
   }).catch(() => false);
   if (hasToken) return false;
+  // Only a challenge the user can SEE blocks. Invisible reCAPTCHA (Greenhouse loads it on
+  // every form) and an idle Turnstile script are always present and pass on their own;
+  // counting them reported real submissions as "not sent".
   return await page.evaluate(() => {
-    return !!document.querySelector('#turnstile-script, [id^="turnstile-container"], .cf-turnstile, [data-sitekey], iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], iframe[src*="recaptcha"], .g-recaptcha')
-      || /verify you are human/i.test(document.body?.innerText || '');
+    const shown = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 60 && r.height > 60 && cs.visibility !== 'hidden' && cs.display !== 'none' && cs.opacity !== '0'; };
+    const challenge = [...document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[title*="challenge" i], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"], iframe[src*="captcha-delivery"]')].some(shown);
+    return challenge || /verify you are human|slide right to secure|are you a robot/i.test(document.body?.innerText || '');
   }).catch(() => false);
 }
 
 // ── Submit detection ───────────────────────────────────────────────────────
+// Why the last real submit didn't go through: 'captcha' | 'validation' | 'unconfirmed' |
+// 'empty' (required fields left blank) | 'sent'. Read by the Company Sites agent.
+let lastOutcome = null;
 async function _trySubmit(page, ats) {
+  lastOutcome = 'empty';
   // GUARD: never click Submit while a required field is still empty. The ATS just
   // shows "Please select one of these options" and stays on the form, but the
   // click otherwise reports a false success → the job gets marked "applied" when
@@ -550,10 +558,6 @@ async function _trySubmit(page, ats) {
         // not defeat CAPTCHAs — if one appears, skip: report NOT submitted so the
         // job isn't falsely marked applied, and the agent moves to the next one.
         await J(2000, 3000);
-        if (await _captchaBlocks(page)) {
-          console.log('  [ATS] ⚠ Human-verification (CAPTCHA) on this form — skipping, application NOT sent.');
-          return false;
-        }
         // Poll for a REAL outcome. Critically, "Submitting…" is NOT success — the
         // button text merely flips while a Turnstile/validation block keeps the
         // application un-sent; only an explicit confirmation OR the apply form
@@ -570,11 +574,15 @@ async function _trySubmit(page, ats) {
             const turnstile = /verify you are human/i.test(t);
             return { success, validationError, submitting, formGone, turnstile };
           }).catch(() => ({}));
-          if (st.success || st.formGone) { console.log('  [ATS] ✓ Application submitted!'); return true; }
-          if (st.validationError && !st.submitting) { console.log('  [ATS] ⚠ Submit blocked by a validation error — NOT submitted'); return false; }
+          if (st.success || st.formGone) { console.log('  [ATS] ✓ Application submitted!'); lastOutcome = 'sent'; return true; }
+          if (await _captchaBlocks(page)) {
+            console.log('  [ATS] ⚠ Human-verification (CAPTCHA) on this form — application NOT sent.');
+            lastOutcome = 'captcha'; return false;
+          }
+          if (st.validationError && !st.submitting) { console.log('  [ATS] ⚠ Submit blocked by a validation error — NOT submitted'); lastOutcome = 'validation'; return false; }
           // still submitting / turnstile pending → keep waiting
         }
-        console.log('  [ATS] ⚠ Submit did not confirm (stuck on Submitting/verification) — NOT counting as applied'); return false;
+        console.log('  [ATS] ⚠ Submit did not confirm (stuck on Submitting/verification) — NOT counting as applied'); lastOutcome = 'unconfirmed'; return false;
       }
     } catch (_) {}
   }
@@ -874,4 +882,11 @@ Answer truthfully. For a willingness, availability or commitment question the ca
   } catch (_) { return null; }
 }
 
-module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm };
+// Greenhouse's embedded form always shows the application, even for companies whose
+// hosted job page redirects to their own careers site (Coinbase, Stripe...).
+function formUrl(url) {
+  const m = String(url || '').match(/greenhouse\.io\/([^/?#]+)\/jobs\/(\d+)/i);
+  return m ? `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}` : url;
+}
+
+module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, formUrl, lastSubmitOutcome: () => lastOutcome };

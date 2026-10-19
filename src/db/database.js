@@ -179,6 +179,12 @@ async function init(userDataPath) {
   if (!searchPrefsCols.includes('review_before_apply')) {
     db.exec('ALTER TABLE search_preferences ADD COLUMN review_before_apply INTEGER DEFAULT 0');
   }
+  // Company sites "Send for me": the Company Sites agent presses Submit itself; a site
+  // that shows a human check waits in Ready to send. On by default; off = every
+  // company-site job waits for the user to send.
+  if (!searchPrefsCols.includes('ats_auto_submit')) {
+    db.exec('ALTER TABLE search_preferences ADD COLUMN ats_auto_submit INTEGER DEFAULT 1');
+  }
   // Headless-only apply: the Auto-Apply agent launches no browser and applies only
   // pure-HTTP ATSes (Recruitee). Auto-on for macOS regardless of this flag; this
   // lets any platform opt in. Off by default.

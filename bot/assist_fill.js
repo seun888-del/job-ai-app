@@ -43,12 +43,6 @@ async function pageState(page) {
 // can say "thank you for your interest") or that shows once the Submit button has gone.
 const isSent = (st, before) => st.url || (st.text && (!before.text || !st.submitButton));
 
-// Greenhouse's embedded form always shows the application, even for companies whose
-// hosted job page redirects to their own careers site (Coinbase, Stripe...).
-function formUrl(url) {
-  const m = String(url || '').match(/greenhouse\.io\/([^/?#]+)\/jobs\/(\d+)/i);
-  return m ? `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}` : url;
-}
 const hasForm = (page) => page.evaluate(() => !!document.querySelector('form input[type="file"], form input[type="email"], form input[name*="first" i]')).catch(() => false);
 
 async function main() {
@@ -65,7 +59,7 @@ async function main() {
   context.on('close', () => { closed = true; });
 
   console.log(`  [Send] Opening ${job.title} @ ${job.company}`);
-  await page.goto(formUrl(job.url), { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+  await page.goto(atsFiller.formUrl(job.url), { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
   await restoreWindow(page).catch(() => {});
   await DELAY(2000);
 

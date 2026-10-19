@@ -136,7 +136,7 @@ function getReviewQueue(limit = 100) {
 function getAssistQueue(limit = 100) {
   return withQueueDb(db => {
     try {
-      return all(db, `SELECT job_id, title, company, url, cv_path, cover_letter, updated_at FROM queue
+      return all(db, `SELECT job_id, title, company, url, reason, cv_path, cover_letter, updated_at FROM queue
         WHERE source = 'ats' AND status = 'ready_to_submit' ORDER BY updated_at DESC LIMIT ?`, [limit]);
     } catch (_) { return []; }
   }, []);
