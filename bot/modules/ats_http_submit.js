@@ -41,6 +41,8 @@ function answerRecruiteeQuestion(q, a = {}) {
   if (q.kind === 'boolean') {
     if (/sponsor/.test(body)) return { id: q.id, kind: 'boolean', answer: needsSponsor };
     if (/right to work|eligible to work|authori[sz]|legally.*work/.test(body)) return { id: q.id, kind: 'boolean', answer: hasRtW };
+    // "Are you based in the UK?": answered from where the applicant lives, when known.
+    if (/based in|located in|living in|resid/.test(body) && home.test(body) && a.country) return { id: q.id, kind: 'boolean', answer: home.test(a.country) };
     if (/privacy|consent|data protection|gdpr|i (confirm|agree|accept)|terms/.test(body)) return { id: q.id, kind: 'boolean', answer: true };
     return { id: q.id, kind: 'boolean', answer: null, unknown: true };
   }
