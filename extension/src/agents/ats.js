@@ -32,7 +32,7 @@ async function getJson(url, opts = {}) {
 // Auto-appliable company-site jobs for the user's search terms (same feed the app uses).
 export async function feedJobs(country) {
   const terms = (cfg.JOB_SEARCHES || []).slice(0, 5).map((t) => String(t).trim()).filter(Boolean).join(',');
-  const url = `${BACKEND}/v1/jobs/candidates?country=${country}&limit=100` + (terms ? `&terms=${encodeURIComponent(terms)}` : '');
+  const url = `${BACKEND}/v1/jobs/candidates?country=${country}&limit=200` + (terms ? `&terms=${encodeURIComponent(terms)}` : '');
   const data = await getJson(url, { headers: llm.headers() });
   return (data.jobs || [])
     .filter((j) => j && (j.auto_apply || j.assist) && j.apply_url)
@@ -85,6 +85,8 @@ export class AtsAgent extends SiteAgent {
       if (await store.hasJob(job.jobId)) continue;
       const ats = atsFiller.detectATS(job.url);
       if (atsFiller.ACCOUNT_REQUIRED_ATS.has(ats)) continue;
+      // SmartRecruiters shows a puzzle after a few automated visits: leave it out.
+      if (ats === 'smartrecruiters') continue;
       const description = await fetchJD(job);
       await this.queueIfWanted(job, { ...job, description });
       await sleep(800);

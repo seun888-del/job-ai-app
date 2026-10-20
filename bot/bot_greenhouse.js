@@ -209,7 +209,7 @@ async function phase1_sourceAndQueue(page) {
   // Only the user's own region: a UK user can't take a US job and the reverse.
   const country = (cfg.APPLICANT || {}).country === 'United States' ? 'US' : 'GB';
   let jobs = [];
-  try { jobs = await jobFeed.fetchAtsJobs({ country, limit: 80 }); } catch (_) {}
+  try { jobs = await jobFeed.fetchAtsJobs({ country, limit: 200 }); } catch (_) {}
   // Router step 2: also fold in Reed (browser board) when enabled. Reed stubs
   // carry a reed.co.uk URL, so the Phase-2 router applies them via reed.applyToJob.
   if (REED_ENABLED) {
@@ -226,6 +226,17 @@ async function phase1_sourceAndQueue(page) {
   const fed = jobs.length;
   jobs = jobs.filter((j) => require('./modules/title_match').titleMatches(j.title, matchers));
   if (fed !== jobs.length) console.log(`  [Auto-Apply] Title filter: ${jobs.length} of ${fed} feed job(s) match your search terms`);
+  // SmartRecruiters shows a puzzle after a few automated visits, so the agent leaves it out,
+  // along with any already in the queue from before.
+  const isSR = (j) => atsFiller.detectATS(j.apply_url || j.url || '') === 'smartrecruiters';
+  const srCount = jobs.filter(isSR).length;
+  jobs = jobs.filter((j) => !isSR(j));
+  if (srCount) console.log(`  [Auto-Apply] Skipped ${srCount} SmartRecruiters job(s) (puzzle check)`);
+  for (const st of ['pending', 'cv_ready', 'ready_to_submit']) {
+    for (const j of queue.getByStatus(st).filter((x) => x.source === SOURCE && isSR(x))) {
+      queue.update(j.jobId, { status: 'skipped', reason: 'SmartRecruiters (puzzle check)' });
+    }
+  }
   jobs = jobs.slice(0, 50);
   if (!jobs.length) {
     console.log('  [Auto-Apply] No auto-appliable jobs in the feed right now (feed off, no licence, or none matched your terms).');
