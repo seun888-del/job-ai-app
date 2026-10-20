@@ -43,7 +43,10 @@ async function pageState(page) {
 // can say "thank you for your interest") or that shows once the Submit button has gone.
 const isSent = (st, before) => st.url || (st.text && (!before.text || !st.submitButton));
 
-const hasForm = (page) => page.evaluate(() => !!document.querySelector('form input[type="file"], form input[type="email"], form input[name*="first" i]')).catch(() => false);
+// Playwright selectors see inside the web components some ATSes build their form from
+// (SmartRecruiters), and single-page apply forms render a few seconds after load.
+const hasForm = (page, waitMs = 8000) => page.locator('input[type="file"], input[type="email"], input[name*="first" i], input[autocomplete="given-name"]').first()
+  .waitFor({ state: 'attached', timeout: waitMs }).then(() => true, () => false);
 
 async function main() {
   const jobId = process.argv[2];
@@ -54,7 +57,7 @@ async function main() {
 
   const context = await launchPersistentContext(path.join(process.env.JOBBOT_USERDATA, 'assist_profile'));
   await stealth.applyToContext(context).catch(() => {});
-  const page = context.pages()[0] || await context.newPage();
+  let page = context.pages()[0] || await context.newPage();
   let closed = false;
   context.on('close', () => { closed = true; });
 
@@ -67,8 +70,16 @@ async function main() {
     const ats = atsFiller.detectATS(job.url);
     if (!(await hasForm(page))) {
       // No form on the page yet: most job pages open it behind an Apply button.
-      const apply = page.locator('a, button').filter({ hasText: /^\s*apply( now| for this job)?\s*$/i }).first();
-      if (await apply.count().catch(() => 0)) { await apply.click().catch(() => {}); await DELAY(3000); }
+      // SmartRecruiters labels it "I'm interested".
+      const apply = page.locator('a, button').filter({ hasText: /^\s*(apply( now| for this (job|position|role))?|i['’]m interested)\s*$/i }).first();
+      if (await apply.count().catch(() => 0)) {
+        // The form may open in a new tab: carry on in whichever tab it opened.
+        const popup = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
+        await apply.click().catch(() => {});
+        const tab = await popup;
+        if (tab) { page = tab; await page.waitForLoadState('domcontentloaded').catch(() => {}); }
+        await DELAY(2000);
+      }
     }
     if (!(await hasForm(page))) {
       console.log("  [[JOBBOT_NOTIFY]] Couldn't find the form on this page. Press Apply there, fill it in, then press Submit.");

@@ -101,6 +101,7 @@ async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
     // (Workable) parse the CV and rebuild the form, which briefly detaches the
     // name/email fields; typing into them mid-rebuild silently fails.
     if (step === 0) await J(4000, 5500);
+    if (step === 0 && ats === 'smartrecruiters') await _cancelParsedEntries(page);
     await _fillStep(page, job);
     // Answering a radio can REVEAL a dependent field (e.g. "How many years?"
     // appears only after "Do you have 1+ year experience? → Yes"), and such
@@ -111,7 +112,9 @@ async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
     if (dryRun) {
       // Fill this step, then either advance to the next or, if this was the last
       // step, stop WITHOUT submitting.
-      const advanced = await _tryNext(page);
+      let advanced = await _tryNext(page);
+      // SmartRecruiters opens an unfinished CV entry only when Next is pressed: close it, try once more.
+      if (!advanced && ats === 'smartrecruiters' && step === 0) { await _cancelParsedEntries(page); advanced = await _tryNext(page); }
       if (!advanced) { console.log('  [ATS] ✓ Dry run — form filled, NOT submitted'); return 'dry_run'; }
       await J(1500, 2500);
       continue;
@@ -152,6 +155,22 @@ async function _uploadResume(page, resumePath) {
         return;
       }
     } catch (_) {}
+  }
+}
+
+// SmartRecruiters reads the CV into Experience/Education entries and leaves any it
+// couldn't complete (a certificate with no school, say) open in an edit box with Cancel
+// and Save. Filling that box puts the cover letter and guesses into it and blocks Next,
+// so it is cancelled: the complete entries stay, the CV itself is attached anyway.
+async function _cancelParsedEntries(page) {
+  for (let i = 0; i < 4; i++) {
+    // SmartRecruiters' buttons are its own spl-button / oc-button elements, not <button>.
+    const save = page.locator('spl-button, oc-button, button').filter({ hasText: /^\s*Save\s*$/ }).filter({ visible: true });
+    const cancel = page.locator('spl-button, oc-button, button').filter({ hasText: /^\s*Cancel\s*$/ }).filter({ visible: true }).first();
+    if (!(await save.count().catch(() => 0)) || !(await cancel.count().catch(() => 0))) return;
+    await cancel.click({ timeout: 3000 }).catch(() => {});
+    console.log('  [ATS] Closed an unfinished entry SmartRecruiters made from the CV');
+    await J(800, 1200);
   }
 }
 
@@ -262,6 +281,13 @@ async function _fillStep(page, job) {
           break;
         }
       } catch (_) {}
+    }
+  }
+
+  // "Confirm your email" is a second email box: every empty one gets the email.
+  if (email) {
+    for (const el of await page.$$('input[type="email"], input[name*="email" i], input[id*="email" i]').catch(() => [])) {
+      try { if (await el.isVisible() && !(await el.inputValue().catch(() => ''))) { await _setValue(el, email); await J(80, 150); } } catch (_) {}
     }
   }
 
