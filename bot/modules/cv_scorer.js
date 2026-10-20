@@ -34,10 +34,30 @@ function hasTerm(cvText, term) {
 
 // A keyword object counts as covered if the CV contains its term OR any alt.
 function keywordCovered(cvLower, kw) {
-  if (hasTerm(cvLower, kw.term)) return true;
-  for (const a of (kw.alts || [])) if (hasTerm(cvLower, a)) return true;
+  for (const t of [kw.term, ...(kw.alts || [])]) for (const v of termVariants(t)) if (hasTerm(cvLower, v)) return true;
   return false;
 }
+
+// Advert wordings a CV rarely repeats word for word: "Outlook / Excel" is met by either
+// one, and filler like "suite", "tool" or "knowledge of" is dropped ("Microsoft Office
+// suite" -> "Microsoft Office", "ITSM Tool" -> "ITSM").
+const FILLER_HEAD_RE = /^(experience|knowledge|understanding|proficiency)( of| in| with)?\s+/i;
+const FILLER_TAIL_RE = /\s+(suite|tools?|skills?|experience|knowledge)$/i;
+function termVariants(term) {
+  const t = String(term || '').trim();
+  const out = new Set([t]);
+  for (const part of t.split(/\s*\/\s*|\s+or\s+|\s*,\s*/i)) {
+    out.add(part.trim());
+    out.add(part.trim().replace(FILLER_HEAD_RE, '').replace(FILLER_TAIL_RE, '').trim());
+  }
+  return [...out].filter(v => v.length >= 2);
+}
+
+// Soft skills and personal qualities ("Strong communication skills", "Attention to
+// detail", "Self motivated") aren't scored: every candidate claims them, CVs rarely
+// word them the advert's way, and counting them sank good matches to 0% (NEC Service
+// Desk Analyst, 2026-10-20). Only real skills, tools and experience count.
+const SOFT_SKILL_RE = /communicat|attention to detail|detail[- ]oriented|self[- ]?motivat|self[- ]?starter|team ?(player|work)|work(ing)? (well )?(under pressure|independently|on your own|as part of a team)|follow(ing)? (instructions|procedures|processes)|(take|taking) ownership|make decisions|decision[- ]making|flexib|adaptab|proactive|enthusias|positive attitude|can[- ]do|hard[- ]working|well[- ]organi[sz]ed|organi[sz]ational skills|time management|punctual|good timekeeping|interpersonal|problem[- ]solving|influencing|motivated|reliab|willing(ness)? to learn|eager to learn|initiative|integrity|professionalism|people skills/i;
 
 // Normalise whatever the model returned into our {term, essential, alts} shape.
 // Tolerates the old flat ["skill", ...] format and stray junk so a model drift
@@ -57,6 +77,7 @@ function normaliseKeywords(raw) {
     }
     term = String(term || '').trim();
     if (term.length < 2 || term.length > 60) continue;
+    if (SOFT_SKILL_RE.test(term)) continue;
     const key = term.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -77,7 +98,9 @@ async function extractJDKeywords(jdText) {
 For EACH requirement return an object with:
 - "term": the skill/tool/qualification as written in the advert
 - "essential": true if it is a must-have / mandatory requirement, false if merely desirable
-- "alts": accurate equivalents that mean the SAME thing — acronym expansions, the acronym itself, and common synonyms. Include the acronym AND its full form as a pair (e.g. term "user acceptance testing" -> alts ["UAT"]; term "AD" -> alts ["Active Directory"]). Do NOT invent unrelated terms.
+- "alts": accurate equivalents that mean the SAME thing — acronym expansions, the acronym itself, and common synonyms. Include the acronym AND its full form as a pair (e.g. term "user acceptance testing" -> alts ["UAT"]; term "AD" -> alts ["Active Directory"]). Do NOT invent unrelated terms. For an experience-level requirement give the everyday wordings of that experience (e.g. term "1st line experience" -> alts ["first line", "1st line support", "service desk", "helpdesk", "IT support"]; term "customer service" -> alts ["customer support", "end-user support", "user support", "client support"]).
+
+Leave out soft skills and personal qualities (communication, attention to detail, self-motivation, teamwork, following instructions, taking ownership, flexibility, problem solving); list only real skills, tools, technologies, qualifications and experience.
 
 Return ONLY a valid JSON array of such objects, 10 to 20 items, most important first. No commentary.
 Example:
