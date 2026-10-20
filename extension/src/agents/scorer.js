@@ -81,7 +81,12 @@ export async function scoreJob(job, log) {
     const raw = cleanText(c.text);
     let r;
     try { r = await cvScorer.scoreCV(raw, job.description); }
-    catch (e) { log('Scoring failed (' + e.message + '), will retry later.'); await store.updateJob(job.jobId, { status: 'pending' }); return; }
+    catch (e) {
+      // Never guess a score: try the job again later, then skip it.
+      const n = (job.retryCount || 0) + 1;
+      if (n > 2) { log('Could not score ' + job.title + ', skipped.'); await store.updateJob(job.jobId, { status: 'skipped', reason: "Couldn't check how well your CV matches this job" }); return; }
+      log('Scoring failed (' + e.message + '), will retry later.'); await store.updateJob(job.jobId, { status: 'pending', retryCount: n }); return;
+    }
     let score = r.score, text = raw;
     if (score >= QUICK_FAIL && score < BOOST_TARGET && (r.missingKeywords || []).length) { text = boostCVText(raw, r.missingKeywords); score = cvScorer.rescoreCV(text, r.allKeywords).score; }
     if (!best || score > best.score) best = { cv: c, raw, cvText: text, score, missing: r.missingKeywords || [], all: r.allKeywords || [] };

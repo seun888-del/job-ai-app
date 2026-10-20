@@ -156,23 +156,15 @@ function computeScore(cvText, keywords) {
 
 // Full score: extract keywords (+ semantics) from JD via the LLM, then score.
 // One LLM call per CV; subsequent boost iterations use rescoreCV (instant, no LLM).
-// Falls back to score=85 / no missing keywords when the LLM is unavailable.
+// When the AI fails or reads no keywords (twice), this THROWS: callers retry the job
+// later. It used to fall back to 85%, which let off-target jobs through (GitLab Backend
+// Engineer roles reached Ready to send on 2026-10-20 with no keywords read).
 async function scoreCV(cvText, jdText) {
-  // Try the real LLM call and only fall back on an ACTUAL failure. Do NOT
-  // pre-gate on llmAvailable()'s /health ping — it flakes (e.g. during a backend
-  // redeploy) while the real /v1/chat call works fine, and pre-gating would then
-  // silently score EVERY job 85, defeating the relevance gate.
-  let keywords;
-  try {
+  let keywords = [];
+  for (let attempt = 0; attempt < 2 && !keywords.length; attempt++) {
     keywords = await extractJDKeywords(jdText);
-  } catch (err) {
-    console.log(`  [Scorer] AI scoring unavailable (${err.message}) — fallback score 85`);
-    return { score: 85, missingKeywords: [], allKeywords: [] };
   }
-  if (!keywords.length) {
-    console.log('  [Scorer] No keywords extracted — fallback score 85');
-    return { score: 85, missingKeywords: [], allKeywords: [] };
-  }
+  if (!keywords.length) throw new Error('no keywords read from the advert');
 
   const { score, found, missing } = computeScore(cvText, keywords);
   const essN = keywords.filter(k => k.essential).length;

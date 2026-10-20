@@ -132,8 +132,9 @@ async function scoreWithBoost(cv, jdText) {
   try {
     ({ score, missingKeywords, allKeywords } = await cvScorer.scoreCV(cleanedText, jdText));
   } catch (err) {
-    console.warn(`  [Scorer Agent] Scoring failed (${err.message}) — fallback score 85`);
-    return { score: 85, cvText: cleanedText, rawCvText: cleanedText, missingKeywords: [] };
+    // Never guess a score: the job is retried later (see processJob).
+    console.warn(`  [Scorer Agent] Scoring failed (${err.message})`);
+    return { score: 0, unscored: true, cvText: cleanedText, rawCvText: cleanedText, missingKeywords: [] };
   }
 
   console.log(`  [Scorer Agent] Score: ${score}% — ${cv.name}`);
@@ -211,9 +212,20 @@ async function processJob(job) {
 
   // NHS jobs are judged on essential-criteria evidence (below), so skip the keyword score's AI
   // call: the AI account has a per-minute limit shared by every user.
-  let { score, cvText: boostedText, rawCvText, missingKeywords, allKeywords } = job.source === 'trac'
+  let { score, unscored, cvText: boostedText, rawCvText, missingKeywords, allKeywords } = job.source === 'trac'
     ? await (async () => { const t = cleanText(await cvSelector.extractCVText(bestCV.path)); return { score: 0, cvText: t, rawCvText: t, missingKeywords: [] }; })()
     : await scoreWithBoost(bestCV, job.description);
+  // The AI couldn't read the advert's keywords: try the job again later, then skip it.
+  if (unscored) {
+    if ((job.retryCount || 0) < 2) {
+      queue.update(job.jobId, { status: 'pending', retryCount: (job.retryCount || 0) + 1 });
+      console.log(`  [Scorer Agent] Could not score the advert, will retry: ${job.title}`);
+    } else {
+      queue.update(job.jobId, { status: 'skipped', reason: "Couldn't check how well your CV matches this job" });
+      console.log(`  [Scorer Agent] ✗ Could not score the advert, skipped: ${job.title}`);
+    }
+    return;
+  }
   let bestScore        = score;
   let bestCvText       = boostedText;
   let bestRawCvText    = rawCvText;
