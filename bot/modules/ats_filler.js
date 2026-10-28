@@ -53,6 +53,16 @@ const _answerCache = new Map();
 async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
   const dryRun = opts.submit === false;
   _answerCache.clear();
+  // No NHS details (US users never see that page): take work history and education from
+  // the CV, so "Current company", "School" and employment-gap questions get answered.
+  if (job && job.cvText) {
+    const D = cfg.TRAC_DETAILS || (cfg.TRAC_DETAILS = {});
+    if (!(D.employment || []).length || !(D.education || []).length) {
+      const h = require('./work_history').fromCV(job.cvText);
+      if (h && !(D.employment || []).length && h.employment.length) D.employment = h.employment;
+      if (h && !(D.education || []).length && h.education.length) D.education = h.education;
+    }
+  }
   // Bound every field interaction: SPA forms (Workable etc.) re-render as they
   // load / after a CV import, leaving elements briefly un-actionable. Without a
   // cap Playwright waits its 30s default per action, so a few stuck fields look
@@ -945,7 +955,14 @@ function _yesNoForQuestion(question) {
     if (gap !== null) return gap ? 'yes' : 'no';
   }
   const rtw = cfg.APPLICANT.rightToWorkCountries || [];
-  const hasRightToWork = rtw.some(c => /uk|united kingdom|britain|england|scotland|wales|northern ireland|gb\b/i.test(c));
+  // The country the question asks about ("authorized to work in the United States?"),
+  // else the applicant's own; right to work means that country is in their list.
+  const RTW_RE = { US: /\b(US|USA|U\.S\.A?\.?|united states|america)\b/i, UK: /\b(UK|U\.K\.|united kingdom|britain|great britain|england|scotland|wales|northern ireland|GB)\b/i };
+  const raw = String(question || '');
+  const askedAbout = /\b(US|USA|U\.S\.)\b|united states|america/i.test(raw) && !RTW_RE.UK.test(raw) ? 'US'
+    : RTW_RE.UK.test(raw) ? 'UK'
+    : (cfg.APPLICANT.country === 'United States' ? 'US' : 'UK');
+  const hasRightToWork = rtw.some(c => RTW_RE[askedAbout].test(c));
   // Explicit profile flag wins; otherwise infer (has right to work ⇒ no sponsorship needed)
   const requiresSponsorship = typeof cfg.APPLICANT.requiresSponsorship === 'boolean'
     ? cfg.APPLICANT.requiresSponsorship
@@ -1238,6 +1255,16 @@ function _pickLocationOption(question, optionTexts) {
   return optionTexts.find(t => hasCity(t) && home.test(t)) || optionTexts.find(hasCity) || null;
 }
 
+const US_STATES = { AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming' };
+// The US state the applicant lives in, from their location or address ("New York, NY 10118").
+function _usState() {
+  const text = [cfg.APPLICANT.location, cfg.APPLICANT.address].filter(Boolean).join(', ');
+  const code = (text.match(/,\s*([A-Z]{2})\b(?:\s+\d{5})?/g) || []).map((m) => m.replace(/[^A-Z]/g, '').slice(0, 2)).find((c) => US_STATES[c]);
+  if (code) return { code, name: US_STATES[code] };
+  const name = Object.entries(US_STATES).sort((a, b) => b[1].length - a[1].length).find(([, n]) => new RegExp(`\\b${n}\\b`, 'i').test(text));
+  return name ? { code: name[0], name: name[1] } : null;
+}
+
 function _pickDropdownOption(question, options) {
   const q = (question || '').toLowerCase();
   const loc = _pickLocationOption(question, options.map(o => o.text));
@@ -1252,8 +1279,16 @@ function _pickDropdownOption(question, options) {
     if (avail === '1month')      return options.find(o => /1 month|one month/i.test(o.text))?.text || null;
   }
   if (/salary|compensation/i.test(q)) return null;
-  if (/country|where.*based/i.test(q))
-    return options.find(o => /united kingdom|uk$/i.test(o.text))?.text || null;
+  // US state ("Which state do you reside in?"): from the location/address ("New York, NY").
+  if (/\bstate\b/i.test(q) && !/united states/i.test(q) && cfg.APPLICANT.country === 'United States') {
+    const st = _usState();
+    if (st) return options.find(o => o.text.trim().toLowerCase() === st.name.toLowerCase() || o.text.trim() === st.code)?.text || null;
+  }
+  // The applicant's own country (a phone country-code list too: "United States +1").
+  if (/country|where.*based/i.test(q)) {
+    const us = cfg.APPLICANT.country === 'United States';
+    return options.find(o => (us ? /united states|\busa?\b|^us\b/i : /united kingdom|uk$/i).test(o.text))?.text || null;
+  }
   if (/experience.*level|senior.*level|level.*experi/i.test(q)) {
     const yrs = cfg.APPLICANT.yearsExperience ?? 0;
     if (yrs >= 5) return options.find(o => /senior|mid|experienced/i.test(o.text))?.text || null;
@@ -1363,4 +1398,4 @@ function formUrl(url) {
   return m ? `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}` : url;
 }
 
-module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, submitEmailCode, formUrl, lastSubmitOutcome: () => lastOutcome, _yesNoForQuestion, _pickRadioOption };
+module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, submitEmailCode, formUrl, lastSubmitOutcome: () => lastOutcome, _yesNoForQuestion, _pickRadioOption, _pickDropdownOption };

@@ -117,7 +117,7 @@ function reportApplied({ title, company, url, cv_score }) {
   fetch(`${backendUrl()}/v1/jobs/applied`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${licenseKey()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, company, url, cv_score, tailor: require('./tailor_version').TAILOR_VERSION }),
+    body: JSON.stringify({ title, company, url, cv_score, tailor: require('./tailor_version').TAILOR_VERSION, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     signal: AbortSignal.timeout(15000),
   }).catch(() => {});
 }
