@@ -107,7 +107,7 @@ module.exports = {
     }
     return false;
   },
-  "f4e85bb821ce6": el => {
+  "f91a4a731e8d2": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         // Also accept a WRAPPING <label> (no for=) — Workable nests the input
         // inside a <label> whose text is the question, with no fieldset/aria at
@@ -119,22 +119,25 @@ module.exports = {
         const alb  = (fs && fs.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
         const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="Question"]');
         const wl   = wrap?.querySelector('label, legend, [class*="label"], [class*="Label"]');
-        const label = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || wl?.innerText || '').trim();
+        // Lever keeps the question in a sibling .application-label, outside the field's box.
+        const ll   = el.closest('.application-question')?.querySelector('.application-label');
+        const label = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || ll?.innerText || wl?.innerText || '').trim();
         return { label, placeholder: el.placeholder || '' };
       },
-  "f4bc31026ff3c": el => {
+  "f280caa33d325": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const fs   = el.closest('fieldset');
         const alb  = (fs && fs.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
         const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="Question"]');
         const wl   = wrap?.querySelector('label, legend, [class*="label"]');
-        const question = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || wl?.innerText || '').trim();
+        const ll   = el.closest('.application-question')?.querySelector('.application-label');
+        const question = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || ll?.innerText || wl?.innerText || '').trim();
         const options  = Array.from(el.options).map(o => ({ val: o.value, text: o.text.trim() })).filter(o => o.val && o.val !== '0');
         return { question, options };
       },
   "fc2e0d667fec4": el => !!(el.offsetParent || (el.labels && [...el.labels].some(l => l.offsetParent))),
-  "f31ac98430d87": el => {
+  "f0c4ed2aa0952": el => {
         const name = el.name || '';
         const allR = name ? Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`)) : [el];
         // Option text: label[for] / wrapping <label> / the radio's parent text
@@ -166,6 +169,8 @@ module.exports = {
         if (lb) { const qe = document.getElementById(lb.split(' ')[0]); if (qe) q = (qe.innerText || '').trim(); }
         if (!q && fieldset && fieldset.querySelector('legend')) q = (fieldset.querySelector('legend').innerText || '').trim();
         if (q && optSet.has(q.toLowerCase())) q = '';
+        // Lever: the question sits in the sibling .application-label.
+        if (!q) { const ll = el.closest('.application-question')?.querySelector('.application-label'); if (ll) q = (ll.innerText || '').trim(); }
         if (!q) {
           let node = el.parentElement;
           for (let i = 0; i < 7 && node && !q; i++) {
@@ -204,14 +209,15 @@ module.exports = {
         }
         return false;
       },
-  "fb6a826e37db5": el => {
+  "f07f193c7c1f5": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const fs   = el.closest('fieldset');
         const alb  = (fs && fs.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
         const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="Question"]');
         const wl   = wrap?.querySelector('label, legend, [class*="label"]');
-        return (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || wl?.innerText || el.placeholder || el.getAttribute('aria-label') || '').trim();
+        const ll   = el.closest('.application-question')?.querySelector('.application-label');
+        return (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || ll?.innerText || wl?.innerText || el.placeholder || el.getAttribute('aria-label') || '').trim();
       },
   "fef8298953616": el => {
         const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label') || el.parentElement;
@@ -261,6 +267,7 @@ module.exports = {
             const emailCode = /verification code (was|has been) sent|enter the \d+-character code|security code/i.test(t);
             return { success, validationError, submitting, formGone, turnstile, emailCode };
           },
+  "f8cc200e5ff13": () => /verify you are human/i.test(document.body?.innerText || '') || !!document.querySelector('iframe[src*="challenges.cloudflare.com"], .cf-turnstile, [name="cf-turnstile-response"]'),
   "f1a2da66b20f6": () => {
       const t = (document.body?.innerText || '').toLowerCase();
       return {

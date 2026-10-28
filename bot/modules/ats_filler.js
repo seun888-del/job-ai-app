@@ -437,6 +437,21 @@ async function _fillStep(page, job) {
   // Yes/No answered first: the answer decides which follow-up questions appear.
   await _answerYesNoButtons(page, job);
 
+  // Workable fills "Address" from the CV it parses (it can pick a university town):
+  // when it doesn't name the profile's city, put the profile's location there.
+  if (location && /workable\.com/.test(page.url())) {
+    const city = location.split(',')[0].trim().toLowerCase();
+    for (const el of await page.$$('input[name="address"], input[id="address"]').catch(() => [])) {
+      try {
+        const v = await el.inputValue();
+        if (await el.isVisible() && !v.toLowerCase().includes(city)) {
+          await _setValue(el, `${location}, ${cfg.APPLICANT.country || 'United Kingdom'}`);
+          console.log(`  [ATS] Address → "${location}" (the site had "${v.slice(0, 30)}")`);
+        }
+      } catch (_) {}
+    }
+  }
+
   // "Confirm your email" is a second email box: every empty one gets the email.
   if (email) {
     for (const el of await page.$$('input[type="email"], input[name*="email" i], input[id*="email" i]').catch(() => [])) {
@@ -462,12 +477,15 @@ async function _fillStep(page, job) {
         const alb  = (fs && fs.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
         const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="Question"]');
         const wl   = wrap?.querySelector('label, legend, [class*="label"], [class*="Label"]');
-        const label = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || wl?.innerText || '').trim();
+        // Lever keeps the question in a sibling .application-label, outside the field's box.
+        const ll   = el.closest('.application-question')?.querySelector('.application-label');
+        const label = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || ll?.innerText || wl?.innerText || '').trim();
         return { label, placeholder: el.placeholder || '' };
       }).catch(() => ({ label: '', placeholder: '' }));
 
       const question = label || placeholder;
-      if (!question) continue;
+      // A bare "Type your response" placeholder isn't a question: don't let the AI guess one.
+      if (!question || (!label && /^(type|enter|write) (your|an?) |^your (answer|response)/i.test(placeholder))) continue;
       const answer = await _buildAnswer(question, 'text', job);
       if (answer) {
         await _setValue(inp, answer);
@@ -492,7 +510,8 @@ async function _fillStep(page, job) {
         const alb  = (fs && fs.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
         const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="Question"]');
         const wl   = wrap?.querySelector('label, legend, [class*="label"]');
-        const question = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || wl?.innerText || '').trim();
+        const ll   = el.closest('.application-question')?.querySelector('.application-label');
+        const question = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || ll?.innerText || wl?.innerText || '').trim();
         const options  = Array.from(el.options).map(o => ({ val: o.value, text: o.text.trim() })).filter(o => o.val && o.val !== '0');
         return { question, options };
       }).catch(() => ({ question: '', options: [] }));
@@ -552,6 +571,8 @@ async function _fillStep(page, job) {
         if (lb) { const qe = document.getElementById(lb.split(' ')[0]); if (qe) q = (qe.innerText || '').trim(); }
         if (!q && fieldset && fieldset.querySelector('legend')) q = (fieldset.querySelector('legend').innerText || '').trim();
         if (q && optSet.has(q.toLowerCase())) q = '';
+        // Lever: the question sits in the sibling .application-label.
+        if (!q) { const ll = el.closest('.application-question')?.querySelector('.application-label'); if (ll) q = (ll.innerText || '').trim(); }
         if (!q) {
           let node = el.parentElement;
           for (let i = 0; i < 7 && node && !q; i++) {
@@ -580,15 +601,16 @@ async function _fillStep(page, job) {
         : _pickRadioOption(legend, texts) || await _aiPickOption(legend, texts, job);
       if (demo && !chosen) continue;
       // Last resort for a REQUIRED yes/no radio the rules and AI both left blank:
-      // default to the affirmative. A blank required radio blocks the whole
-      // submission, and someone who chose to apply is asserting fitness for the
-      // role — an unanswered "Yes/No" would otherwise silently fail the apply.
+      // the affirmative, but only for a willingness/ability question. A blank required
+      // radio blocks the submission; an experience question stays blank for the user.
       if (!chosen) {
         const isRequired = await page.$eval(`input[type="radio"][name="${groupName}"]`, el => {
           const w = el.closest('[role="radio"],fieldset'); return el.required || el.getAttribute('aria-required') === 'true' || (w && w.getAttribute('aria-required') === 'true');
         }).catch(() => false);
         const yesOpt = options.map(o => o.text).find(t => /^\s*yes\b/i.test(t));
-        if (isRequired && yesOpt) { chosen = yesOpt; console.log(`  [ATS] Required radio unanswered → affirmative fallback: "${(legend || '').substring(0, 40)}"`); }
+        // Only for willingness/ability ("Can you work from the office?"), never experience claims.
+        const willing = /\b(can you|i can|are you (willing|able|happy|comfortable|available|open)|willing|able to|happy to|comfortable|commute|relocat|travel|work from|on-?site|office|hours|shifts?|weekends?|start)\b/i.test(legend || '') && !/experience|years|certif|qualif|licen[cs]e|degree/i.test(legend || '');
+        if (isRequired && yesOpt && willing) { chosen = yesOpt; console.log(`  [ATS] Required radio unanswered → affirmative fallback: "${(legend || '').substring(0, 40)}"`); }
       }
       if (chosen) {
         const opt = options.find(o => o.text === chosen);
@@ -625,7 +647,7 @@ async function _fillStep(page, job) {
       } else {
         console.log(`  [ATS] ⚠ No answer for radio: "${(legend || '').substring(0, 50)}"`);
       }
-    } catch (_) {}
+    } catch (e) { console.log(`  [ATS] ⚠ Radio question failed: ${String(e && e.message || e).slice(0, 120)}`); }
   }
 
   // A required Cover Letter upload (Greenhouse): open its "Enter manually" box so the
@@ -670,7 +692,8 @@ async function _fillStep(page, job) {
         const alb  = (fs && fs.getAttribute('aria-labelledby')) || el.getAttribute('aria-labelledby') || '';
         const wrap = el.closest('[class*="field"],[class*="Field"],[class*="question"],[class*="Question"]');
         const wl   = wrap?.querySelector('label, legend, [class*="label"]');
-        return (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || wl?.innerText || el.placeholder || el.getAttribute('aria-label') || '').trim();
+        const ll   = el.closest('.application-question')?.querySelector('.application-label');
+        return (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || ll?.innerText || wl?.innerText || el.placeholder || el.getAttribute('aria-label') || '').trim();
       }).catch(() => '');
       const answer = await _buildAnswer(question || 'cover letter', 'textarea', job);
       if (answer) {
@@ -813,6 +836,10 @@ async function _trySubmit(page, ats) {
           if (st.validationError && !st.submitting) { console.log('  [ATS] ⚠ Submit blocked by a validation error — NOT submitted'); lastOutcome = 'validation'; return false; }
           // still submitting / turnstile pending → keep waiting
         }
+        // Stuck because a Cloudflare "Verify you are human" box is waiting (Workable): a human check.
+        if (await page.evaluate(() => /verify you are human/i.test(document.body?.innerText || '') || !!document.querySelector('iframe[src*="challenges.cloudflare.com"], .cf-turnstile, [name="cf-turnstile-response"]')).catch(() => false)) {
+          console.log('  [ATS] ⚠ Human-verification (Cloudflare) on Submit — application NOT sent.'); lastOutcome = 'captcha'; return false;
+        }
         console.log('  [ATS] ⚠ Submit did not confirm (stuck on Submitting/verification) — NOT counting as applied'); lastOutcome = 'unconfirmed'; return false;
       }
     } catch (_) {}
@@ -883,8 +910,38 @@ async function _tryNext(page) {
 // answer. Sponsorship is handled SEPARATELY from right-to-work — conflating the
 // two made the agent answer "Yes, I need sponsorship" for users who have the
 // right to work and need none. Returns 'yes' | 'no' | null.
+// "Any gaps in employment in the last 5 years?": worked out from the saved work history
+// (a gap = more than a month between one job ending and the next starting). Null when
+// there's no history to go on.
+function _hasEmploymentGap(question) {
+  const jobs = ((cfg.TRAC_DETAILS || {}).employment || []).map((e) => ({ s: _ukDate(e.start), e: e.end ? _ukDate(e.end) : new Date() })).filter((j) => j.s && j.e);
+  if (!jobs.length) return null;
+  const yrs = +((/(\d+)\s*years?/.exec(question) || [])[1] || 5);
+  const from = new Date(); from.setFullYear(from.getFullYear() - yrs);
+  jobs.sort((x, y) => x.s - y.s);
+  let covered = from;
+  for (const j of jobs) {
+    if (j.e < from) continue;
+    if (j.s - covered > 31 * 864e5) return true;
+    if (j.e > covered) covered = j.e;
+  }
+  return Date.now() - covered > 31 * 864e5;
+}
+function _ukDate(d) {
+  const m = String(d || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/) || String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return m[1].length === 4 ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(+m[3], +m[2] - 1, +m[1]);
+}
+
 function _yesNoForQuestion(question) {
   const q = (question || '').toLowerCase();
+  // "Are you a British citizen?": from the right-to-work status saved with the NHS details.
+  const rtwStatus = String((cfg.TRAC_DETAILS || {}).rightToWork || '').toLowerCase();
+  if (/\b(british|uk) citizen|citizen of the (uk|united kingdom)/.test(q) && rtwStatus) return /british citizen|uk citizen/.test(rtwStatus) ? 'yes' : 'no';
+  if (/gaps? in (your )?(employment|work history|career)|employment gaps?/.test(q)) {
+    const gap = _hasEmploymentGap(q);
+    if (gap !== null) return gap ? 'yes' : 'no';
+  }
   const rtw = cfg.APPLICANT.rightToWorkCountries || [];
   const hasRightToWork = rtw.some(c => /uk|united kingdom|britain|england|scotland|wales|northern ireland|gb\b/i.test(c));
   // Explicit profile flag wins; otherwise infer (has right to work ⇒ no sponsorship needed)
@@ -1015,19 +1072,20 @@ Candidate facts:
 - Availability: ${avail}
 - Right to work in ${home}: ${(rightToWorkCountries || []).some(c => homeRe.test(c)) ? 'Yes' : 'No'}
 - Requires visa sponsorship: ${_yesNoForQuestion('do you require sponsorship') === 'yes' ? 'Yes' : 'No'}
-${jobs ? `Work history (newest first):\n${jobs}\n` : ''}${edu ? `Education:\n${edu}\n` : ''}
+${jobs ? `Work history (newest first):\n${jobs}\n` : ''}${edu ? `Education:\n${edu}\n` : ''}${job && job.cvText ? `CV:\n${String(job.cvText).slice(0, 5000)}\n` : ''}
 Job: ${job.title} at ${job.company}
 
 Form question: "${question}"
 
 Rules:
 - Use only the facts above. Never invent employers, job titles, dates, schools, links, numbers or experience.
+- Experience with a specific skill, tool, standard, technology or industry counts only if the CV or work history shows it.
 - A short field (company, job title, school, degree, a date, month, year, number or URL) takes just the value, nothing else. Fields about a job or school with no other context mean the most recent one.
 - Company, employer, job title and date fields in a work-history section are about the candidate's OWN past jobs, never the job being applied for. A job with no end date is current: its end date fields get SKIP.
 - An open question gets 1 to 3 natural, professional sentences. No bullet points, no mention of AI.
 - If the facts don't answer it, reply with exactly: SKIP`;
       const answer = await llmChat(prompt);
-      if (/^\W*skip\W*$/i.test(String(answer || '').trim())) { console.log(`  [ATS] Not in your details, left blank: "${question.substring(0, 50)}"`); _answerCache.set(cacheKey, ''); return ''; }
+      if (/^\W*skip\W*$/i.test(String(answer || '').trim()) || /^(please provide|i('m| am) (sorry|unable)|could you (please )?(provide|clarify)|as an ai)/i.test(String(answer || '').trim())) { console.log(`  [ATS] Not in your details, left blank: "${question.substring(0, 50)}"`); _answerCache.set(cacheKey, ''); return ''; }
       if (answer?.trim()) {
         console.log(`  [ATS] AI: "${question.substring(0, 50)}" → "${answer.substring(0, 60)}"`);
         _answerCache.set(cacheKey, answer.trim());
@@ -1045,7 +1103,8 @@ Rules:
 // whose options only exist while the menu is open. Open it, read the options, pick one with the
 // same rules/AI as native selects, then click it. Mouse events are dispatched in the page so this
 // works the same in Playwright and in the Chrome extension.
-const DEMOGRAPHIC_RE = /gender|ethnic|race|hispanic|latin[oax]|sexual|orientation|disab|neurodiver|veteran|pronoun|religio|age range|\bwhat age\b|\byour age\b|\bage (group|bracket)\b|how old|transgender|identity/i;
+// Whole words: "race" must not match "Abtrace", nor "identity" an IT skill like identity management.
+const DEMOGRAPHIC_RE = /gender|ethnic|\brac(e|ial)\b|hispanic|\blatin[oax]\b|sexual|disab|neurodiver|veteran|pronoun|religio|age range|\bwhat age\b|\byour age\b|\bage (group|bracket)\b|how old|transgender/i;
 async function _answerComboboxes(page, job) {
   // Re-find the dropdowns before each one: picking an answer re-renders the form, which can
   // replace later inputs and leave stale handles behind.
@@ -1107,6 +1166,8 @@ async function _answerComboboxes(page, job) {
       }
       if (!options.length) { console.log(`  [ATS] ⚠ No options for dropdown: "${q.substring(0, 50)}"`); await box.press('Escape').catch(() => {}); continue; }
 
+      // An optional "If yes, ..." follow-up: left blank (it only applies to a "Yes" above).
+      if (/^\s*if (yes|so)\b/i.test(q) && !/\*\s*$/.test(info.question)) { await box.press('Escape').catch(() => {}); continue; }
       let chosen = null;
       const fact = _workFact(q);
       if (fact !== undefined) {
@@ -1249,13 +1310,13 @@ async function _aiPickOptionUncached(question, optionTexts, job) {
     const prompt =
 `You are completing a job application for ${firstName} ${lastName} (${yearsExperience} yrs experience, lives in ${location || country || home}, availability: ${AVAIL_MAP[availability] || 'immediately'}, right to work ${home}: ${(rightToWorkCountries||[]).some(c=>homeRe.test(c))}, requires visa sponsorship: ${_yesNoForQuestion('require sponsorship') === 'yes'}).
 
-${(() => { const D = cfg.TRAC_DETAILS || {}; const w = (D.employment || []).slice(0, 5).map((e) => `- ${e.jobTitle || ''} at ${e.employer || ''} (${e.start || '?'} to ${e.end || 'present'})`).join('\n'); const ed = (D.education || []).slice(0, 3).map((e) => `- ${[e.qualification || e.subject, e.institution || e.school || e.place, e.end || e.year].filter(Boolean).join(', ')}`).join('\n'); return (w ? `Work history (newest first):\n${w}\n` : '') + (ed ? `Education:\n${ed}\n` : ''); })()}
+${(() => { const D = cfg.TRAC_DETAILS || {}; const w = (D.employment || []).slice(0, 5).map((e) => `- ${e.jobTitle || ''} at ${e.employer || ''} (${e.start || '?'} to ${e.end || 'present'})`).join('\n'); const ed = (D.education || []).slice(0, 3).map((e) => `- ${[e.qualification || e.subject, e.institution || e.school || e.place, e.end || e.year].filter(Boolean).join(', ')}`).join('\n'); return (w ? `Work history (newest first):\n${w}\n` : '') + (ed ? `Education:\n${ed}\n` : ''); })()}${job && job.cvText ? `CV:\n${String(job.cvText).slice(0, 5000)}\n` : ''}
 Question: "${question}"
 Options:
 ${optionTexts.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
 A question about a specific date, month, year, school, degree or employer must come from the facts above (fields about a job or school with no other context mean the candidate's own most recent one, never the job being applied for; a job with no end date is current, so its end date is SKIP); if the facts don't give it, reply with exactly: SKIP
-Answer truthfully. For a willingness, availability or commitment question the candidate can reasonably meet (e.g. willing to work on-site, able to commute), choose the affirmative option. For a rating of their own skill or knowledge, pick a modest middle level unless the details above show real expertise; never overstate. Never claim a licence, certificate, clearance or past employer the details don't show. Reply with ONLY the exact text of the best option. No explanation.`;
+Answer truthfully. For a willingness, availability or commitment question the candidate can reasonably meet (e.g. willing to work on-site, able to commute), choose the affirmative option. For a rating of their own skill or knowledge, pick a modest middle level unless the details above show real expertise; never overstate. Never claim a licence, certificate, clearance or past employer the details don't show. For experience with a specific skill, tool, standard (e.g. ISO 27001), technology or industry, choose yes only if the CV or work history shows it; otherwise choose the no / none / lowest option. Reply with ONLY the exact text of the best option. No explanation.`;
     // The model occasionally returns an empty/garbled reply; a blank required
     // radio blocks the whole submission, so retry a couple of times before giving
     // up (each blank answer is a lost application otherwise).
@@ -1282,4 +1343,4 @@ function formUrl(url) {
   return m ? `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}` : url;
 }
 
-module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, submitEmailCode, formUrl, lastSubmitOutcome: () => lastOutcome };
+module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, submitEmailCode, formUrl, lastSubmitOutcome: () => lastOutcome, _yesNoForQuestion, _pickRadioOption };

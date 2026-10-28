@@ -355,6 +355,7 @@ async function phase2_applyReadyCVs(browser) {
           const page = await browser.page();
           await page.goto(atsFiller.formUrl(job.url), { waitUntil: 'domcontentloaded', timeout: 45000 });
           await DELAY(1500 + Math.random() * 1500);
+          job.cvText = job.cvText || await readCvText(job.cvPath); // so form answers come from the CV
           sent = (await atsFiller.fillExternalForm(page, job, job.cvPath, ats, { submit: true })) === true;
           outcome = atsFiller.lastSubmitOutcome();
           // The site emailed the user a code: ask for it (two tries), with the form held open.
