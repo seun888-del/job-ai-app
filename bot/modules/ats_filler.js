@@ -935,6 +935,8 @@ function _ukDate(d) {
 
 function _yesNoForQuestion(question) {
   const q = (question || '').toLowerCase();
+  // "Are you connected to / do you know any current employees?": No (Job-AI finds the jobs, so no referral).
+  if (/(connected|related|referred|relationship|friends?|know)\b.{0,40}\b(current |existing )?(employees?|staff|team members?|(some|any)(one|body) (who works|working|at))/.test(q) && !/previous(ly)?|former|employed by/.test(q)) return 'no';
   // "Are you a British citizen?": from the right-to-work status saved with the NHS details.
   const rtwStatus = String((cfg.TRAC_DETAILS || {}).rightToWork || '').toLowerCase();
   if (/\b(british|uk) citizen|citizen of the (uk|united kingdom)/.test(q) && rtwStatus) return /british citizen|uk citizen/.test(rtwStatus) ? 'yes' : 'no';
@@ -1062,7 +1064,7 @@ async function _buildAnswer(question, fieldType, job) {
       // work/education sections many ATS forms repeat) come from real data, newest first.
       const D = cfg.TRAC_DETAILS || {};
       const jobs = (D.employment || []).slice(0, 5).map((e) => `- ${e.jobTitle || ''} at ${e.employer || ''} (${e.start || '?'} to ${e.end || 'present'})`).join('\n');
-      const edu = (D.education || []).slice(0, 3).map((e) => `- ${[e.qualification || e.subject, e.institution || e.school || e.place, e.end || e.year].filter(Boolean).join(', ')}`).join('\n');
+      const edu = (D.education || []).slice(0, 3).map((e) => `- ${[e.qualification || e.subject, e.institution || e.school || e.place, e.grade && `grade ${e.grade}`, e.end || e.year].filter(Boolean).join(', ')}`).join('\n');
       const prompt =
 `You are completing a job application form on behalf of ${firstName} ${lastName}.
 
@@ -1080,11 +1082,14 @@ Form question: "${question}"
 Rules:
 - Use only the facts above. Never invent employers, job titles, dates, schools, links, numbers or experience.
 - Experience with a specific skill, tool, standard, technology or industry counts only if the CV or work history shows it.
+- Asked which of some certifications, licences or clearances they hold: list the ones the CV shows; if it shows none of them, reply with exactly: None
 - A short field (company, job title, school, degree, a date, month, year, number or URL) takes just the value, nothing else. Fields about a job or school with no other context mean the most recent one.
 - Company, employer, job title and date fields in a work-history section are about the candidate's OWN past jobs, never the job being applied for. A job with no end date is current: its end date fields get SKIP.
 - An open question gets 1 to 3 natural, professional sentences. No bullet points, no mention of AI.
 - If the facts don't answer it, reply with exactly: SKIP`;
-      const answer = await llmChat(prompt);
+      let answer = await llmChat(prompt);
+      // Drop a bracketed note the model copied from the question ("2:1 (Grading system: ...)").
+      answer = String(answer || '').replace(/\s*\(([^)]{6,})\)/g, (m, inner) => (question.includes(inner.trim()) ? '' : m)).trim();
       if (/^\W*skip\W*$/i.test(String(answer || '').trim()) || /^(please provide|i('m| am) (sorry|unable)|could you (please )?(provide|clarify)|as an ai)/i.test(String(answer || '').trim())) { console.log(`  [ATS] Not in your details, left blank: "${question.substring(0, 50)}"`); _answerCache.set(cacheKey, ''); return ''; }
       if (answer?.trim()) {
         console.log(`  [ATS] AI: "${question.substring(0, 50)}" → "${answer.substring(0, 60)}"`);
@@ -1172,7 +1177,22 @@ async function _answerComboboxes(page, job) {
       const fact = _workFact(q);
       if (fact !== undefined) {
         const f = String(fact).toLowerCase().trim();
-        chosen = f ? (options.find(t => t.toLowerCase() === f) || options.find(t => t.toLowerCase().includes(f) || (f.length > 3 && f.includes(t.toLowerCase())))) || null : null;
+        const match = (opts) => f ? (opts.find(t => t.toLowerCase() === f) || opts.find(t => t.toLowerCase().includes(f) || (f.length > 3 && f.includes(t.toLowerCase())))) || null : null;
+        chosen = match(options);
+        // School / Discipline lists only show matches once you type (Greenhouse): search for
+        // the value, then a shorter search ("BSc Computer Networking..." -> "Computer Networking").
+        if (!chosen && f) {
+          const words = f.replace(/^(bsc|ba|msc|ma|beng|meng|ma|phd|hnd|hnc|btec|bachelor'?s?|master'?s?)( \(hons\))?\s+(of |in )?/i, '').split(/\s+/);
+          for (const term of [...new Set([String(fact).trim(), words.slice(0, 2).join(' '), words[0]])].filter((t) => t && t.length >= 3)) {
+            await box.fill(term).catch(() => {}); await J(1200, 1800);
+            const found = await readOptions();
+            chosen = match(found) || (term !== String(fact).trim() && found.find((t) => words.filter((w) => w.length > 3 && t.toLowerCase().includes(w)).length >= Math.min(2, words.length))) || null;
+            // Last search: the AI picks the closest listed subject ("Computer Networking..." ->
+            // "Computer Science" / "Information Technology"), or none.
+            if (!chosen && term === words[0] && found.length) chosen = await _aiPickOption(`${q} (the candidate's actual subject is "${fact}"; pick the closest option, or SKIP if none is close)`, found, job);
+            if (chosen) break;
+          }
+        }
         if (!chosen) { console.log(`  [ATS] Not in your details, left blank: "${q.substring(0, 50)}"`); await box.press('Escape').catch(() => {}); continue; }
       }
       if (isLocation) chosen = options[0];
@@ -1310,13 +1330,13 @@ async function _aiPickOptionUncached(question, optionTexts, job) {
     const prompt =
 `You are completing a job application for ${firstName} ${lastName} (${yearsExperience} yrs experience, lives in ${location || country || home}, availability: ${AVAIL_MAP[availability] || 'immediately'}, right to work ${home}: ${(rightToWorkCountries||[]).some(c=>homeRe.test(c))}, requires visa sponsorship: ${_yesNoForQuestion('require sponsorship') === 'yes'}).
 
-${(() => { const D = cfg.TRAC_DETAILS || {}; const w = (D.employment || []).slice(0, 5).map((e) => `- ${e.jobTitle || ''} at ${e.employer || ''} (${e.start || '?'} to ${e.end || 'present'})`).join('\n'); const ed = (D.education || []).slice(0, 3).map((e) => `- ${[e.qualification || e.subject, e.institution || e.school || e.place, e.end || e.year].filter(Boolean).join(', ')}`).join('\n'); return (w ? `Work history (newest first):\n${w}\n` : '') + (ed ? `Education:\n${ed}\n` : ''); })()}${job && job.cvText ? `CV:\n${String(job.cvText).slice(0, 5000)}\n` : ''}
+${(() => { const D = cfg.TRAC_DETAILS || {}; const w = (D.employment || []).slice(0, 5).map((e) => `- ${e.jobTitle || ''} at ${e.employer || ''} (${e.start || '?'} to ${e.end || 'present'})`).join('\n'); const ed = (D.education || []).slice(0, 3).map((e) => `- ${[e.qualification || e.subject, e.institution || e.school || e.place, e.grade && `grade ${e.grade}`, e.end || e.year].filter(Boolean).join(', ')}`).join('\n'); return (w ? `Work history (newest first):\n${w}\n` : '') + (ed ? `Education:\n${ed}\n` : ''); })()}${job && job.cvText ? `CV:\n${String(job.cvText).slice(0, 5000)}\n` : ''}
 Question: "${question}"
 Options:
 ${optionTexts.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
 A question about a specific date, month, year, school, degree or employer must come from the facts above (fields about a job or school with no other context mean the candidate's own most recent one, never the job being applied for; a job with no end date is current, so its end date is SKIP); if the facts don't give it, reply with exactly: SKIP
-Answer truthfully. For a willingness, availability or commitment question the candidate can reasonably meet (e.g. willing to work on-site, able to commute), choose the affirmative option. For a rating of their own skill or knowledge, pick a modest middle level unless the details above show real expertise; never overstate. Never claim a licence, certificate, clearance or past employer the details don't show. For experience with a specific skill, tool, standard (e.g. ISO 27001), technology or industry, choose yes only if the CV or work history shows it; otherwise choose the no / none / lowest option. Reply with ONLY the exact text of the best option. No explanation.`;
+Answer truthfully. For a willingness, availability or commitment question the candidate can reasonably meet (e.g. willing to work on-site, able to commute), choose the affirmative option. For a rating of their own skill or knowledge, pick a modest middle level unless the details above show real expertise; never overstate. Never claim a licence, certificate, clearance or past employer the details don't show. Asked which certifications or licences they hold, pick the none / no option when the details show none of them. For experience with a specific skill, tool, standard (e.g. ISO 27001), technology or industry, choose yes only if the CV or work history shows it; otherwise choose the no / none / lowest option. Reply with ONLY the exact text of the best option. No explanation.`;
     // The model occasionally returns an empty/garbled reply; a blank required
     // radio blocks the whole submission, so retry a couple of times before giving
     // up (each blank answer is a lost application otherwise).

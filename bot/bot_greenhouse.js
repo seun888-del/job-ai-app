@@ -224,6 +224,11 @@ async function filterAndQueue(page, job) {
     queue.add({ ...job, source: SOURCE, status: 'skipped', reason: 'Below salary expectation' });
     return;
   }
+  if (await httpSubmit.recruiteeNeedsMedia(job.url)) {
+    console.log(`  [Auto-Apply] Asks for a video or file upload — skipping: ${job.title}`);
+    queue.add({ ...job, source: SOURCE, status: 'skipped', reason: 'Asks for a video or file upload' });
+    return;
+  }
   queue.add({ ...job, description, source: SOURCE, workType });
   console.log(`  [Auto-Apply] → Queued for Scorer: ${job.title} @ ${job.company} [${workType}]`);
 }
@@ -414,6 +419,10 @@ async function phase2_applyReadyCVs(browser) {
           queue.update(job.jobId, { status: 'skipped', reason: 'Dry run (submit disabled)' });
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', `Dry run — ${ats} not submitted`);
           console.log(`  [Auto-Apply] ✓ Dry run — NOT submitted [${ats}]: ${job.title}`);
+        } else if (r.reason === 'needs_media') {
+          // A required video or file upload: only the candidate can make it, so skip rather than park.
+          queue.update(job.jobId, { status: 'skipped', reason: 'Asks for a video or file upload' });
+          console.log(`  [Auto-Apply] Asks for a video or file upload — skipping: ${job.title}`);
         } else if (r.reason === 'needs_you') {
           // A required question neither the profile nor the AI could answer (a video, or a
           // sensitive question the profile doesn't cover): never guess it, hand it over.

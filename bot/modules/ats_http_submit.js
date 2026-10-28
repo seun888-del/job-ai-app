@@ -113,6 +113,9 @@ async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions,
 
   // Questions the profile can't answer go to the caller's `ask` hook (the app's AI, which
   // never answers sensitive ones). Video and file questions can't be answered over HTTP.
+  // A required video or file answer can't be sent over HTTP: hand it over before spending AI calls.
+  const media = Array.isArray(questions) ? questions.filter((q) => q && q.unknown && /^(video|file)$/.test(q.kind)) : [];
+  if (media.length) return { ok: false, reason: 'needs_media', questions: media.map((q) => q.body || q.kind) };
   if (Array.isArray(questions) && typeof ask === 'function') {
     for (const q of questions) {
       if (!q || !q.unknown || /^(video|file)$/.test(q.kind)) continue;
@@ -169,6 +172,19 @@ async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions,
 const SUBMITTERS = { recruitee: submitRecruitee, ats_recruitee: submitRecruitee };
 
 // True if this job can be submitted by pure HTTP (no browser).
+// A Recruitee job that requires a video or file answer can never go out unattended:
+// checked when the job is found, before the Scorer spends AI tailoring a CV for it.
+async function recruiteeNeedsMedia(url) {
+  const m = String(url || '').match(/https?:\/\/([^.]+)\.recruitee\.com\/(?:o|offers)\/([^/?#]+)/i);
+  if (!m) return false;
+  try {
+    const r = await fetch(`https://${m[1]}.recruitee.com/api/offers/${encodeURIComponent(m[2])}`, { headers: { Accept: 'application/json' } });
+    if (!r.ok) return false;
+    const qs = ((await r.json()).offer || {}).open_questions || [];
+    return qs.some((q) => q.required && /^(video|file)$/.test(q.kind));
+  } catch (_) { return false; }
+}
+
 function httpSubmitterFor(key) { return SUBMITTERS[key] || null; }
 
-module.exports = { httpSubmitterFor, submitRecruitee };
+module.exports = { httpSubmitterFor, submitRecruitee, recruiteeNeedsMedia };
