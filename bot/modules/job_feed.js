@@ -97,4 +97,17 @@ async function fetchAtsJobs({ country = 'GB', limit = 100 } = {}) {
   }
 }
 
-module.exports = { enabled, fetchReedStubs, fetchAtsJobs };
+// Tell the backend how a Company Sites send went ('sent', 'captcha', 'email_code'), so
+// employers whose form always stops for a human drop out of the feed. Only the job URL
+// and the outcome are sent. Fire-and-forget: never holds up or fails the agent.
+function reportOutcome(url, outcome) {
+  if (!licenseKey() || !url || !outcome) return;
+  fetch(`${backendUrl()}/v1/jobs/outcome`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${licenseKey()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, outcome }),
+    signal: AbortSignal.timeout(10000),
+  }).catch(() => {});
+}
+
+module.exports = { enabled, fetchReedStubs, fetchAtsJobs, reportOutcome };

@@ -91,6 +91,18 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('bot:status', handler);
       return () => ipcRenderer.removeListener('bot:status', handler);
     },
+    submitCode: (botName, jobId, code) => ipcRenderer.invoke('bot:submitCode', botName, jobId, code),
+    skipCode: (botName, jobId) => ipcRenderer.invoke('bot:skipCode', botName, jobId),
+    onCodeNeeded: (callback) => {
+      const handler = (event, data) => callback(data);
+      ipcRenderer.on('agents:code-needed', handler);
+      return () => ipcRenderer.removeListener('agents:code-needed', handler);
+    },
+    onCodeResult: (callback) => {
+      const handler = (event, data) => callback(data);
+      ipcRenderer.on('agents:code-result', handler);
+      return () => ipcRenderer.removeListener('agents:code-result', handler);
+    },
     onConnectionError: (callback) => {
       const handler = (event, data) => callback(data);
       ipcRenderer.on('agents:connection-error', handler);

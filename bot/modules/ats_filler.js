@@ -47,8 +47,12 @@ const ACCOUNT_REQUIRED_ATS = new Set(['workday', 'taleo', 'successfactors', 'adp
 // forms) but never click the final submit, so the whole pipeline can be tested
 // against a real ATS form without ever sending an application to an employer.
 // Returns true (submitted), 'dry_run' (filled, not submitted), or false.
+// Answers already worked out for the form being filled (question → answer, '' = left blank).
+const _answerCache = new Map();
+
 async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
   const dryRun = opts.submit === false;
+  _answerCache.clear();
   // Bound every field interaction: SPA forms (Workable etc.) re-render as they
   // load / after a CV import, leaving elements briefly un-actionable. Without a
   // cap Playwright waits its 30s default per action, so a few stuck fields look
@@ -107,7 +111,7 @@ async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
     // appears only after "Do you have 1+ year experience? → Yes"), and such
     // fields render late — after the text pass, sometimes 15s+ in. Keep polling
     // and re-filling until required fields stay filled across two clean checks.
-    if (step === 0) await _ensureRequiredFilled(page, job);
+    await _ensureRequiredFilled(page, job);
 
     if (dryRun) {
       // Fill this step, then either advance to the next or, if this was the last
@@ -184,20 +188,163 @@ async function _setValue(el, val) {
   try { await el.click({ timeout: 4000 }); await el.type(v, { delay: 40 }); return true; } catch (_) { return false; }
 }
 
-// Poll for late-rendered required fields and fill them. Dependent questions
-// (revealed by a radio answer) can appear 15s+ after the initial fill, so a
-// single pass misses them and a break-on-first-clean loop exits too early.
-// Concludes only after TWO consecutive checks find nothing empty. Bounded.
+// Check-and-fix pass (as the Trac agent does): list the required fields still blank, fill
+// again, re-check. Dependent questions (revealed by a radio answer) can appear 15s+ after
+// the first fill, so it concludes only after TWO clean checks, and stops early when a pass
+// changes nothing (the details don't answer what's left). Returns what's still blank.
 async function _ensureRequiredFilled(page, job) {
-  let cleanStreak = 0;
+  let cleanStreak = 0, prev = '';
   for (let i = 0; i < 7 && cleanStreak < 2; i++) {
     await J(1500, 2500);
-    const empty = await page.$$eval(
-      'input[required], select[required], textarea[required]',
-      els => els.filter(el => el.offsetParent !== null && !el.value && el.type !== 'radio' && el.type !== 'checkbox').length
-    ).catch(() => 0);
-    if (empty) { await _fillStep(page, job); cleanStreak = 0; }
-    else cleanStreak++;
+    const empty = await _findEmptyRequired(page);
+    if (!empty.length) { cleanStreak++; continue; }
+    cleanStreak = 0;
+    if (empty.join('|') === prev) {
+      console.log(`  [ATS] ⚠ Required, still blank: ${empty.map(q => `"${q.substring(0, 45)}"`).join(', ')}`);
+      return empty;
+    }
+    prev = empty.join('|');
+    await _fillStep(page, job);
+  }
+  return [];
+}
+
+// Required fields still unanswered, by question text. Covers text boxes, selects, radio and
+// tick-box groups, and react-select dropdowns (whose typing box stays empty after a pick:
+// the chosen answer sits beside it).
+function _findEmptyRequired(page) {
+  return page.evaluate(() => {
+    const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
+    const textOf = (e) => {
+      const l = (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label');
+      const w = e.closest('fieldset, [class*="field"], [class*="question"], [class*="Question"]');
+      const wl = w && w.querySelector('legend, label, [class*="label"]');
+      return ((wl && wl.innerText) || (l && l.innerText) || e.getAttribute('aria-label') || e.name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    };
+    const pickedNear = (e) => {
+      let box = e.parentElement;
+      for (let i = 0; i < 5 && box && box.parentElement && box.parentElement.querySelectorAll('input[role="combobox"]').length <= 1; i++) box = box.parentElement;
+      const v = box && box.querySelector('[class*="single-value"],[class*="singleValue"],[class*="multi-value"],[class*="multiValue"]');
+      return !!(v && v.textContent.trim());
+    };
+    const out = [], seen = new Set();
+    for (const e of document.querySelectorAll('input, textarea, select')) {
+      if (['hidden', 'file', 'submit', 'button'].includes(e.type) || /recaptcha|captcha/i.test(e.name || '') || !shown(e)) continue;
+      if (!(e.required || e.getAttribute('aria-required') === 'true')) continue;
+      if (e.type === 'radio' || e.type === 'checkbox') {
+        if (seen.has(e.name)) continue;
+        seen.add(e.name);
+        const group = e.name ? [...document.querySelectorAll(`input[name="${CSS.escape(e.name)}"]`)] : [e];
+        if (!group.some(r => r.checked || (r.closest('[role="radio"],[role="checkbox"]') || { getAttribute: () => '' }).getAttribute('aria-checked') === 'true')) out.push(textOf(e));
+        continue;
+      }
+      if (String(e.value || '').trim() || pickedNear(e)) continue;
+      out.push(textOf(e));
+    }
+    return [...new Set(out)];
+  }).catch(() => []);
+}
+
+// Yes/No questions drawn as two buttons (Ashby: aria-pressed buttons over a hidden tick-box).
+// Required ones are always answered; optional ones only when the profile gives the answer.
+async function _answerYesNoButtons(page, job) {
+  const qs = await page.evaluate(() => {
+    const out = [];
+    document.querySelectorAll('[data-jobai-yn]').forEach(e => e.removeAttribute('data-jobai-yn'));
+    for (const box of document.querySelectorAll('div')) {
+      const btns = [...box.children].filter(c => c.tagName === 'BUTTON');
+      if (btns.length !== 2 || !box.offsetParent) continue;
+      const texts = btns.map(b => (b.innerText || '').trim().toLowerCase());
+      if (texts[0] !== 'yes' || texts[1] !== 'no') continue;
+      if (btns.some(b => b.getAttribute('aria-pressed') === 'true')) continue;
+      const entry = box.closest('[class*="fieldEntry"], fieldset, [class*="field"], [class*="question"]') || box.parentElement;
+      const lab = entry && entry.querySelector('label, legend');
+      const q = (lab && lab.innerText || '').replace(/\s+/g, ' ').trim();
+      if (!q) continue;
+      const i = out.length;
+      btns.forEach((b, j) => b.setAttribute('data-jobai-yn', `${i}-${j}`));
+      out.push({ i, q, required: !!(lab && /required/i.test(lab.className)) || /[*✱]\s*$/.test(q) });
+    }
+    return out;
+  }).catch(() => []);
+  for (const { i, q, required } of qs) {
+    const question = q.replace(/\s*[*✱]\s*$/, '');
+    const yn = _yesNoForQuestion(question);
+    let chosen = yn ? (yn === 'yes' ? 'Yes' : 'No') : null;
+    if (!chosen && required) chosen = await _aiPickOption(question, ['Yes', 'No'], job);
+    if (!chosen) { if (required) console.log(`  [ATS] ⚠ No answer for Yes/No: "${question.substring(0, 50)}"`); continue; }
+    const sel = `[data-jobai-yn="${i}-${chosen === 'Yes' ? 0 : 1}"]`;
+    try { await page.click(sel, { timeout: 2500 }); } catch (_) { await page.$eval(sel, el => el.click()).catch(() => {}); }
+    console.log(`  [ATS] Yes/No "${question.substring(0, 40)}" → "${chosen}"`);
+    await J(400, 700);
+  }
+}
+
+// Tick-box groups that work like a question ("Have you worked at Spotify before? No / Yes -
+// Intern / Yes - Full Time", or an equality question): pick one option, as for radios.
+// Equality questions get "Prefer not to say"; other optional groups are left alone.
+async function _answerCheckboxGroups(page, job) {
+  const groups = await page.evaluate(() => {
+    const labelOf = (cb) => { const l = (cb.id && document.querySelector(`label[for="${CSS.escape(cb.id)}"]`)) || cb.closest('label'); return ((l && l.innerText) || cb.getAttribute('aria-label') || cb.value || '').replace(/\s+/g, ' ').trim(); };
+    const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
+    const all = [...document.querySelectorAll('input[type="checkbox"]')].filter(shown);
+    const used = new Set(), out = [];
+    for (const cb of all) {
+      if (used.has(cb)) continue;
+      // The group: boxes sharing a name, or the nearest container of boxes and nothing else.
+      let members = cb.name ? all.filter(x => x.name === cb.name) : [];
+      let box = null;
+      if (members.length >= 2) {
+        box = cb.parentElement;
+        while (box && !members.every(m => box.contains(m))) box = box.parentElement;
+      } else {
+        let c = cb.parentElement;
+        for (let i = 0; i < 4 && c; i++, c = c.parentElement) {
+          const inner = [...c.querySelectorAll('input, select, textarea')].filter(x => x.type !== 'hidden');
+          if (inner.some(x => x.type !== 'checkbox')) break;
+          if (inner.length >= 2) { box = c; members = inner.filter(shown); }
+        }
+      }
+      if (!box || members.length < 2) continue;
+      members.forEach(m => used.add(m));
+      const options = members.map(labelOf);
+      const optSet = new Set(options.map(t => t.toLowerCase()));
+      let q = '';
+      for (let node = box, i = 0; node && i < 5 && !q; node = node.parentElement, i++) {
+        for (const c of node.querySelectorAll('legend, label, h3, h4, p, [class*="label" i], [class*="question" i], [class*="title" i]')) {
+          const t = (c.innerText || '').replace(/\s+/g, ' ').trim();
+          if (t && t.length >= 3 && t.length < 300 && !optSet.has(t.toLowerCase()) && !options.some(o => o && t.includes(o) && t.length < o.length + 4)) { q = t; break; }
+        }
+      }
+      const required = members.some(m => m.required || m.getAttribute('aria-required') === 'true') || /[*✱]\s*$/.test(q);
+      const gi = out.length;
+      members.forEach((m, j) => m.setAttribute('data-jobai-cb', `${gi}-${j}`));
+      out.push({ gi, q, options, required, anyChecked: members.some(m => m.checked) });
+    }
+    return out;
+  }).catch(() => []);
+
+  for (const g of groups) {
+    if (g.anyChecked || !g.q) continue;
+    const q = g.q.replace(/\s*[*✱]\s*$/, '');
+    const demo = DEMOGRAPHIC_RE.test(q);
+    if (!g.required && !demo) continue;
+    if (/pronoun/i.test(q)) continue;
+    let chosen = demo
+      ? g.options.find(t => /prefer not|decline|don.?t wish|do not wish|rather not|not to (say|answer|disclose)/i.test(t)) || null
+      : _pickRadioOption(q, g.options) || await _aiPickOption(q, g.options, job);
+    if (!chosen) { if (g.required) console.log(`  [ATS] ⚠ No answer for tick-box question: "${q.substring(0, 50)}"`); continue; }
+    const j = g.options.indexOf(chosen);
+    const sel = `[data-jobai-cb="${g.gi}-${j}"]`;
+    let ok = false;
+    try { await page.check(sel, { timeout: 2500 }); } catch (_) {}
+    ok = await page.$eval(sel, el => el.checked).catch(() => false);
+    if (!ok) {
+      await page.$eval(sel, el => { const l = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label'); (l || el).click(); }).catch(() => {});
+      ok = await page.$eval(sel, el => el.checked).catch(() => false);
+    }
+    console.log(`  [ATS] ${ok ? 'Tick-box' : '⚠ Tick-box NOT set'} "${q.substring(0, 40)}" → "${chosen}"`);
+    await J(200, 400);
   }
 }
 
@@ -236,7 +383,7 @@ async function _radioGroupSetTo(page, groupName, chosenText) {
       const w = r.closest('[role="radio"]');
       const checked = r.checked || (w && w.getAttribute('aria-checked') === 'true');
       if (!checked) continue;
-      const lab = r.closest('label'); let t = (lab && lab.innerText || '').trim();
+      const lab = r.closest('label') || (r.labels && r.labels[0]); let t = (lab && lab.innerText || '').trim();
       if (!t && w) { const wl = w.getAttribute('aria-labelledby'); if (wl) for (const tok of wl.split(' ')) if (/radio_label/i.test(tok)) { const e = document.getElementById(tok); if (e && (e.innerText || '').trim()) { t = e.innerText.trim(); break; } } }
       if (!t) t = r.value;
       const a = t.trim().toLowerCase(), b = String(want).trim().toLowerCase();
@@ -275,14 +422,20 @@ async function _fillStep(page, job) {
         if (el && await el.isVisible()) {
           // Custom dropdowns (role=combobox) need an option picked, not typed text: _answerComboboxes.
           if ((await el.getAttribute('role').catch(() => '')) === 'combobox') break;
-          if (await el.inputValue().catch(() => '')) break;
-          await _setValue(el, val);
+          const cur = await el.inputValue().catch(() => '');
+          // A phone box pre-filled with just the dial code ("+44") still needs the number.
+          const dialOnly = val === phone && /^\s*\+\d{1,4}\s*$/.test(cur);
+          if (cur && !dialOnly) break;
+          await _setValue(el, dialOnly && !/^\s*\+/.test(val) ? `${cur.trim()} ${String(val).replace(/^\s*0/, '')}` : val);
           await J(80, 150);
           break;
         }
       } catch (_) {}
     }
   }
+
+  // Yes/No answered first: the answer decides which follow-up questions appear.
+  await _answerYesNoButtons(page, job);
 
   // "Confirm your email" is a second email box: every empty one gets the email.
   if (email) {
@@ -365,7 +518,8 @@ async function _fillStep(page, job) {
   const groupsSeen = new Set();
   for (const radio of radios) {
     try {
-      if (!await radio.isVisible()) continue;
+      // Lever hides the real radio and shows only its label, so a visible label counts.
+      if (!await radio.evaluate(el => !!(el.offsetParent || (el.labels && [...el.labels].some(l => l.offsetParent)))).catch(() => false)) continue;
       const { groupName, legend, options } = await radio.evaluate(el => {
         const name = el.name || '';
         const allR = name ? Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`)) : [el];
@@ -417,7 +571,14 @@ async function _fillStep(page, job) {
       const alreadyChecked = await page.$eval(`input[type="radio"][name="${groupName}"]:checked`, () => true).catch(() => false);
       if (alreadyChecked) continue;
 
-      let chosen = _pickRadioOption(legend, options.map(o => o.text)) || await _aiPickOption(legend, options.map(o => o.text), job);
+      const texts = options.map(o => o.text);
+      // Equality questions (gender, ethnicity, disability, veteran): "Prefer not to say",
+      // never a guess. Spotted by the question, or by its options when the question isn't found.
+      const demo = DEMOGRAPHIC_RE.test(legend) || (texts.some(t => /prefer not|decline|choose not/i.test(t)) && texts.some(t => /\b(man|woman|male|female|asian|white|black|hispanic|veteran|disabilit)/i.test(t)));
+      let chosen = demo
+        ? texts.find(t => /prefer not|decline|don.?t wish|do not wish|rather not|choose not|not to (say|answer|disclose)/i.test(t))
+        : _pickRadioOption(legend, texts) || await _aiPickOption(legend, texts, job);
+      if (demo && !chosen) continue;
       // Last resort for a REQUIRED yes/no radio the rules and AI both left blank:
       // default to the affirmative. A blank required radio blocks the whole
       // submission, and someone who chose to apply is asserting fitness for the
@@ -436,17 +597,23 @@ async function _fillStep(page, job) {
           // 1) Playwright click on the VISIBLE proxy: the [role="radio"] wrapper is
           //    actionable; the real <input> is opacity:0 and just times out.
           if (opt.wrapperId) {
-            try { await page.click(`#${opt.wrapperId}`, { timeout: 2500 }); } catch (_) {}
+            try { await page.click(`[id="${opt.wrapperId}"]`, { timeout: 2500 }); } catch (_) {}
             ok = await _radioGroupSetTo(page, groupName, chosen);
           }
           // 2) DOM-click the wrapper / wrapping <label> (fires React's handler).
           if (!ok && opt.inputId) {
-            try { await page.$eval(`#${opt.inputId}`, el => { const p = el.closest('[role="radio"]') || el.closest('label') || el.parentElement; (p || el).click(); }); } catch (_) {}
+            try { await page.$eval(`[id="${opt.inputId}"]`, el => { const p = el.closest('[role="radio"]') || el.closest('label') || (el.labels && el.labels[0]) || el.parentElement; (p || el).click(); }); } catch (_) {}
             ok = await _radioGroupSetTo(page, groupName, chosen);
           }
           // 3) Last resort: force the input state + dispatch input/change.
           if (!ok && opt.inputId) {
-            try { await page.$eval(`#${opt.inputId}`, el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.click(); }); } catch (_) {}
+            try { await page.$eval(`[id="${opt.inputId}"]`, el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.click(); }); } catch (_) {}
+            ok = await _radioGroupSetTo(page, groupName, chosen);
+          }
+          // 4) Radios with no id (Lever): click the option's label by its place in the group.
+          if (!ok) {
+            const idx = options.indexOf(opt);
+            await page.$$eval(`input[type="radio"][name="${groupName}"]`, (els, i) => { const el = els[i]; if (!el) return; const l = el.closest('label') || (el.id && document.querySelector(`label[for="${el.id}"]`)); (l || el).click(); }, idx).catch(() => {});
             ok = await _radioGroupSetTo(page, groupName, chosen);
           }
           // React commits the checked state asynchronously after the click, so an
@@ -483,6 +650,8 @@ async function _fillStep(page, job) {
     } catch (_) {}
   }
 
+  await _answerCheckboxGroups(page, job);
+
   // Consent checkboxes. NOTE: no isVisible() guard — Workable's required consent
   // box is opacity:0 with a styled proxy, so isVisible() is false and it would be
   // silently skipped (leaving the form un-submittable). Gate on the label text.
@@ -494,12 +663,14 @@ async function _fillStep(page, job) {
         const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label') || el.parentElement;
         return { text: (lab?.innerText || '').toLowerCase(), id: el.id || '' };
       }).catch(() => ({ text: '', id: '' }));
-      if (!/agree|consent|terms|accept|gdpr|privacy|data protection|i have read/i.test(info.text)) continue;
+      if (!/agree|consent|terms|accept|gdpr|privacy|data protection|i have read|^\s*i understand|acknowledge/i.test(info.text)) continue;
+      // A future-jobs mailing list is the applicant's choice, not part of applying.
+      if (/future (job|role|opportunit|career)|marketing|newsletter|talent (pool|community)|contact me about/i.test(info.text)) continue;
       await J(200, 500);
       let done = false;
       try { await cb.check({ timeout: 2000 }); done = await cb.isChecked().catch(() => false); } catch (_) {}
-      if (!done && info.id) { try { await page.$eval(`#${info.id}`, el => { const l = el.closest('label') || el.parentElement; (l || el).click(); }); } catch (_) {} done = await cb.isChecked().catch(() => false); }
-      if (!done && info.id) { try { await page.$eval(`#${info.id}`, el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }); } catch (_) {} }
+      if (!done && info.id) { try { await page.$eval(`[id="${info.id}"]`, el => { const l = el.closest('label') || el.parentElement; (l || el).click(); }); } catch (_) {} done = await cb.isChecked().catch(() => false); }
+      if (!done && info.id) { try { await page.$eval(`[id="${info.id}"]`, el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }); } catch (_) {} }
     } catch (_) {}
   }
 }
@@ -532,7 +703,7 @@ async function _captchaBlocks(page) {
 }
 
 // ── Submit detection ───────────────────────────────────────────────────────
-// Why the last real submit didn't go through: 'captcha' | 'validation' | 'unconfirmed' |
+// Why the last real submit didn't go through: 'captcha' | 'email_code' | 'validation' | 'unconfirmed' |
 // 'empty' (required fields left blank) | 'sent'. Read by the Company Sites agent.
 let lastOutcome = null;
 async function _trySubmit(page, ats) {
@@ -594,13 +765,18 @@ async function _trySubmit(page, ats) {
             const t = (document.body?.innerText || '').toLowerCase();
             const success = /application (received|submitted)|thank you for applying|thanks for applying|successfully applied|we('| ha)ve received your|application complete/.test(t);
             const validationError = /please select|please (fill|complete)|this field is required|is required\b|please provide|please enter/.test(t);
-            const submitting = !!Array.from(document.querySelectorAll('button')).find(b => /submitting/i.test(b.innerText || ''));
+            // Recruitee shows only a spinner (no text) while sending: a busy, disabled or blank submit button is still submitting.
+            const submitting = !!Array.from(document.querySelectorAll('button')).find(b => /submitting/i.test(b.innerText || ''))
+              || !!Array.from(document.querySelectorAll('button[type="submit"], [aria-busy="true"]')).find(b => b.offsetParent && (b.getAttribute('aria-busy') === 'true' || b.disabled || !(b.innerText || '').trim()));
             const formGone = !document.querySelector('input[type="email"], input[name*="email" i]')
               && !Array.from(document.querySelectorAll('button')).some(b => /submit application|submitting/i.test(b.innerText || ''));
             const turnstile = /verify you are human/i.test(t);
-            return { success, validationError, submitting, formGone, turnstile };
+            // Greenhouse: "A verification code was sent to ... enter the 8-character code".
+            const emailCode = /verification code (was|has been) sent|enter the \d+-character code|security code/i.test(t);
+            return { success, validationError, submitting, formGone, turnstile, emailCode };
           }).catch(() => ({}));
           if (st.success || st.formGone) { console.log('  [ATS] ✓ Application submitted!'); lastOutcome = 'sent'; return true; }
+          if (st.emailCode) { console.log('  [ATS] ⚠ The site emailed a code to finish this application. NOT sent.'); lastOutcome = 'email_code'; return false; }
           if (await _captchaBlocks(page)) {
             console.log('  [ATS] ⚠ Human-verification (CAPTCHA) on this form — application NOT sent.');
             lastOutcome = 'captcha'; return false;
@@ -612,6 +788,46 @@ async function _trySubmit(page, ats) {
       }
     } catch (_) {}
   }
+  return false;
+}
+
+// ── Emailed security code ──────────────────────────────────────────────────
+// Greenhouse sometimes emails the applicant a code after Submit ("enter the 8-character
+// code to confirm you're a human"). The user reads it from their own inbox and types it
+// in the app; this enters it on the still-open form and submits again. True when the
+// site confirms; lastOutcome says why not ('email_code' = code refused, try again).
+async function submitEmailCode(page, code) {
+  const chars = String(code || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!chars) return false;
+  const visible = async (els) => { const out = []; for (const e of els) if (await e.isVisible().catch(() => false)) out.push(e); return out; };
+  // One box per character (Greenhouse), or a single code box.
+  let boxes = await visible(await page.$$('input[id^="security-input"], input[maxlength="1"]'));
+  if (boxes.length >= chars.length) {
+    for (let i = 0; i < chars.length; i++) { await boxes[i].click().catch(() => {}); await boxes[i].fill(chars[i]).catch(() => {}); await J(60, 140); }
+  } else {
+    boxes = await visible(await page.$$('input[name*="security" i], input[id*="security" i], input[aria-label*="code" i], input[autocomplete="one-time-code"]'));
+    if (!boxes.length) { lastOutcome = 'email_code'; return false; }
+    await _setValue(boxes[0], chars);
+  }
+  await J(500, 900);
+  for (const sel of ['button:has-text("Submit application")', 'button:has-text("Submit Application")', 'button[type="submit"]', 'button:has-text("Submit")']) {
+    const btn = await page.$(sel).catch(() => null);
+    if (btn && await btn.isVisible().catch(() => false) && await btn.isEnabled().catch(() => false)) { await btn.click().catch(() => {}); break; }
+  }
+  for (let i = 0; i < 15; i++) {
+    await J(1500, 2200);
+    const st = await page.evaluate(() => {
+      const t = (document.body?.innerText || '').toLowerCase();
+      return {
+        success: /application (received|submitted)|thank you for (applying|your interest)|thanks for applying|successfully applied|we('| ha)ve received your|application complete/.test(t) || /confirmation/.test(location.href),
+        wrong: /(invalid|incorrect|wrong|expired).{0,30}code|code.{0,30}(invalid|incorrect|expired|didn.t match)/.test(t),
+      };
+    }).catch(() => ({}));
+    if (st.success) { console.log('  [ATS] ✓ Application submitted with the emailed code!'); lastOutcome = 'sent'; return true; }
+    if (st.wrong) break;
+  }
+  console.log('  [ATS] ⚠ The code was not accepted. Application NOT sent.');
+  lastOutcome = 'email_code';
   return false;
 }
 
@@ -690,12 +906,37 @@ async function _buildAnswer(question, fieldType, job) {
   const fact = _workFact(question);
   if (fact !== undefined) return fact;
 
-  if (/cover letter|covering letter/i.test(q) || fieldType === 'textarea') {
-    return `Please see my attached CV for full details of my experience and qualifications. I am genuinely excited about the ${job.title} role at ${job.company} and believe my background makes me a strong fit. I am ${AVAIL_MAP[availability || 'immediately'] || 'immediately available'} and welcome the opportunity to discuss further.`;
+  const nameQ = q.replace(/[*✱:]/g, '').trim();
+  if (/^(full |legal |your )?name$/.test(nameQ)) return `${firstName} ${lastName}`.trim();
+  if (/^(first|given|forename)( name)?$/.test(nameQ)) return firstName || '';
+  if (/^(last|family|surname)( name)?$/.test(nameQ)) return lastName || '';
+
+  // Address from the profile ("15 Exchange Gardens, SW8 1BP"): the postcode is the part that
+  // looks like a UK postcode or US ZIP, the street is the rest.
+  if (/address|post ?code|postal|zip|street/i.test(q) && !/e-?mail|web/i.test(q)) {
+    const addr = String(cfg.APPLICANT.address || '').trim();
+    const pc = (addr.match(/\b[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}\b/i) || addr.match(/\b\d{5}(?:-\d{4})?\b/) || [''])[0].toUpperCase();
+    if (/post ?code|postal|zip/i.test(q)) return pc;
+    if (/line ?2|line two|apartment|suite/i.test(q)) return '';
+    return addr.replace(pc, '').replace(/[\s,]+$/, '').trim();
   }
+
+  // Questions for current students (asked only if "enrolled" is answered Yes): not the
+  // candidate's past degree.
+  if (/anticipated graduation|expected graduation|graduation date|institution (do )?you (currently )?attend|currently (enrolled|studying)/i.test(q)) return '';
+
+  // Links: only LinkedIn is in the profile. A "Website/Portfolio/GitHub" box (a textarea on
+  // some Greenhouse forms) is left blank, never given the cover letter.
+  if (/linkedin/i.test(q)) return linkedin || '';
+  if (/website|portfolio|github|gitlab|\burls?\b|twitter|\bx \(formerly|personal site|blog|behance|dribbble/i.test(q)) return '';
+
+  const coverLetter = `Please see my attached CV for full details of my experience and qualifications. I am genuinely excited about the ${job.title} role at ${job.company} and believe my background makes me a strong fit. I am ${AVAIL_MAP[availability || 'immediately'] || 'immediately available'} and welcome the opportunity to discuss further.`;
+  // Other textareas are real questions ("Why this role?", a scenario): the rules and AI
+  // below answer them, and the cover letter is only the fallback when the AI is unavailable.
+  if (/cover letter|covering letter/i.test(q) || (fieldType === 'textarea' && !q.trim())) return coverLetter;
   if (/notice period|availability|when can you start|available to start/i.test(q))
     return AVAIL_MAP[availability || 'immediately'] || 'Immediately available';
-  if (/salary|compensation|expected pay|remuneration|expected salary/i.test(q))
+  if (/salary|compensation|expected pay|remuneration|expected salary|desired annual|on target earnings|\bote\b/i.test(q))
     // Required salary fields block submit when the profile has no figure; a
     // "Negotiable" is honest, widely accepted, and unblocks the application.
     return salaryExpectation || 'Negotiable';
@@ -711,15 +952,18 @@ async function _buildAnswer(question, fieldType, job) {
   if (/linkedin/i.test(q))  return linkedin || '';
   if (/github/i.test(q))    return '';
   if (/pronoun/i.test(q))   return '';
-  if (/how did you hear|how.*find.*role|how.*learn/i.test(q)) return 'Job board / online search';
+  if (/(how|where) did you (hear|find|learn)|how.*find.*role|how.*learn/i.test(q)) return 'Job board / online search';
   if (/additional|tell us more|anything else|comments/i.test(q))
     return 'Please see my CV for a full overview of my experience. I am available for interview at your earliest convenience.';
-  if (/why.*role|why.*company|what.*attract|motivat/i.test(q)) {
+  if (/why.*role|why.*company|what.*attract|motivat|why (are you|do you want|would you like).*(interest|join|apply|work)|most interested in|interest(s|ed)? you (in|about)/i.test(q)) {
     const yrs = yearsExperience > 0 ? `${yearsExperience} years of` : 'solid';
     return `The ${job.title} position at ${job.company} closely aligns with my ${yrs} experience and I am excited about the opportunity to contribute my skills.`;
   }
 
   if (!q) return '';
+  // A form is re-checked several times; ask the AI each question once per form.
+  const cacheKey = `t:${fieldType}:${q}`;
+  if (_answerCache.has(cacheKey)) return _answerCache.get(cacheKey);
   try {
     if (await llmAvailable()) {
       const avail = AVAIL_MAP[availability || 'immediately'] || 'Immediately available';
@@ -751,12 +995,13 @@ Rules:
 - An open question gets 1 to 3 natural, professional sentences. No bullet points, no mention of AI.
 - If the facts don't answer it, reply with exactly: SKIP`;
       const answer = await llmChat(prompt);
-      if (/^\W*skip\W*$/i.test(String(answer || '').trim())) { console.log(`  [ATS] Not in your details, left blank: "${question.substring(0, 50)}"`); return ''; }
+      if (/^\W*skip\W*$/i.test(String(answer || '').trim())) { console.log(`  [ATS] Not in your details, left blank: "${question.substring(0, 50)}"`); _answerCache.set(cacheKey, ''); return ''; }
       if (answer?.trim()) {
         console.log(`  [ATS] AI: "${question.substring(0, 50)}" → "${answer.substring(0, 60)}"`);
+        _answerCache.set(cacheKey, answer.trim());
         return answer.trim();
       }
-    }
+    } else if (fieldType === 'textarea') return coverLetter;
   } catch (e) {
     console.log(`  [ATS] AI answer failed: ${e.message}`);
   }
@@ -768,7 +1013,7 @@ Rules:
 // whose options only exist while the menu is open. Open it, read the options, pick one with the
 // same rules/AI as native selects, then click it. Mouse events are dispatched in the page so this
 // works the same in Playwright and in the Chrome extension.
-const DEMOGRAPHIC_RE = /gender|ethnic|race|hispanic|latin[oax]|sexual|orientation|disab|neurodiver|veteran|pronoun|religio|age range|transgender|identity/i;
+const DEMOGRAPHIC_RE = /gender|ethnic|race|hispanic|latin[oax]|sexual|orientation|disab|neurodiver|veteran|pronoun|religio|age range|\bwhat age\b|\byour age\b|\bage (group|bracket)\b|how old|transgender|identity/i;
 async function _answerComboboxes(page, job) {
   // Re-find the dropdowns before each one: picking an answer re-renders the form, which can
   // replace later inputs and leave stale handles behind.
@@ -812,6 +1057,12 @@ async function _answerComboboxes(page, job) {
       await open(); await J(400, 700);
       let options = await readOptions();
       if (!options.length) { await box.press('Escape').catch(() => {}); await J(300, 500); await open(); await J(900, 1300); options = await readOptions(); }
+      // Ashby's search dropdowns open from the arrow button beside the box, or the Down key.
+      if (!options.length) {
+        await box.evaluate(el => { const b = el.parentElement && el.parentElement.querySelector('button'); if (b) b.click(); }).catch(() => {});
+        await J(600, 900); options = await readOptions();
+        if (!options.length) { await box.focus().catch(() => {}); await box.press('ArrowDown').catch(() => {}); await J(600, 900); options = await readOptions(); }
+      }
       // A short "Location / City" search box, not a question that merely mentions the location.
       const isLocation = q.length <= 45 && /\b(location|city|town)\b|where.*(live|based)/i.test(q) && !/right to work|visa|sponsor|relocat|willing/i.test(q);
       if (!options.length || isLocation) {
@@ -859,8 +1110,23 @@ async function _answerComboboxes(page, job) {
 }
 
 // ── Rule-based dropdown picker ─────────────────────────────────────────────
+// "Which office / work location do you prefer?": the option naming the candidate's city
+// (best if it also names their home country). Null when it isn't such a question or no
+// option names the city (the AI then picks, knowing where they live).
+function _pickLocationOption(question, optionTexts) {
+  if (!/(prefer|preferred|which).*(office|location|site|hub)|(office|work) location/i.test(question || '')) return null;
+  const city = (cfg.APPLICANT.location || '').split(',')[0].trim().toLowerCase();
+  // Home = where they have the right to work (the profile country can be a search setting).
+  const rtw = (cfg.APPLICANT.rightToWorkCountries || [])[0] || cfg.APPLICANT.country || '';
+  const home = /united states|\busa?\b/i.test(rtw) ? /\bus\b|usa|united states/i : /\buk\b|united kingdom|britain|england/i;
+  const hasCity = (t) => city && t.toLowerCase().includes(city);
+  return optionTexts.find(t => hasCity(t) && home.test(t)) || optionTexts.find(hasCity) || null;
+}
+
 function _pickDropdownOption(question, options) {
   const q = (question || '').toLowerCase();
+  const loc = _pickLocationOption(question, options.map(o => o.text));
+  if (loc) return loc;
   const yn = _yesNoForQuestion(question);
   if (yn === 'yes') return options.find(o => /^\s*yes\b/i.test(o.text))?.text || options.find(o => /authoris|eligible|citizen/i.test(o.text))?.text || null;
   if (yn === 'no')  return options.find(o => /^\s*no\b/i.test(o.text))?.text || null;
@@ -884,6 +1150,8 @@ function _pickDropdownOption(question, options) {
 // ── Rule-based radio picker ────────────────────────────────────────────────
 function _pickRadioOption(question, optionTexts) {
   const q = (question || '').toLowerCase();
+  const loc = _pickLocationOption(question, optionTexts);
+  if (loc) return loc;
   const yn = _yesNoForQuestion(question);
   if (yn === 'yes') return optionTexts.find(t => /^\s*yes\b/i.test(t)) || null;
   if (yn === 'no')  return optionTexts.find(t => /^\s*no\b/i.test(t)) || null;
@@ -931,14 +1199,21 @@ function _workFact(question) {
 // ── AI option picker ───────────────────────────────────────────────────────
 async function _aiPickOption(question, optionTexts, job) {
   if (!question || !optionTexts.length) return null;
+  const cacheKey = `o:${question}|${optionTexts.join('|')}`;
+  if (_answerCache.has(cacheKey)) return _answerCache.get(cacheKey);
+  const picked = await _aiPickOptionUncached(question, optionTexts, job);
+  _answerCache.set(cacheKey, picked);
+  return picked;
+}
+async function _aiPickOptionUncached(question, optionTexts, job) {
   try {
     if (!await llmAvailable()) return null;
-    const { firstName, lastName, yearsExperience, availability, rightToWorkCountries, country } = cfg.APPLICANT;
+    const { firstName, lastName, yearsExperience, availability, rightToWorkCountries, country, location } = cfg.APPLICANT;
     const home = country === 'United States' ? 'US' : 'UK';
     const homeRe = home === 'US' ? /\bus\b|usa|united states|america/i : /uk|united kingdom|britain/i;
     const AVAIL_MAP = { 'immediately': 'Immediately', '1week': '1 week', '2weeks': '2 weeks', '1month': '1 month', '3months': '3 months' };
     const prompt =
-`You are completing a job application for ${firstName} ${lastName} (${yearsExperience} yrs experience, availability: ${AVAIL_MAP[availability] || 'immediately'}, right to work ${home}: ${(rightToWorkCountries||[]).some(c=>homeRe.test(c))}, requires visa sponsorship: ${_yesNoForQuestion('require sponsorship') === 'yes'}).
+`You are completing a job application for ${firstName} ${lastName} (${yearsExperience} yrs experience, lives in ${location || country || home}, availability: ${AVAIL_MAP[availability] || 'immediately'}, right to work ${home}: ${(rightToWorkCountries||[]).some(c=>homeRe.test(c))}, requires visa sponsorship: ${_yesNoForQuestion('require sponsorship') === 'yes'}).
 
 ${(() => { const D = cfg.TRAC_DETAILS || {}; const w = (D.employment || []).slice(0, 5).map((e) => `- ${e.jobTitle || ''} at ${e.employer || ''} (${e.start || '?'} to ${e.end || 'present'})`).join('\n'); const ed = (D.education || []).slice(0, 3).map((e) => `- ${[e.qualification || e.subject, e.institution || e.school || e.place, e.end || e.year].filter(Boolean).join(', ')}`).join('\n'); return (w ? `Work history (newest first):\n${w}\n` : '') + (ed ? `Education:\n${ed}\n` : ''); })()}
 Question: "${question}"
@@ -973,4 +1248,4 @@ function formUrl(url) {
   return m ? `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}` : url;
 }
 
-module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, formUrl, lastSubmitOutcome: () => lastOutcome };
+module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, submitEmailCode, formUrl, lastSubmitOutcome: () => lastOutcome };

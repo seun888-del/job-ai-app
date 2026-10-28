@@ -40,6 +40,13 @@ export async function feedJobs(country) {
     .filter((j) => j.jobId !== 'gh_');
 }
 
+// Tell the backend how a send went, so employers whose form always stops for a human
+// (captcha, emailed code) drop out of the feed. Only the job URL and outcome are sent.
+function reportOutcome(url, outcome) {
+  if (!url || !outcome) return;
+  fetch(`${BACKEND}/v1/jobs/outcome`, { method: 'POST', headers: { ...llm.headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ url, outcome }), signal: AbortSignal.timeout(10000) }).catch(() => {});
+}
+
 // Job description: Greenhouse's job API, otherwise the posting page's text.
 export async function fetchJD(job) {
   const m = String(job.url).match(/greenhouse[^/]*\/([^/]+)\/jobs\/(\d+)/i);
@@ -124,10 +131,11 @@ export class AtsAgent extends SiteAgent {
     await this.ensurePage();
     await this.page.goto(atsFiller.formUrl(job.url));
     await sleep(1500 + Math.random() * 1500);
-    if (await blocked(this.page)) return this.park(job, 'The site asked for a human check.');
+    if (await blocked(this.page)) { reportOutcome(job.url, 'captcha'); return this.park(job, 'The site asked for a human check.'); }
     const r = await atsFiller.fillExternalForm(this.page, job, job.cvPath, ats, { submit: true });
+    reportOutcome(job.url, r === true ? 'sent' : atsFiller.lastSubmitOutcome());
     if (r === true) return true;
-    const why = { captcha: 'The site asked for a human check.', validation: 'A question needs your answer.', empty: 'A question needs your answer.', unconfirmed: "The site didn't confirm it. Check your email before sending again." }[atsFiller.lastSubmitOutcome()] || 'Needs you to finish it.';
+    const why = { captcha: 'The site asked for a human check.', email_code: 'The site emailed you a code to finish it.', validation: 'A question needs your answer.', empty: 'A question needs your answer.', unconfirmed: "The site didn't confirm it. Check your email before sending again." }[atsFiller.lastSubmitOutcome()] || 'Needs you to finish it.';
     return this.park(job, why);
   }
 

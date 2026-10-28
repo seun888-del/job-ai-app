@@ -1298,3 +1298,6 @@ textarea.tracd { resize: vertical; }
 /* USA region: NHS (Trac) applications are UK-only. */
 .region-us #nhs-apps-section,
 .region-us #card-ready { display: none !important; }
+
+/* ── Emailed code box ───────────────────────────────────────────────────────── */
+.code-input { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 22px; letter-spacing: 0.3em; text-align: center; text-transform: uppercase; padding: 12px 10px; }

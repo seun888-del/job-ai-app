@@ -34,6 +34,26 @@ const { launchPersistentContext, connectToRunningChrome, spawnChromeWithCdp, wat
 const path        = require('path');
 
 const DELAY         = ms => new Promise(r => setTimeout(r, ms));
+
+// Emailed security codes: the agent asks the app for the code the site emailed the user
+// (a [[JOBAI_CODE_NEEDED]] line the app turns into a pop-up) and waits for the app to
+// write "CODE <jobId> <code>" or "SKIP <jobId>" to stdin. Null on skip or after 15 min.
+const CODE_WAIT_MS = 15 * 60 * 1000;
+const codeWaiters = new Map();
+require('readline').createInterface({ input: process.stdin }).on('line', (line) => {
+  const m = String(line).trim().match(/^(CODE|SKIP)\s+(\S+)(?:\s+(\S+))?$/);
+  const done = m && codeWaiters.get(m[2]);
+  if (done) done(m[1] === 'CODE' ? m[3] || null : null);
+});
+function askForCode(job, attempt) {
+  return new Promise((resolve) => {
+    const finish = (code) => { clearTimeout(timer); codeWaiters.delete(String(job.jobId)); resolve(code); };
+    const timer = setTimeout(() => finish(null), CODE_WAIT_MS);
+    codeWaiters.set(String(job.jobId), finish);
+    console.log('[[JOBAI_CODE_NEEDED]]' + JSON.stringify({ jobId: String(job.jobId), title: job.title, company: job.company, retry: attempt > 0 }));
+  });
+}
+const codeResult = (job, ok) => console.log('[[JOBAI_CODE_RESULT]]' + JSON.stringify({ jobId: String(job.jobId), ok }));
 const POLL_INTERVAL = 10000;   // 10 s between queue polls
 const MAX_IDLE      = 6;       // give up after ~60 s of no pending/ready jobs
 
@@ -330,10 +350,20 @@ async function phase2_applyReadyCVs(browser) {
           await DELAY(1500 + Math.random() * 1500);
           sent = (await atsFiller.fillExternalForm(page, job, job.cvPath, ats, { submit: true })) === true;
           outcome = atsFiller.lastSubmitOutcome();
+          // The site emailed the user a code: ask for it (two tries), with the form held open.
+          for (let attempt = 0; !sent && outcome === 'email_code' && attempt < 2; attempt++) {
+            console.log(`  [Auto-Apply] ${job.company} emailed you a code to finish this application. Waiting for it in the app.`);
+            const code = await askForCode(job, attempt);
+            if (!code) { codeResult(job, false); break; }
+            sent = await atsFiller.submitEmailCode(page, code);
+            outcome = atsFiller.lastSubmitOutcome();
+            if (sent || attempt === 1) codeResult(job, sent);
+          }
         } catch (err) {
           if (err.launchFailed) { queue.update(job.jobId, { status: 'cv_ready' }); throw err; }
           outcome = 'error: ' + err.message.slice(0, 60);
         }
+        jobFeed.reportOutcome(job.url, sent ? 'sent' : outcome);
         if (sent) {
           queue.update(job.jobId, { status: 'applied' });
           queue.markApplied(job.jobId);
@@ -341,7 +371,7 @@ async function phase2_applyReadyCVs(browser) {
           console.log(`  [Auto-Apply] ✓ Applied [${ats}]: ${job.title}`);
         } else {
           // 'unconfirmed' may have gone through: say so, so it isn't sent twice blindly.
-          const why = { captcha: 'The site asked for a human check.', validation: 'A question needs your answer.', empty: 'A question needs your answer.', unconfirmed: "The site didn't confirm it. Check your email before sending again." }[outcome] || 'Needs you to finish it.';
+          const why = { captcha: 'The site asked for a human check.', email_code: 'The site emailed you a code to finish it.', validation: 'A question needs your answer.', empty: 'A question needs your answer.', unconfirmed: "The site didn't confirm it. Check your email before sending again." }[outcome] || 'Needs you to finish it.';
           queue.update(job.jobId, { status: 'ready_to_submit', reason: why + ' ' + READY_REASON });
           console.log(`  [Auto-Apply] Not sent (${outcome || 'unknown'}), ready for you to send: ${job.title}`);
         }

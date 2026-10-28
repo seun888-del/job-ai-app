@@ -2,15 +2,104 @@
 // Every function the shared agent code runs inside a web page, bundled by id.
 module.exports = {
   "f93d8a3ef8df9": el => el.files?.length || 0,
-  "f49ce31054c78": els => els.filter(el => el.offsetParent !== null && !el.value && el.type !== 'radio' && el.type !== 'checkbox').length,
+  "fa970bfd884c6": () => {
+    const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
+    const textOf = (e) => {
+      const l = (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label');
+      const w = e.closest('fieldset, [class*="field"], [class*="question"], [class*="Question"]');
+      const wl = w && w.querySelector('legend, label, [class*="label"]');
+      return ((wl && wl.innerText) || (l && l.innerText) || e.getAttribute('aria-label') || e.name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    };
+    const pickedNear = (e) => {
+      let box = e.parentElement;
+      for (let i = 0; i < 5 && box && box.parentElement && box.parentElement.querySelectorAll('input[role="combobox"]').length <= 1; i++) box = box.parentElement;
+      const v = box && box.querySelector('[class*="single-value"],[class*="singleValue"],[class*="multi-value"],[class*="multiValue"]');
+      return !!(v && v.textContent.trim());
+    };
+    const out = [], seen = new Set();
+    for (const e of document.querySelectorAll('input, textarea, select')) {
+      if (['hidden', 'file', 'submit', 'button'].includes(e.type) || /recaptcha|captcha/i.test(e.name || '') || !shown(e)) continue;
+      if (!(e.required || e.getAttribute('aria-required') === 'true')) continue;
+      if (e.type === 'radio' || e.type === 'checkbox') {
+        if (seen.has(e.name)) continue;
+        seen.add(e.name);
+        const group = e.name ? [...document.querySelectorAll(`input[name="${CSS.escape(e.name)}"]`)] : [e];
+        if (!group.some(r => r.checked || (r.closest('[role="radio"],[role="checkbox"]') || { getAttribute: () => '' }).getAttribute('aria-checked') === 'true')) out.push(textOf(e));
+        continue;
+      }
+      if (String(e.value || '').trim() || pickedNear(e)) continue;
+      out.push(textOf(e));
+    }
+    return [...new Set(out)];
+  },
+  "f8fcfea8a925b": () => {
+    const out = [];
+    document.querySelectorAll('[data-jobai-yn]').forEach(e => e.removeAttribute('data-jobai-yn'));
+    for (const box of document.querySelectorAll('div')) {
+      const btns = [...box.children].filter(c => c.tagName === 'BUTTON');
+      if (btns.length !== 2 || !box.offsetParent) continue;
+      const texts = btns.map(b => (b.innerText || '').trim().toLowerCase());
+      if (texts[0] !== 'yes' || texts[1] !== 'no') continue;
+      if (btns.some(b => b.getAttribute('aria-pressed') === 'true')) continue;
+      const entry = box.closest('[class*="fieldEntry"], fieldset, [class*="field"], [class*="question"]') || box.parentElement;
+      const lab = entry && entry.querySelector('label, legend');
+      const q = (lab && lab.innerText || '').replace(/\s+/g, ' ').trim();
+      if (!q) continue;
+      const i = out.length;
+      btns.forEach((b, j) => b.setAttribute('data-jobai-yn', `${i}-${j}`));
+      out.push({ i, q, required: !!(lab && /required/i.test(lab.className)) || /[*✱]\s*$/.test(q) });
+    }
+    return out;
+  },
   "f6bf25fe2b85d": el => el.click(),
-  "fb54ef45a195a": ({ name, want }) => {
+  "fa77ab52b1714": () => {
+    const labelOf = (cb) => { const l = (cb.id && document.querySelector(`label[for="${CSS.escape(cb.id)}"]`)) || cb.closest('label'); return ((l && l.innerText) || cb.getAttribute('aria-label') || cb.value || '').replace(/\s+/g, ' ').trim(); };
+    const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
+    const all = [...document.querySelectorAll('input[type="checkbox"]')].filter(shown);
+    const used = new Set(), out = [];
+    for (const cb of all) {
+      if (used.has(cb)) continue;
+      // The group: boxes sharing a name, or the nearest container of boxes and nothing else.
+      let members = cb.name ? all.filter(x => x.name === cb.name) : [];
+      let box = null;
+      if (members.length >= 2) {
+        box = cb.parentElement;
+        while (box && !members.every(m => box.contains(m))) box = box.parentElement;
+      } else {
+        let c = cb.parentElement;
+        for (let i = 0; i < 4 && c; i++, c = c.parentElement) {
+          const inner = [...c.querySelectorAll('input, select, textarea')].filter(x => x.type !== 'hidden');
+          if (inner.some(x => x.type !== 'checkbox')) break;
+          if (inner.length >= 2) { box = c; members = inner.filter(shown); }
+        }
+      }
+      if (!box || members.length < 2) continue;
+      members.forEach(m => used.add(m));
+      const options = members.map(labelOf);
+      const optSet = new Set(options.map(t => t.toLowerCase()));
+      let q = '';
+      for (let node = box, i = 0; node && i < 5 && !q; node = node.parentElement, i++) {
+        for (const c of node.querySelectorAll('legend, label, h3, h4, p, [class*="label" i], [class*="question" i], [class*="title" i]')) {
+          const t = (c.innerText || '').replace(/\s+/g, ' ').trim();
+          if (t && t.length >= 3 && t.length < 300 && !optSet.has(t.toLowerCase()) && !options.some(o => o && t.includes(o) && t.length < o.length + 4)) { q = t; break; }
+        }
+      }
+      const required = members.some(m => m.required || m.getAttribute('aria-required') === 'true') || /[*✱]\s*$/.test(q);
+      const gi = out.length;
+      members.forEach((m, j) => m.setAttribute('data-jobai-cb', `${gi}-${j}`));
+      out.push({ gi, q, options, required, anyChecked: members.some(m => m.checked) });
+    }
+    return out;
+  },
+  "f281df73ea86f": el => el.checked,
+  "f984ff3b07e9e": el => { const l = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label'); (l || el).click(); },
+  "f1b11dedd0ea7": ({ name, want }) => {
     const rs = Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`));
     for (const r of rs) {
       const w = r.closest('[role="radio"]');
       const checked = r.checked || (w && w.getAttribute('aria-checked') === 'true');
       if (!checked) continue;
-      const lab = r.closest('label'); let t = (lab && lab.innerText || '').trim();
+      const lab = r.closest('label') || (r.labels && r.labels[0]); let t = (lab && lab.innerText || '').trim();
       if (!t && w) { const wl = w.getAttribute('aria-labelledby'); if (wl) for (const tok of wl.split(' ')) if (/radio_label/i.test(tok)) { const e = document.getElementById(tok); if (e && (e.innerText || '').trim()) { t = e.innerText.trim(); break; } } }
       if (!t) t = r.value;
       const a = t.trim().toLowerCase(), b = String(want).trim().toLowerCase();
@@ -18,7 +107,7 @@ module.exports = {
     }
     return false;
   },
-  "f4e85bb821ce6": el => {
+  "fc2ca7da7c7f4": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         // Also accept a WRAPPING <label> (no for=) — Workable nests the input
         // inside a <label> whose text is the question, with no fieldset/aria at
@@ -33,7 +122,7 @@ module.exports = {
         const label = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || wl?.innerText || '').trim();
         return { label, placeholder: el.placeholder || '' };
       },
-  "f4bc31026ff3c": el => {
+  "fd57881f394f5": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const fs   = el.closest('fieldset');
@@ -44,7 +133,8 @@ module.exports = {
         const options  = Array.from(el.options).map(o => ({ val: o.value, text: o.text.trim() })).filter(o => o.val && o.val !== '0');
         return { question, options };
       },
-  "f31ac98430d87": el => {
+  "fc2e0d667fec4": el => !!(el.offsetParent || (el.labels && [...el.labels].some(l => l.offsetParent))),
+  "fb8c197215e66": el => {
         const name = el.name || '';
         const allR = name ? Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`)) : [el];
         // Option text: label[for] / wrapping <label> / the radio's parent text
@@ -90,12 +180,13 @@ module.exports = {
         return { groupName: name, legend: q, options };
       },
   "f24044144b7ba": () => true,
-  "f3241c962bcca": el => {
+  "f4fbbb957bca8": el => {
           const w = el.closest('[role="radio"],fieldset'); return el.required || el.getAttribute('aria-required') === 'true' || (w && w.getAttribute('aria-required') === 'true');
         },
-  "fac87df65c852": el => { const p = el.closest('[role="radio"]') || el.closest('label') || el.parentElement; (p || el).click(); },
+  "f4d9d6c3d9a53": el => { const p = el.closest('[role="radio"]') || el.closest('label') || (el.labels && el.labels[0]) || el.parentElement; (p || el).click(); },
   "f347f48337a5c": el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.click(); },
-  "fb6a826e37db5": el => {
+  "f473f1b370347": (els, i) => { const el = els[i]; if (!el) return; const l = el.closest('label') || (el.id && document.querySelector(`label[for="${el.id}"]`)); (l || el).click(); },
+  "f71ae9f4c43c1": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const fs   = el.closest('fieldset');
@@ -104,22 +195,22 @@ module.exports = {
         const wl   = wrap?.querySelector('label, legend, [class*="label"]');
         return (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || wl?.innerText || el.placeholder || el.getAttribute('aria-label') || '').trim();
       },
-  "fef8298953616": el => {
+  "f3bf7b89e9a4e": el => {
         const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label') || el.parentElement;
         return { text: (lab?.innerText || '').toLowerCase(), id: el.id || '' };
       },
   "fb76b21ebf7e0": el => { const l = el.closest('label') || el.parentElement; (l || el).click(); },
   "f03b4b2773ef4": el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); },
-  "fa08702decda5": () => {
+  "fb9acdf14d91a": () => {
     const el = document.querySelector('input[name="cf-turnstile-response"], input[name*="turnstile" i], input[name="g-recaptcha-response"]');
     return !!(el && el.value && el.value.length > 20);
   },
-  "ffc9ff588cfa3": () => {
+  "f58c6f6269920": () => {
     const shown = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 60 && r.height > 60 && cs.visibility !== 'hidden' && cs.display !== 'none' && cs.opacity !== '0'; };
     const challenge = [...document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[title*="challenge" i], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"], iframe[src*="captcha-delivery"]')].some(shown);
     return challenge || /verify you are human|slide right to secure|are you a robot/i.test(document.body?.innerText || '');
   },
-  "f635c2c739280": () => {
+  "f5f36b20a688f": () => {
     let fields = 0, radios = 0, boxes = 0;
     for (const el of document.querySelectorAll('input[required], select[required], textarea[required]')) {
       if (el.offsetParent === null) continue;
@@ -138,17 +229,28 @@ module.exports = {
     }
     return { fields, radios, boxes };
   },
-  "f9a642fa9955b": () => {
+  "f17724d6ac189": () => {
             const t = (document.body?.innerText || '').toLowerCase();
             const success = /application (received|submitted)|thank you for applying|thanks for applying|successfully applied|we('| ha)ve received your|application complete/.test(t);
             const validationError = /please select|please (fill|complete)|this field is required|is required\b|please provide|please enter/.test(t);
-            const submitting = !!Array.from(document.querySelectorAll('button')).find(b => /submitting/i.test(b.innerText || ''));
+            // Recruitee shows only a spinner (no text) while sending: a busy, disabled or blank submit button is still submitting.
+            const submitting = !!Array.from(document.querySelectorAll('button')).find(b => /submitting/i.test(b.innerText || ''))
+              || !!Array.from(document.querySelectorAll('button[type="submit"], [aria-busy="true"]')).find(b => b.offsetParent && (b.getAttribute('aria-busy') === 'true' || b.disabled || !(b.innerText || '').trim()));
             const formGone = !document.querySelector('input[type="email"], input[name*="email" i]')
               && !Array.from(document.querySelectorAll('button')).some(b => /submit application|submitting/i.test(b.innerText || ''));
             const turnstile = /verify you are human/i.test(t);
-            return { success, validationError, submitting, formGone, turnstile };
+            // Greenhouse: "A verification code was sent to ... enter the 8-character code".
+            const emailCode = /verification code (was|has been) sent|enter the \d+-character code|security code/i.test(t);
+            return { success, validationError, submitting, formGone, turnstile, emailCode };
           },
-  "f98b62e23b18f": el => {
+  "f37b54efac2b8": () => {
+      const t = (document.body?.innerText || '').toLowerCase();
+      return {
+        success: /application (received|submitted)|thank you for (applying|your interest)|thanks for applying|successfully applied|we('| ha)ve received your|application complete/.test(t) || /confirmation/.test(location.href),
+        wrong: /(invalid|incorrect|wrong|expired).{0,30}code|code.{0,30}(invalid|incorrect|expired|didn.t match)/.test(t),
+      };
+    },
+  "f9fea4f6b111d": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const alb = el.getAttribute('aria-labelledby') || '';
@@ -159,13 +261,13 @@ module.exports = {
         const chosen = control && control.querySelector('[class*="single-value"],[class*="singleValue"],[class*="multi-value"],[class*="multiValue"]');
         return { question, has: !!(chosen && chosen.textContent.trim()) };
       },
-  "f68f2d02c3905": el => {
+  "f3c8066d77ad1": el => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
         const opts = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent);
         return opts.map(o => (o.innerText || o.textContent || '').trim());
       },
-  "f2e0ed16954c2": el => {
+  "f24fcff94188c": el => {
         el.focus();
         // react-select only opens on the full pointer + mouse sequence (a lone mousedown is ignored).
         const ctl = el.closest('[class*="control"]') || el.parentElement;
@@ -174,7 +276,8 @@ module.exports = {
           ctl.dispatchEvent(new E(t, { bubbles: true, cancelable: true, button: 0, view: window, pointerType: 'mouse' }));
         }
       },
-  "f104fc7478ef5": (el, want) => {
+  "f8a7cb68b42c2": el => { const b = el.parentElement && el.parentElement.querySelector('button'); if (b) b.click(); },
+  "f1ff3593896ac": (el, want) => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
         const opt = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent)

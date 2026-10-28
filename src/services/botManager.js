@@ -284,7 +284,16 @@ function stopAll() {
   for (const botName of Object.keys(bots)) stop(botName);
 }
 
+// Write one line to a running agent's stdin (e.g. the emailed code the user typed in).
+function sendToBot(botName, line) {
+  const proc = bots[botName] && bots[botName].proc;
+  if (!proc || !proc.stdin || proc.stdin.destroyed) return false;
+  proc.stdin.write(String(line).replace(/[\r\n]+/g, ' ') + '\n');
+  return true;
+}
+
 module.exports = {
+  sendToBot,
   start,
   stop,
   stopAll,
