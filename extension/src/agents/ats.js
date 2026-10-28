@@ -95,6 +95,8 @@ export class AtsAgent extends SiteAgent {
       if (atsFiller.ACCOUNT_REQUIRED_ATS.has(ats)) continue;
       // SmartRecruiters shows a puzzle after a few automated visits: leave it out.
       if (ats === 'smartrecruiters') continue;
+      // A required video or file upload can never go out unattended: skip before any CV tailoring.
+      if (await httpSubmit.recruiteeNeedsMedia(job.url)) { await store.addJob({ ...job, source: this.source, status: 'skipped', reason: 'Asks for a video or file upload' }); continue; }
       const description = await fetchJD(job);
       await this.queueIfWanted(job, { ...job, description });
       await sleep(800);
@@ -125,6 +127,7 @@ export class AtsAgent extends SiteAgent {
       }, ask: questionAi.recruiteeAsk(job, job.cvText) });
       if (r.submitted) return true;
       // A required question the profile can't answer: never guess, hand it over.
+      if (r.reason === 'needs_media') return 'Asks for a video or file upload';
       if (r.reason === 'needs_you') return this.park(job, 'A question needs your answer.');
       return { error: `${ats} did not accept the application (${r.reason}${r.status ? ' ' + r.status : ''})` };
     }
