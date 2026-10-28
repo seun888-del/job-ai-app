@@ -1,6 +1,8 @@
 // Everything the user gives Job-AI lives here, on this device only (chrome.storage.local).
-// Nothing is sent anywhere except the AI requests needed to write answers, which go to the
+// Nothing is sent anywhere except the AI requests needed to write answers, and the title,
+// company and link of each application sent (for the user's receipt email), which go to the
 // licensed Job-AI backend exactly like the desktop app.
+import llm from '../shims/llm.js';
 
 const DEFAULTS = {
   license: { key: '' },
@@ -37,13 +39,20 @@ export function addJob(job) {
     return { save: true, value: true };
   });
 }
-export function updateJob(jobId, fields) {
-  return withJobs((all) => {
+export async function updateJob(jobId, fields) {
+  let applied = null;
+  const r = await withJobs((all) => {
     const j = all.find((x) => x.jobId === jobId);
     if (!j) return { value: null };
+    if (fields.status === 'applied' && j.status !== 'applied') applied = { title: j.title, company: j.company, url: j.url };
     Object.assign(j, fields, { updatedAt: new Date().toISOString() });
     return { save: true, value: j };
   });
+  // Newly applied: the backend emails the user a receipt (same as the app). Fire and forget.
+  if (applied && applied.title) {
+    fetch(`${llm.BACKEND}/v1/jobs/applied`, { method: 'POST', headers: { ...llm.headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(applied), signal: AbortSignal.timeout(15000) }).catch(() => {});
+  }
+  return r;
 }
 export async function byStatus(status, source) { return (await jobs()).filter((j) => j.status === status && (!source || j.source === source)); }
 // Tailored jobs waiting to be sent (fresh only, see the app's countReadyBacklog).

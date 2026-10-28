@@ -110,4 +110,16 @@ function reportOutcome(url, outcome) {
   }).catch(() => {});
 }
 
-module.exports = { enabled, fetchReedStubs, fetchAtsJobs, reportOutcome };
+// Each application sent: the backend emails the user a receipt (it skips repeats and
+// anyone who turned these emails off). Fire and forget.
+function reportApplied({ title, company, url }) {
+  if (!licenseKey() || !title) return;
+  fetch(`${backendUrl()}/v1/jobs/applied`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${licenseKey()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, company, url }),
+    signal: AbortSignal.timeout(15000),
+  }).catch(() => {});
+}
+
+module.exports = { enabled, fetchReedStubs, fetchAtsJobs, reportOutcome, reportApplied };
