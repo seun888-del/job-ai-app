@@ -246,4 +246,55 @@ Return ONLY JSON: {"answers":[{"id":<id>,"value":<string or null>}]}`;
   } catch (e) { console.log('  [AI] Form answers failed: ' + (e && e.message ? e.message : e)); return out; }
 }
 
-module.exports = { aiPickOption, aiTextAnswer, aiFillFields, isSensitiveQuestion, aiEnabled, _matchOption };
+// The `ask` hook for ats_http_submit's Recruitee apply: answers a required question the
+// profile doesn't cover, from the candidate's CV for this job (cvText). Experience and
+// skills only get a "yes" when the CV shows them; practical yes/no questions (own laptop,
+// internet, working hours) get "yes"; anything it can't know comes back null and the job
+// waits for the user. No CV text, no AI: the caller hands the job over instead.
+// Sensitive questions never reach the model (isSensitiveQuestion).
+function recruiteeAsk(job, cvText) {
+  const cv = String(cvText || '').replace(/\s+\n/g, '\n').slice(0, 6000);
+  return async (q) => {
+    if (!cv || !aiEnabled() || isSensitiveQuestion(q.body)) return null;
+    const choice = /choice/.test(q.kind), yesNo = q.kind === 'boolean';
+    if (!choice && !yesNo && q.kind !== 'string' && q.kind !== 'text') return null;
+    const opts = choice ? (q.options || []).filter((o) => o && o.text) : [];
+    const ck = _key('rq:' + q.kind, q.body + '|' + (job && job.title), opts);
+    let v = _cache.get(ck);
+    if (v === undefined) {
+      const shape = yesNo ? 'Reply {"answer": true} or {"answer": false}.'
+        : choice ? `Reply {"answer": "<one option copied exactly>"}. OPTIONS:\n${opts.map((o) => '- ' + o.text).join('\n')}`
+        : q.kind === 'text' ? 'Reply {"answer": "<2 to 4 sentences in the first person>"}.'
+        : 'Reply {"answer": "<a few words or a number>"}.';
+      const prompt =
+`You are filling in a job application for the candidate whose CV is below. Answer ONLY from facts in the CV and profile. Rules:
+- Experience, skills, tools, industries, sales or management history, qualifications, licences: say yes / describe them ONLY if the CV shows them. If the CV does not show it, answer false, pick the "none" style option, or for a written answer reply {"answer": null}.
+- Practical yes/no questions about the candidate's setup or willingness (own laptop or computer, internet connection, a mobile phone, working hours, working remotely, being self-employed or commission-based): answer true.
+- If the answer needs a fact you cannot know from the CV (device specs, processor, a document they hold, a number not in the CV), reply {"answer": null}.
+- Never invent employers, years or tools.
+
+PROFILE:
+${_profileBlock(job)}
+
+CV:
+${cv}
+
+QUESTION: ${q.body}
+${shape} Respond with ONLY that JSON.`;
+      try {
+        const parsed = _extractJson(await llm.llmChat(prompt, TIMEOUT_MS));
+        v = parsed && parsed.answer != null && parsed.answer !== '' ? parsed.answer : null;
+      } catch (err) {
+        console.log(`  [AI] question fallback failed: ${(err && err.message) || err}`);
+        return null; // not cached: a busy backend shouldn't stick
+      }
+      _cache.set(ck, v);
+    }
+    if (v == null) return null;
+    if (yesNo) return v === true || /^(true|yes)$/i.test(String(v));
+    if (choice) { const o = _matchOption(String(v), opts); return o ? o.text : null; }
+    return String(v);
+  };
+}
+
+module.exports = { aiPickOption, aiTextAnswer, aiFillFields, recruiteeAsk, isSensitiveQuestion, aiEnabled, _matchOption };

@@ -27,35 +27,70 @@ function attachCv(fd, field, cvPath) {
 }
 
 // Answer one Recruitee required open question from the applicant profile.
-// Deterministic (no LLM — this module is shared app+web): covers the common
-// right-to-work / sponsorship / salary / availability questions from the profile.
-// Anything else comes back unknown:true, and the caller hands the job to the user
-// instead of sending a guess (a "Yes" to a skill or licence they don't have).
+// Deterministic (no LLM — this module is shared app+web): covers right to work,
+// sponsorship, salary, availability, where the applicant lives, postcode, phone,
+// driving licence and gender from the profile. Anything else comes back unknown:true;
+// the caller may pass an `ask` hook (the app's AI) to answer those, otherwise the job
+// is handed to the user instead of sending a guess.
+const UK_POSTCODE = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
+const US_ZIP = /\b(\d{5})(?:-\d{4})?\b/;
 function answerRecruiteeQuestion(q, a = {}) {
-  const body = String(q.body || '').replace(/<[^>]+>/g, ' ').toLowerCase();
+  const body = String(q.body || '').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').toLowerCase();
+  const opts = (q.open_question_options || []).map((o) => ({ id: o.id, text: String(o.body || '') }));
   const rtw = a.rightToWorkCountries || [];
   const us = a.country === 'United States';
-  const home = us ? /\bus\b|usa|united states|america/i : /uk|united kingdom|britain/i;
+  const home = us ? /\bus\b|usa|united states|america/i : /\buk\b|united kingdom|britain|england|scotland|wales/i;
   const hasRtW = Array.isArray(rtw) ? rtw.some((c) => home.test(c)) : home.test(String(rtw));
   const needsSponsor = typeof a.requiresSponsorship === 'boolean' ? a.requiresSponsorship : !hasRtW;
-  if (q.kind === 'boolean') {
-    if (/sponsor/.test(body)) return { id: q.id, kind: 'boolean', answer: needsSponsor };
-    if (/right to work|eligible to work|authori[sz]|legally.*work/.test(body)) return { id: q.id, kind: 'boolean', answer: hasRtW };
-    // "Are you based in the UK?": answered from where the applicant lives, when known.
-    if (/based in|located in|living in|resid/.test(body) && home.test(body) && a.country) return { id: q.id, kind: 'boolean', answer: home.test(a.country) };
-    if (/privacy|consent|data protection|gdpr|i (confirm|agree|accept)|terms/.test(body)) return { id: q.id, kind: 'boolean', answer: true };
-    return { id: q.id, kind: 'boolean', answer: null, unknown: true };
+  const where = [a.address, a.location].filter(Boolean).join(', ');
+  const livesHome = a.country ? home.test(a.country) : null;
+  const unknown = { id: q.id, kind: q.kind, answer: q.kind === 'boolean' ? null : '', unknown: true, body: String(q.body || '').replace(/<[^>]+>/g, ' ').trim(), options: opts };
+  if (q.kind === 'boolean' || q.kind === 'legal') {
+    const yes = (v) => ({ id: q.id, kind: 'boolean', answer: v });
+    if (/sponsor/.test(body)) return yes(needsSponsor);
+    if (/right to work|eligible to work|authori[sz]|legally.*work/.test(body)) return yes(hasRtW);
+    // "Do you live in the UK?" / "Are you a UK resident?": from where the applicant lives.
+    if (/\blive in|based in|located in|living in|resid/.test(body) && home.test(body) && livesHome != null) return yes(livesHome);
+    if (/mobile|phone number/.test(body) && (!home.test(body) || livesHome)) return yes(!!a.phone);
+    if (/driv(er|ing)['’]?s? licen[cs]e/.test(body) && !/passport/.test(body)) return yes(!!a.drivingLicence);
+    if (/passport or driv|driv.* or passport/.test(body) && a.drivingLicence) return yes(true);
+    if (/privacy|consent|data protection|gdpr|i (confirm|agree|accept)|terms/.test(body) || q.kind === 'legal') return yes(true);
+    return unknown;
   }
-  if (q.kind === 'salary') return a.salaryExpectation ? { id: q.id, kind: 'salary', answer: a.salaryExpectation } : { id: q.id, kind: 'salary', answer: '', unknown: true };
+  if (q.kind === 'salary') return a.salaryExpectation ? { id: q.id, kind: 'salary', answer: a.salaryExpectation } : unknown;
+  if (/gender|\bsex\b/.test(body) && opts.length) {
+    // The profile's own answer (matching "Male" to "M" too), else "Prefer not to say".
+    const g = String(a.eeoGender || '').trim().toLowerCase();
+    const pick = (/^(male|female)$/.test(g) && opts.find((o) => [g, g[0]].includes(o.text.trim().toLowerCase())))
+      || opts.find((o) => /prefer not|rather not|decline/i.test(o.text));
+    return pick ? { id: q.id, kind: q.kind, answer: pick.text } : unknown;
+  }
+  if (q.kind === 'string' || q.kind === 'text') {
+    if (/salary|pay expectation/.test(body) && a.salaryExpectation) {
+      const yearly = Number(String(a.salaryExpectation).replace(/[^\d.]/g, ''));
+      return { id: q.id, kind: q.kind, answer: /month/.test(body) && yearly > 1000 ? String(Math.round(yearly / 12)) : String(a.salaryExpectation) };
+    }
+    if (/post\s*code|postal code|zip/.test(body)) {
+      const m = where.match(us ? US_ZIP : UK_POSTCODE);
+      return m ? { id: q.id, kind: q.kind, answer: m[1].toUpperCase() } : unknown;
+    }
+    if (/city|town/.test(body) && a.location) return { id: q.id, kind: q.kind, answer: /country/.test(body) ? `${a.location}, ${a.country || ''}`.replace(/, $/, '') : a.location };
+    if (/where .*(live|reside|based)/.test(body) && a.location) return { id: q.id, kind: q.kind, answer: `${a.location}, ${a.country || ''}`.replace(/, $/, '') };
+  }
+  if (q.kind === 'date' && /start|availab/.test(body)) {
+    const d = new Date(); const wk = /(\d+)\s*week/i.exec(a.availability || ''); const mo = /(\d+)\s*month/i.exec(a.availability || '');
+    d.setDate(d.getDate() + (wk ? 7 * +wk[1] : mo ? 30 * +mo[1] : 1));
+    return { id: q.id, kind: 'date', answer: d.toISOString().slice(0, 10) };
+  }
   if (/notice period|availability|when can you start/.test(body) && a.availability) return { id: q.id, kind: q.kind, answer: a.availability };
-  if (/year.*experience|how many year/.test(body) && a.yearsExperience != null && a.yearsExperience !== '') return { id: q.id, kind: q.kind, answer: String(a.yearsExperience) };
-  return { id: q.id, kind: q.kind, answer: '', unknown: true };
+  if (/year.*experience|how many year/.test(body) && /^(string|text|number|numeric)$/.test(q.kind) && a.yearsExperience != null && a.yearsExperience !== '') return { id: q.id, kind: q.kind, answer: String(a.yearsExperience) };
+  return unknown;
 }
 
 // ── Recruitee — documented open POST (no auth) ──────────────────────────────
 // POST https://{company}.recruitee.com/api/offers/{slug}/candidates
 // careers_url shape: https://{company}.recruitee.com/o/{slug}
-async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions, dryRun }) {
+async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions, dryRun, ask }) {
   const m = String(url || '').match(/https?:\/\/([^.]+)\.recruitee\.com\/(?:o|offers)\/([^/?#]+)/i);
   if (!m) return { ok: false, reason: 'unparseable_recruitee_url' };
   const [, company, slug] = m;
@@ -75,8 +110,20 @@ async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions,
     } catch (_) { /* fall through — submit without answers, may 422 (creates nothing) */ }
   }
 
-  // A required question the profile can't answer: don't guess, let the user send it.
-  if (Array.isArray(questions) && questions.some((q) => q && q.unknown)) return { ok: false, reason: 'needs_you' };
+  // Questions the profile can't answer go to the caller's `ask` hook (the app's AI, which
+  // never answers sensitive ones). Video and file questions can't be answered over HTTP.
+  if (Array.isArray(questions) && typeof ask === 'function') {
+    for (const q of questions) {
+      if (!q || !q.unknown || /^(video|file)$/.test(q.kind)) continue;
+      try {
+        const v = await ask(q);
+        if (v != null && v !== '') { q.answer = v; q.unknown = false; }
+      } catch (_) { /* stays unknown */ }
+    }
+  }
+  // A required question still unanswered: don't guess, let the user send it.
+  const open = Array.isArray(questions) ? questions.filter((q) => q && q.unknown) : [];
+  if (open.length) return { ok: false, reason: 'needs_you', questions: open.map((q) => q.body || q.kind) };
 
   const fd = new FormData();
   const name = `${applicant.firstName || ''} ${applicant.lastName || ''}`.trim();
@@ -96,6 +143,9 @@ async function submitRecruitee({ url, applicant, cvPath, coverLetter, questions,
       if (q.kind === 'boolean') {
         const yes = q.answer === true || /^(yes|true|1)$/i.test(String(q.answer));
         fd.append(`${base}[flag]`, yes ? 'true' : 'false');
+      } else if (q.kind === 'multi_choice') {
+        // Choice answers carry the option text (Recruitee's documented shape; unverified live).
+        fd.append(`${base}[multi_content][]`, String(q.answer == null ? '' : q.answer));
       } else {
         fd.append(`${base}[content]`, String(q.answer == null ? '' : q.answer));
       }

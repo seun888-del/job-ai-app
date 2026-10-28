@@ -12,6 +12,7 @@ import { SiteAgent } from './base.js';
 
 const atsFiller = require('../../../bot/modules/ats_filler');
 const httpSubmit = require('../../../bot/modules/ats_http_submit');
+const questionAi = require('../../../bot/modules/question_ai');
 const llm = require('../shims/llm.js');
 const titleMatch = require('../../../bot/modules/title_match');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -120,7 +121,8 @@ export class AtsAgent extends SiteAgent {
         firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone, country: A.country,
         rightToWorkCountries: A.rightToWorkCountries, requiresSponsorship: A.requiresSponsorship,
         salaryExpectation: A.salaryExpectation, yearsExperience: A.yearsExperience, availability: A.availability,
-      } });
+        location: A.location, address: A.address, drivingLicence: A.drivingLicence, eeoGender: A.eeoGender,
+      }, ask: questionAi.recruiteeAsk(job, job.cvText) });
       if (r.submitted) return true;
       // A required question the profile can't answer: never guess, hand it over.
       if (r.reason === 'needs_you') return this.park(job, 'A question needs your answer.');

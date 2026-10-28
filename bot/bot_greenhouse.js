@@ -29,6 +29,7 @@ const jobFeed     = require('./modules/job_feed');
 const stealth     = require('./modules/stealth');
 const atsFiller   = require('./modules/ats_filler');
 const httpSubmit  = require('./modules/ats_http_submit');
+const questionAi  = require('./modules/question_ai');
 const reed        = require('./modules/reed');
 const { launchPersistentContext, connectToRunningChrome, spawnChromeWithCdp, watchForManualClose, BROWSER_CLOSED_RE } = require('./modules/browser_launcher');
 const path        = require('path');
@@ -45,6 +46,12 @@ require('readline').createInterface({ input: process.stdin }).on('line', (line) 
   const done = m && codeWaiters.get(m[2]);
   if (done) done(m[1] === 'CODE' ? m[3] || null : null);
 });
+// The tailored CV's text, so the AI answers application questions from it.
+async function readCvText(cvPath) {
+  try { return cvPath ? (await require('pdf-parse')(require('fs').readFileSync(cvPath))).text : ''; }
+  catch (_) { return ''; }
+}
+
 function askForCode(job, attempt) {
   return new Promise((resolve) => {
     const finish = (code) => { clearTimeout(timer); codeWaiters.delete(String(job.jobId)); resolve(code); };
@@ -388,12 +395,14 @@ async function phase2_applyReadyCVs(browser) {
       console.log(`  [Auto-Apply] Applying${SUBMIT ? '' : ' (DRY RUN)'} [${ats} · HTTP]: ${job.title} @ ${job.company}`);
       try {
         const A = cfg.APPLICANT || {};
+        const cvText = await readCvText(job.cvPath);
         const r = await httpFn({ url: job.url, applicant: {
           firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone, country: A.country,
           // Needed to auto-answer Recruitee's required questions (RTW/sponsorship/salary).
           rightToWorkCountries: A.rightToWorkCountries, requiresSponsorship: A.requiresSponsorship,
           salaryExpectation: A.salaryExpectation, yearsExperience: A.yearsExperience, availability: A.availability,
-        }, cvPath: job.cvPath, coverLetter: job.coverLetter || '', dryRun: !SUBMIT });
+          location: A.location, address: A.address, drivingLicence: A.drivingLicence, eeoGender: A.eeoGender,
+        }, cvPath: job.cvPath, coverLetter: job.coverLetter || '', dryRun: !SUBMIT, ask: questionAi.recruiteeAsk(job, cvText) });
 
         if (r.submitted) {
           queue.update(job.jobId, { status: 'applied' });
@@ -405,9 +414,10 @@ async function phase2_applyReadyCVs(browser) {
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', `Dry run — ${ats} not submitted`);
           console.log(`  [Auto-Apply] ✓ Dry run — NOT submitted [${ats}]: ${job.title}`);
         } else if (r.reason === 'needs_you') {
-          // A required question isn't covered by the profile: never guess it, hand it over.
+          // A required question neither the profile nor the AI could answer (a video, or a
+          // sensitive question the profile doesn't cover): never guess it, hand it over.
           queue.update(job.jobId, { status: 'ready_to_submit', reason: READY_REASON });
-          console.log(`  [Auto-Apply] A question needs your answer, ready for you to send: ${job.title}`);
+          console.log(`  [Auto-Apply] A question needs your answer, ready for you to send: ${job.title} (${(r.questions || []).join(' | ').slice(0, 160)})`);
         } else {
           queue.update(job.jobId, { status: 'apply_failed', error: `${r.reason}${r.status ? ' ' + r.status : ''}` });
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'APPLY_FAILED', `${ats} not accepted (${r.reason})`);

@@ -134,6 +134,6 @@ export async function scoreJob(job, log) {
   try { coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, raw); } catch (_) {}
   // "Review before applying" (Search preferences): hold it for the user, as the app does.
   const review = !!((await store.get('settings')) || {}).reviewBeforeApply;
-  await store.updateJob(job.jobId, { status: review ? 'awaiting_review' : 'cv_ready', cvPath: paths.saved, cvScore: score, cvName: cv.label || cv.name, ...(coverLetter ? { coverLetter } : {}) });
+  await store.updateJob(job.jobId, { status: review ? 'awaiting_review' : 'cv_ready', cvPath: paths.saved, cvScore: score, cvName: cv.label || cv.name, cvText: cvText.slice(0, 8000), ...(coverLetter ? { coverLetter } : {}) });
   log(review ? `✓ CV tailored (${score}%), waiting for your review: ${jobTitle}` : `✓ CV tailored (${score}%): ${jobTitle}`);
 }
