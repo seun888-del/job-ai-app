@@ -334,7 +334,7 @@ async function processJob(job) {
       const missingSet = new Set((bestMissing || []).map((k) => String(k).toLowerCase()));
       const tailoredStruct = await tailorStructured(
         baseStruct, jobTitle, job.description, bestMissing, bestRawCvText,
-        { matchedKeywords: bestAllKeywords.filter((k) => k && k.term && !missingSet.has(String(k.term).toLowerCase())) }
+        { matchedKeywords: bestAllKeywords.filter((k) => k && k.term && !missingSet.has(String(k.term).toLowerCase())), uk: !/united states|^us(a)?$/i.test(String(cfg.APPLICANT.country || '')) }
       );
 
       // Header hardening. PDF text extraction can corrupt the header (mangled

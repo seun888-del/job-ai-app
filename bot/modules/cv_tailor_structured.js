@@ -25,35 +25,48 @@
 const { llmAvailable, llmChat } = require('../../src/services/llm');
 const { focusJD } = require('./jd_focus');
 
-// Bullets per role by recency, so the CV stays easy to skim: latest job 5, the one before 4,
-// the next 3, older jobs 2. The bullets kept are the ones that best match the advert, and
-// every role keeps at least 2, so no job disappears.
-const BULLETS_BY_ROLE = [5, 4, 3];
-const bulletCap = (roleIndex) => BULLETS_BY_ROLE[roleIndex] || 2;
+// Bullets per role by recency: latest job 6, the one before 5, the next 4, older jobs 3.
+// The bullets kept are the ones that best match the advert, a bullet with a result
+// (a number) is always kept, and every role keeps at least 2, so no job disappears.
+const BULLETS_BY_ROLE = [6, 5, 4];
+const bulletCap = (roleIndex) => BULLETS_BY_ROLE[roleIndex] || 3;
+const hasResult = (b) => /\d/.test(String(b).replace(/\b(19|20)\d{2}\b/g, ''));
+const numbersIn = (t) => (String(t).match(/\d[\d,]*\.?\d*%?/g) || []).map((n) => n.replace(/,/g, ''));
 const REFUSAL_RE = /\b(cannot|can't|i'm sorry|i am sorry|unable to|not able to|as an ai)\b/i;
 
 // Empty CV clichés that read as filler to a recruiter — banned from every rewrite.
-const CLICHE_BAN = 'Never use empty CV clichés such as "hardworking", "team player", "results-driven", "detail-oriented", "go-getter", "passionate", "self-starter", "dynamic", "proactive", "synergy" or "thought leader".';
+const CLICHE_BAN = 'Never use empty CV clichés such as "hardworking", "team player", "results-driven", "detail-oriented", "go-getter", "passionate", "self-starter", "dynamic", "proactive", "synergy", "proven ability", "proven track record" or "thought leader".';
 
-function firstLine(s) { return String(s || '').split('\n').map(x => x.trim()).find(Boolean) || ''; }
 
 // ── Subtitle ────────────────────────────────────────────────────────────────
-async function tailorSubtitle(currentSubtitle, jobTitle, jdExcerpt) {
-  const prompt = `You are updating the headline under a candidate's name on their CV to match a job they are applying for.
+// The advert's own job title, cleaned in code: "Linux Desktop Support Engineer (London UK
+// office)" -> "Linux Desktop Support Engineer", "Senior Support Engineer II" -> "Senior Support
+// Engineer". The AI version produced fragments like "Enterprise Service Desk".
+function headlineFromJobTitle(jobTitle, fallback) {
+  const t = String(jobTitle || '')
+    .replace(/\s*[([].*?[)\]]\s*/g, ' ')
+    .split(/\s+[-–—|]\s+/)[0]
+    .replace(/\s+(I{1,3}|IV|[1-4])\s*$/, '')
+    .replace(/\s{2,}/g, ' ').trim().replace(/[,;:]+$/, '');
+  return t.length >= 3 && t.split(/\s+/).length <= 8 ? t : fallback;
+}
 
-JOB TITLE: ${jobTitle}
-
-CURRENT HEADLINE: ${currentSubtitle}
-
-Return ONE short headline (3 to 7 words) that mirrors the job title above, optionally keeping a relevant second descriptor from the current headline. No quotes, no label, no explanation — just the headline text on a single line.`;
-  try {
-    const out = firstLine(await llmChat(prompt, 30000));
-    const cleaned = out.replace(/^["'\s]+|["'\s]+$/g, '').replace(/\*/g, '');
-    if (cleaned && cleaned.length >= 3 && cleaned.length <= 70 && !REFUSAL_RE.test(cleaned)) {
-      return cleaned;
-    }
-  } catch (_) {}
-  return currentSubtitle;
+// ── House style ─────────────────────────────────────────────────────────────
+// One consistent style across original and reworded lines, so the CV never reads as
+// half machine-written: capital first letter, no full stop at the end, UK spelling for UK users.
+const US_TO_UK = [
+  [/\b(standardi|optimi|prioriti|organi|utili|reali|speciali|recogni|summari|categori|centrali|customi|minimi|maximi|authori|digiti|moderni|stabili|visuali|synchroni|initiali|capitali|familiari|emphasi|criti)z(e|es|ed|ing|ation|ations)\b/gi, '$1s$2'],
+  [/\b(colo|behavio|favo|hono|labo|neighbo)r(s|ed|ing)?\b/gi, '$1ur$2'],
+  [/\bcenter(s|ed)?\b/gi, 'centre$1'],
+  [/\bcatalog(s)?\b/gi, 'catalogue$1'],
+  [/\benroll(s|ment)?\b/gi, 'enrol$1'],
+];
+function houseStyle(line, uk) {
+  let t = String(line || '').trim().replace(/\s{2,}/g, ' ');
+  t = t.replace(/\btroubleshooted\b/gi, (m) => (m[0] === 'T' ? 'Troubleshot' : 'troubleshot'));
+  if (uk) for (const [re, to] of US_TO_UK) t = t.replace(re, to);
+  t = t.replace(/[.;]+$/, '');
+  return t ? t[0].toUpperCase() + t.slice(1) : t;
 }
 
 // ── Professional summary ─────────────────────────────────────────────────────
@@ -73,27 +86,31 @@ ${jdExcerpt}
 CURRENT SUMMARY:
 ${profile}
 ${kwLine}
-Rewrite the summary so that:
-- It positions the candidate for THIS role, mirroring key terms from the job advert wherever they are genuinely true of them.
-- It foregrounds their most relevant real strengths and experience.
-- It reads as confident, natural professional prose — 2 to 4 sentences, no buzzword soup, no "I"/first-person, no bullet points.
+Write a NEW summary of exactly 3 sentences, 45 to 75 words in total, that a recruiter for THIS job reads in five seconds:
+1. Who they are for this role: their years of experience and their core area, in the advert's words where those words are true of them.
+2. Their single most relevant piece of proof for this job, taken from the CV below, including a real result or number if the CV gives one. Keep each result tied to what actually produced it in the CV.
+3. The two or three strengths from the CV that this advert asks for most.
+No "I", no first person, no bullet points, no buzzwords, no list of every tool they know.
 
 ${CLICHE_BAN}
 
 Absolute rules:
-- Do NOT invent or imply any tool, technology, certification, metric, number, seniority, or years of experience the CV does not already support.
-- Do NOT add quantified claims that weren't already there.
-Return ONLY the rewritten summary as a single paragraph — no label, no quotes, no commentary.`;
-  try {
-    const raw = (await llmChat(prompt, 30000)) || '';
-    const para = raw.replace(/^\s*(summary|profile)\s*[:\-]\s*/i, '').replace(/\s*\n+\s*/g, ' ').replace(/^["']+|["']+$/g, '').trim();
-    const maxLen = Math.max(700, Math.round(profile.length * 1.6));
-    if (para.length >= 40 && para.length <= maxLen
-        && !REFUSAL_RE.test(para.slice(0, 120))
-        && !introducesNewFacts(corpus, para)) {
-      return para;
-    }
-  } catch (_) {}
+- Use only facts in the CV. Do NOT invent or imply any tool, technology, sector, certification, metric, number, seniority, or years of experience the CV does not already state.
+- Every number must appear in the CV exactly as written.
+Return ONLY the summary as a single paragraph — no label, no quotes, no commentary.
+
+THE CANDIDATE'S CV (the only source of facts):
+${String(corpus).slice(0, 6000)}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const raw = (await llmChat(prompt, 30000)) || '';
+      const para = raw.replace(/^\s*(summary|profile)\s*[:\-]\s*/i, '').replace(/\s*\n+\s*/g, ' ').replace(/^["']+|["']+$/g, '').trim();
+      const words = para.split(/\s+/).length;
+      const why = words < 30 || words > 95 ? `${words} words` : REFUSAL_RE.test(para.slice(0, 120)) ? 'refusal' : introducesNewFacts(corpus, para) ? `new claim (${newFactsIn(corpus, para).join(', ')})` : '';
+      if (!why) return para;
+      console.log(`  [Tailor] Summary rewrite rejected: ${why}`);
+    } catch (_) {}
+  }
   return profile;
 }
 
@@ -176,19 +193,16 @@ function midSentenceNames(text) {
   return out;
 }
 
-function introducesNewFacts(originalCorpus, reworded) {
+// The tools, numbers, names and claims in `reworded` that the original text doesn't support.
+function newFactsIn(originalCorpus, reworded) {
   const orig = originalIndex(originalCorpus);
-  for (const tok of significantTokens(reworded)) {
-    if (!orig.has(tok)) return true;
-  }
-  for (const p of CLAIM_PHRASES) {
-    if (hasPhrase(reworded, p, 'i') && !hasPhrase(originalCorpus, p, 'i')) return true;
-  }
-  for (const name of midSentenceNames(reworded)) {
-    if (!hasPhrase(originalCorpus, name, '')) return true;
-  }
-  return false;
+  const out = [];
+  for (const tok of significantTokens(reworded)) if (!orig.has(tok)) out.push(tok);
+  for (const p of CLAIM_PHRASES) if (hasPhrase(reworded, p, 'i') && !hasPhrase(originalCorpus, p, 'i')) out.push(p);
+  for (const name of midSentenceNames(reworded)) if (!hasPhrase(originalCorpus, name, '')) out.push(name);
+  return out;
 }
+function introducesNewFacts(originalCorpus, reworded) { return newFactsIn(originalCorpus, reworded).length > 0; }
 
 // ── JD keyword biasing ───────────────────────────────────────────────────────
 // Common words that carry no signal when matching a bullet to a job advert.
@@ -224,32 +238,65 @@ function bulletJDScore(bullet, jdSet) {
 // natural, recruiter-grade prose tuned to the JD — without ever adding facts the
 // candidate didn't state (the anti-fabrication verifier below enforces this).
 // No-AI path: the same recency cap, keeping the bullets that best match the advert, unchanged.
+// Most job-relevant first; a bullet with a result always makes the cut.
+function rankBullets(bullets, jdSet, roleIndex) {
+  const ranked = (bullets || []).map((b, i) => ({ b, i, s: bulletJDScore(b, jdSet) }))
+    .sort((a, z) => z.s - a.s || a.i - z.i);
+  const cap = Math.max(2, bulletCap(roleIndex));
+  const keep = ranked.slice(0, cap);
+  for (const r of ranked.slice(cap)) {
+    if (!hasResult(r.b)) continue;
+    const drop = [...keep].reverse().find((k) => !hasResult(k.b));
+    if (drop) keep.splice(keep.indexOf(drop), 1, r);
+  }
+  return keep.sort((a, z) => z.s - a.s || a.i - z.i).map((r) => r.b);
+}
+
 function pickBullets(bullets, jdText, roleIndex) {
-  const jdSet = jdKeywordSet((jdText || '').substring(0, 3000));
-  return (bullets || []).map((b, i) => ({ b, i, s: bulletJDScore(b, jdSet) }))
-    .sort((a, z) => z.s - a.s || a.i - z.i).slice(0, bulletCap(roleIndex)).map(r => r.b);
+  return rankBullets(bullets, jdKeywordSet((jdText || '').substring(0, 3000)), roleIndex);
+}
+
+// The advert's wording for a skill counts as truthful in a bullet only when that bullet
+// already names the skill in some form ("AD" -> "Active Directory"). Terms the CV has
+// elsewhere (the skills list) are NOT allowed into a bullet that never mentioned them:
+// that is how "Windows Server" got planted into an unrelated SOP bullet.
+// Only short, plain wording can be swapped in ("tickets" -> "incidents"): a long advert phrase
+// reads as pasted in, and a product name ("Azure AD" for "Active Directory") is a different claim.
+// Only plain advert words may be swapped in: no product or tool names. A capitalised word
+// or an acronym ("Kandji", "MDM") is a name the CV must already show, not a swap.
+const swappable = (f) => f.split(/\s+/).length <= 3 && significantTokens(f).size === 0 && !/\b[A-Z][a-z]|\b[A-Z]{2,}\b/.test(f);
+function bulletCorpus(orig, matched) {
+  const forms = [];
+  for (const k of matched || []) {
+    const all = [k.term, ...(k.alts || [])].filter(Boolean);
+    if (all.some((f) => hasPhrase(orig, f, 'i'))) forms.push(...all.filter(swappable));
+  }
+  return orig + (forms.length ? '  ' + forms.join('  ') : '');
+}
+
+// Why a reworded bullet isn't safe to use, or '' when it is.
+function unsafeRewrite(orig, rw, matched) {
+  if (!rw) return 'missing';
+  const ow = orig.split(/\s+/).length, rwW = rw.split(/\s+/).length;
+  if (rwW > Math.max(ow + 6, Math.round(ow * 1.3))) return 'longer';
+  if (rwW < Math.min(ow, Math.round(ow * 0.6))) return 'lost detail';
+  const nums = numbersIn(rw);
+  if (numbersIn(orig).some((n) => !nums.includes(n))) return 'dropped a result';
+  const pasted = (matched || []).flatMap((k) => [k.term, ...(k.alts || [])]).find((f) => f && f.split(/\s+/).length > 3 && hasPhrase(rw, f, 'i') && !hasPhrase(orig, f, 'i'));
+  if (pasted) return `pasted advert phrase (${pasted})`;
+  const added = newFactsIn(bulletCorpus(orig, matched), rw);
+  return added.length ? `new claim (${added.join(', ')})` : '';
 }
 
 async function selectAndRewordBullets(role, jdExcerpt, roleIndex = 0, kw = {}) {
   const bullets = role.bullets || [];
   if (!bullets.length) return bullets;
 
-  // Rank the candidate's own bullets by how many job-advert terms they already
-  // contain, so both the model's choice AND the fallback favour the bullets most
-  // relevant to THIS job. This only reorders/selects existing bullets — it never
-  // changes their wording, so truthfulness is untouched.
-  const jdSet   = jdKeywordSet(jdExcerpt);
-  const ranked  = bullets
-    .map((b, i) => ({ b, i, s: bulletJDScore(b, jdSet) }))
-    .sort((a, z) => z.s - a.s || a.i - z.i);   // JD relevance desc, stable by original order
-  const ordered = ranked.map(r => r.b).slice(0, bulletCap(roleIndex));
+  // The candidate's own bullets, most job-relevant first. Selection never changes wording.
+  const ordered = rankBullets(bullets, jdKeywordSet(jdExcerpt), roleIndex);
+  const indexed = ordered.map((b, i) => `[${i + 1}] ${b}`).join('\n');
 
-  const indexed   = ordered.map((b, i) => `[${i + 1}] ${b}`).join('\n');
-  // Corpus for the anti-fabrication check. The advert's own wording for skills the CV
-  // already shows (e.g. "Active Directory" where the CV says "AD") counts as truthful.
-  const originals = bullets.join('  ') + (kw.corpus ? '  ' + kw.corpus : '');
-
-  const prompt = `You are rewriting CV bullet points so they read naturally and persuasively to a HUMAN recruiter for a specific job — not just to pass keyword filters. Make them genuinely strong, but stay 100% truthful to what the candidate actually did. Recruiters skim in seconds, so every bullet must be short, punchy and easy to scan — never a dense wall of text.
+  const prompt = `You are lightly editing a candidate's CV bullet points for one specific job. These are their real words and a recruiter should still recognise them as such. Most bullets need little or no change.
 
 JOB DESCRIPTION (excerpt):
 ${jdExcerpt}
@@ -258,42 +305,32 @@ ROLE: ${role.title} at ${role.company}
 ORIGINAL BULLETS:
 ${indexed}
 ${kw.line || ''}
-Task:
-1. The ORIGINAL BULLETS are already pre-ordered with the most job-relevant first. Rewrite EVERY one of them: return exactly ${ordered.length} bullets, in the same order, one rewritten bullet for each original. Never drop or merge bullets: they are the candidate's real experience.
-2. Rewrite each bullet using this shape wherever the source supports it:
-   ACTION (what they did) → HOW (the tool, system or method they used) → PURPOSE (why) → RESULT (the outcome).
-   - Open with a strong, varied action verb (never reuse the same opener twice).
-   - Only include a HOW (tool/system/process) or a RESULT (metric/outcome) when it is ALREADY present or clearly implied in that original bullet. If the original doesn't state a tool or a result, build the bullet from the parts that ARE there — never manufacture the missing element.
-   - Use the job advert's own terminology wherever it genuinely means the same thing as what the candidate wrote.
-   - It must read like a person wrote it, never like a keyword list.
+For each bullet, in order, return exactly one line:
+- If the bullet already reads well for this job, return it UNCHANGED.
+- Otherwise make the smallest edit that helps: swap a word for the advert's word when it means exactly the same thing the bullet already says (e.g. "tickets" -> "incidents"), or move the part that matters most to this job to the front.
+- Keep every tool, number, result and detail the bullet has. Never shorten it into a vaguer line.
+- Never add a tool, system, skill, sector, number or claim the bullet itself doesn't state, even if the candidate has it elsewhere.
+- Past tense for past roles; plain, natural English; no buzzwords.
 
 ${CLICHE_BAN}
 
-Strict truthfulness rules (absolute — these override everything above):
-- Do NOT invent or imply any tool, technology, certification, metric, number, employer, or achievement that is not already in that original bullet. Rephrasing only — no new facts.
-- Do NOT add quantified results (percentages, figures, counts) that weren't already stated.
-- Keep each bullet SHORT and scannable: ONE line, about 16 words or fewer. Cut filler words so a recruiter grasps it at a glance — never a long, multi-clause sentence.
-Return ONLY the rewritten bullets, one per line, each starting with "- ". No numbering, no commentary.`;
+Return exactly ${ordered.length} lines, one per bullet, each starting with "- ". No numbering, no commentary.`;
 
   try {
     const out = await llmChat(prompt, 30000);
     if (REFUSAL_RE.test(out.slice(0, 120))) throw new Error('refusal');
-    let lines = out.split('\n')
+    const lines = out.split('\n')
       .map(l => l.replace(/^\s*(?:\[\d+\]|[-•*]|\d+[.)])\s*/, '').trim())
       .filter(l => l.length > 15);
-    // Guideline hard-check: bullets must be short and scannable (~16 words).
-    // The prompt asks for it, but a model can drift — reject word-heavy lines
-    // outright so the ranked originals take their place instead.
-    const MAX_BULLET_WORDS = 24;
-    // One rewrite per original, in order. A rewrite that's missing, too long or adds a new
-    // fact is replaced by that original bullet, so no experience is ever lost.
-    let kept = 0, reverted = 0;
+    // One edit per original, in order. An edit that is missing, longer, vaguer, drops a
+    // result or adds anything the bullet didn't say is replaced by the original bullet.
+    const reverted = [];
     const result = ordered.map((orig, i) => {
-      const rw = lines[i];
-      if (rw && rw.split(/\s+/).length <= MAX_BULLET_WORDS && !introducesNewFacts(originals, rw)) { kept++; return rw; }
-      reverted++; return orig;
+      const why = unsafeRewrite(orig, lines[i], kw.matched);
+      if (!why) return lines[i];
+      reverted.push(why); return orig;
     });
-    if (reverted) console.log(`  [Tailor] ${role.company}: kept ${reverted} original bullet(s) where the rewrite wasn't safe`);
+    if (reverted.length) console.log(`  [Tailor] ${role.company}: kept ${reverted.length} original bullet(s) (${reverted.join('; ')})`);
     return result;
   } catch (_) {}
   // Fallback: every original bullet, most job-relevant first, unmodified.
@@ -405,34 +442,42 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
     subtitle: cv.subtitle,
     contact: cv.contact,
     profile: cv.profile,
+    strengths: [...(cv.strengths || [])],
     experience: (cv.experience || []).map(j => ({ ...j, bullets: [...(j.bullets || [])] })),
     skills: (cv.skills || []).map(s => ({ ...s })),
     education: (cv.education || []).map(e => ({ ...e })),
   };
 
+  const uk = opts.uk !== false;
+  const style = (t) => {
+    out.subtitle = headlineFromJobTitle(jobTitle, cv.subtitle);
+    out.profile = out.profile ? houseStyle(out.profile, uk) + '.' : out.profile;
+    out.strengths = rankBullets(out.strengths, jdKeywordSet(focusJD(jdText, 3000)), 0).map((s) => houseStyle(s, uk));
+    for (const role of out.experience) role.bullets = role.bullets.map((b) => houseStyle(b, uk));
+    return t;
+  };
+
   if (!await llmAvailable()) {
     console.log('  [Tailor] AI unavailable: keeping the CV as written, no JD tailoring');
     out.experience.forEach((role, i) => { role.bullets = pickBullets(role.bullets, jdText, i); });
-    return out;
+    return style(out);
   }
 
   const jd = focusJD(jdText, 3000);
   const matched = (opts.matchedKeywords || []).filter((k) => k && k.term)
     .sort((a, z) => (z.essential ? 1 : 0) - (a.essential ? 1 : 0)).slice(0, 12);
   const kw = matched.length ? {
-    line: `\nTERMS FROM THE ADVERT THAT THE CANDIDATE GENUINELY HAS (most important first). Wherever the original text means the same thing, use these exact phrases so the CV matches the advert's wording:\n${matched.map((k) => k.term).join(', ')}\n`,
-    corpus: matched.map((k) => [k.term, ...(k.alts || [])].join(' ')).join('  '),
+    line: `\nTERMS FROM THE ADVERT THAT THE CANDIDATE GENUINELY HAS (most important first). Wherever the original text means the same thing, you may use these words instead so the CV matches the advert's wording:\n${matched.filter((k) => k.term.split(/\s+/).length <= 3).map((k) => k.term).join(', ')}\n`,
+    corpus: matched.map((k) => [k.term, ...(k.alts || [])].filter(swappable).join(' ')).join('  '),
+    matched,
   } : {};
-
-  // 1. Subtitle
-  out.subtitle = await tailorSubtitle(cv.subtitle, jobTitle, jd);
-  console.log(`  [Tailor] Subtitle → "${out.subtitle}"`);
 
   // 1b. Professional summary — natural, recruiter-facing rewrite. The corpus is
   //     the WHOLE CV so the summary may legitimately reference real skills/tools
   //     from any section; the verifier still blocks anything the CV can't support.
   const corpus = [
     cv.profile || '',
+    ...(cv.strengths || []),
     ...out.experience.flatMap(j => [j.title, j.company, ...(j.bullets || [])]),
     ...out.skills.map(s => `${s.label || ''} ${s.items || ''}`),
     cv.subtitle || '',
@@ -453,16 +498,18 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
   out.skills = weaveKeywordsIntoSkills(out.skills, missingKeywords, cvFullText || cv.profile + ' ' + JSON.stringify(cv));
   console.log('  [Tailor] Skills reordered + keywords woven');
 
+  style(out);
+  console.log(`  [Tailor] Headline → "${out.subtitle}"`);
   return out;
 }
 
 // Plain text of a tailored CV object, so it can be scored exactly as the employer will read it.
 function structuredText(t) {
-  return [t.subtitle, t.profile,
+  return [t.subtitle, t.profile, ...(t.strengths || []),
     ...(t.experience || []).flatMap((j) => [j.title, j.company, ...(j.bullets || [])]),
     ...(t.skills || []).map((s) => `${s.label || ''} ${s.items || ''}`),
     ...(t.education || []).map((e) => Object.values(e || {}).filter((v) => typeof v === 'string').join(' ')),
   ].filter(Boolean).join('\n');
 }
 
-module.exports = { tailorStructured, structuredText, _test: { introducesNewFacts, isWeavable, significantTokens, originalIndex, midSentenceNames, hasPhrase, CLAIM_PHRASES } };
+module.exports = { tailorStructured, structuredText, _test: { houseStyle, headlineFromJobTitle, unsafeRewrite, rankBullets, introducesNewFacts, isWeavable, significantTokens, originalIndex, midSentenceNames, hasPhrase, CLAIM_PHRASES } };

@@ -112,12 +112,12 @@ function reportOutcome(url, outcome) {
 
 // Each application sent: the backend emails the user a receipt (it skips repeats and
 // anyone who turned these emails off). Fire and forget.
-function reportApplied({ title, company, url }) {
+function reportApplied({ title, company, url, cv_score }) {
   if (!licenseKey() || !title) return;
   fetch(`${backendUrl()}/v1/jobs/applied`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${licenseKey()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, company, url }),
+    body: JSON.stringify({ title, company, url, cv_score, tailor: require('./tailor_version').TAILOR_VERSION }),
     signal: AbortSignal.timeout(15000),
   }).catch(() => {});
 }

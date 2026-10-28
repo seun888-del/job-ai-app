@@ -3,6 +3,7 @@
 // company and link of each application sent (for the user's receipt email), which go to the
 // licensed Job-AI backend exactly like the desktop app.
 import llm from '../shims/llm.js';
+import { TAILOR_VERSION } from '../../../bot/modules/tailor_version.js';
 
 const DEFAULTS = {
   license: { key: '' },
@@ -44,7 +45,7 @@ export async function updateJob(jobId, fields) {
   const r = await withJobs((all) => {
     const j = all.find((x) => x.jobId === jobId);
     if (!j) return { value: null };
-    if (fields.status === 'applied' && j.status !== 'applied') applied = { title: j.title, company: j.company, url: j.url };
+    if (fields.status === 'applied' && j.status !== 'applied') applied = { title: j.title, company: j.company, url: j.url, cv_score: j.cvScore, tailor: TAILOR_VERSION };
     Object.assign(j, fields, { updatedAt: new Date().toISOString() });
     return { save: true, value: j };
   });

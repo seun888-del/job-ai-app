@@ -341,14 +341,14 @@ function markCapCounted(jobId) {
 function markApplied(jobId) {
   let job = null;
   withDb((db, markMutated) => {
-    const stmt = db.prepare('SELECT title, company, url FROM queue WHERE job_id = ?');
+    const stmt = db.prepare('SELECT title, company, url, cv_score FROM queue WHERE job_id = ?');
     stmt.bind([jobId]);
     let title = null, company = null;
     if (stmt.step()) {
       const row = stmt.getAsObject();
       title = row.title;
       company = row.company;
-      job = { title, company, url: row.url };
+      job = { title, company, url: row.url, cv_score: row.cv_score };
     }
     stmt.free();
     db.run('INSERT OR IGNORE INTO applied_jobs (job_id, title, company) VALUES (?, ?, ?)', [jobId, title, company]);

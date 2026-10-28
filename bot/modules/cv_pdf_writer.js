@@ -342,7 +342,16 @@ function writePDF(cvText, outputPath, options = {}) {
 // Renders a parsed CV object (see cv_parser.js) into the fixed reference layout.
 // Layout is driven entirely from named fields, so text can never bleed between
 // sections. This is the path used for every tailored CV.
+// Markdown the model sometimes leaves in ("**Active Directory**", "__SLA__", a leading "# ")
+// prints literally and marks the CV as machine-written: strip it from every string.
+const stripMarkdown = (v) => typeof v === 'string'
+  ? v.replace(/\*\*(.+?)\*\*/g, '$1').replace(/__(.+?)__/g, '$1').replace(/\*\*|__/g, '').replace(/^#{1,6}\s+/gm, '')
+  : Array.isArray(v) ? v.map(stripMarkdown)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, stripMarkdown(x)]))
+  : v;
+
 function writeStructuredPDF(cv, outputPath, options = {}) {
+  cv = stripMarkdown(cv);
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size:    'A4',
@@ -391,6 +400,21 @@ function writeStructuredPDF(cv, outputPath, options = {}) {
       doc.font(FONT).fontSize(9.5).fillColor(GRAY).text(cv.profile.trim(), { lineGap: 1.5, align: 'left' });
     }
 
+    // ── Core Strengths (the candidate's own highlights list) ────────────────
+    const bulletLine = (text) => {
+      const textW = W - 18;
+      ensureSpace(doc.heightOfString(text, { width: textW, lineGap: 2 }));
+      doc.font(FONT).fontSize(9.5).fillColor(GRAY).text('•', L + 8, doc.y, { width: 10, lineGap: 2 });
+      const lineH = doc.currentLineHeight(true);
+      doc.font(FONT).fontSize(9.5).fillColor(GRAY).text(text, L + 18, doc.y - lineH, { width: textW, lineGap: 2 });
+      doc.x = L;
+      doc.moveDown(0.06);
+    };
+    if (Array.isArray(cv.strengths) && cv.strengths.length) {
+      sectionHeading('CORE STRENGTHS');
+      for (const s of cv.strengths) if (String(s).trim()) bulletLine(String(s).trim());
+    }
+
     // ── Work Experience ────────────────────────────────────────────────────
     if (Array.isArray(cv.experience) && cv.experience.length) {
       sectionHeading('WORK EXPERIENCE');
@@ -414,18 +438,8 @@ function writeStructuredPDF(cv, outputPath, options = {}) {
         doc.moveDown(0.25);
 
         for (const b of (job.bullets || [])) {
-          const text  = String(b).trim();
-          if (!text) continue;
-          const textW = W - 18;
-          const textH = doc.heightOfString(text, { width: textW, lineGap: 2 });
-          ensureSpace(textH);
-          const bulletX = L + 8;
-          const textX   = L + 18;
-          doc.font(FONT).fontSize(9.5).fillColor(GRAY).text('•', bulletX, doc.y, { width: 10, lineGap: 2 });
-          const lineH = doc.currentLineHeight(true);
-          doc.font(FONT).fontSize(9.5).fillColor(GRAY).text(text, textX, doc.y - lineH, { width: textW, lineGap: 2 });
-          doc.x = L;
-          doc.moveDown(0.06);
+          const text = String(b).trim();
+          if (text) bulletLine(text);
         }
       });
     }

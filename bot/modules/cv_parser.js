@@ -67,6 +67,7 @@ const HEAD = {
   experience: /\b(WORK EXPERIENCE|PROFESSIONAL EXPERIENCE|EMPLOYMENT HISTORY|EMPLOYMENT EXPERIENCE|CAREER HISTORY|EXPERIENCE)\b/i,
   skills:     /\b(TECHNICAL SKILLS|KEY SKILLS|CORE SKILLS|CORE COMPETENCIES|PROFESSIONAL SKILLS|IT SKILLS|SKILLS)\b/i,
   education:  /\b(EDUCATION AND CERTIFICATIONS|EDUCATION & CERTIFICATIONS|EDUCATION|CERTIFICATIONS|QUALIFICATIONS|TRAINING)\b/i,
+  strengths:  /\b(CORE STRENGTHS|KEY STRENGTHS|STRENGTHS|CAREER HIGHLIGHTS|HIGHLIGHTS|KEY ACHIEVEMENTS|SELECTED ACHIEVEMENTS|ACHIEVEMENTS)\b/i,
 };
 
 // A line is a section heading when it is essentially all-caps with no lowercase.
@@ -83,7 +84,7 @@ function isHeadingLine(line) {
 function classifyHeading(line) {
   const t = line.trim();
   // Order matters: education regex contains "EDUCATION" which must win over generic
-  for (const key of ['profile', 'experience', 'skills', 'education']) {
+  for (const key of ['profile', 'experience', 'skills', 'education', 'strengths']) {
     if (HEAD[key].test(t)) return key;
   }
   return null;
@@ -189,6 +190,17 @@ function parseCV(cvText, opts = {}) {
   // Collapse internal whitespace inside bullets
   for (const job of experience) job.bullets = job.bullets.map(b => b.replace(/\s{2,}/g, ' ').trim()).filter(Boolean);
 
+  // ── Core strengths / highlights: a short bullet list, kept as written ─────
+  const strengths = [];
+  for (const raw of (sections.strengths || [])) {
+    const line = raw.trim();
+    if (!line) continue;
+    const prev = strengths[strengths.length - 1];
+    if (isBullet(line) || !prev || /[.!?]["'’)\]]?\s*$/.test(prev)) strengths.push(stripBullet(line));
+    else strengths[strengths.length - 1] += ' ' + stripBullet(line);
+  }
+  for (let i = 0; i < strengths.length; i++) strengths[i] = strengths[i].replace(/\s{2,}/g, ' ').trim();
+
   // ── Skills ───────────────────────────────────────────────────────────────
   const skills = [];
   for (const raw of (sections.skills || [])) {
@@ -225,7 +237,7 @@ function parseCV(cvText, opts = {}) {
     }
   }
 
-  return { name, subtitle, contact, profile, experience, skills, education };
+  return { name, subtitle, contact, profile, strengths, experience, skills, education };
 }
 
 module.exports = { parseCV };
