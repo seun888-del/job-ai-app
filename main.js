@@ -251,6 +251,19 @@ app.whenReady().then(async () => {
       const msg = text.slice(idx + 17).trim() || 'Action needed in the Agent browser window.';
       new Notification({ title: `${BOT_DISPLAY[bot] || bot}: action needed`, body: msg, silent: false }).show();
     }
+    // Company Sites: the site emailed the user a code to finish an application. Pop the
+    // code box in the app and a desktop notification (the agent waits up to 15 min).
+    for (const m of text.matchAll(/\[\[JOBAI_CODE_(NEEDED|RESULT)\]\](\{[^\n]*\})/g)) {
+      let info; try { info = JSON.parse(m[2]); } catch (_) { continue; }
+      mainWindow?.webContents.send(m[1] === 'NEEDED' ? 'agents:code-needed' : 'agents:code-result', { bot, ...info });
+      // The phone (tryjobai.com/app) shows the same code box, so it can be entered there.
+      try { if (m[1] === 'NEEDED') remoteControl.codeNeeded({ bot, ...info }); else remoteControl.codeDone(info.jobId); } catch (_) {}
+      if (m[1] === 'NEEDED' && !info.retry && Notification.isSupported()) {
+        const note = new Notification({ title: 'Enter your code to finish an application', body: `${info.company || 'An employer'} emailed you a code for ${info.title || 'a job'}. Open Job-AI to enter it.`, silent: false });
+        note.on('click', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
+        note.show();
+      }
+    }
     // A dead/expired/quota-exhausted proxy makes every agent fail at first
     // navigation with a tunnel error and stop, which looks like a crash. Surface
     // it plainly: a friendly line in the on-screen log (so it's on the record),
@@ -781,6 +794,13 @@ ipcMain.handle('bot:start', async (event, botName) => {
 // Shared by the button and by JOBBOT_AUTOSTART (unattended runs).
 // loginPrompt: someone is at the computer, so a signed-out site may ask them to sign in.
 async function startBotGated(botName, { loginPrompt = false } = {}) {
+  // Sign-in agents (Reed, LinkedIn...) are retired for now: refuse them from every path
+  // (Start button, phone, resume after a restart). See bot/modules/retired_agents.js.
+  if (require('./bot/modules/retired_agents').isRetired(botName)) {
+    const err = new Error('This agent has been retired. Job-AI now applies through Company Sites.');
+    err.code = 'retired';
+    throw err;
+  }
   // Gate: no agent may run without a currently-valid trial or subscription.
   const access = await agentAccessAllowed();
   if (!access.ok) {
@@ -807,6 +827,11 @@ async function startBotGated(botName, { loginPrompt = false } = {}) {
   return botManager.start(botName, userData, { loginPrompt });
 }
 ipcMain.handle('bot:stop', (event, botName) => botManager.stop(botName));
+ipcMain.handle('bot:submitCode', (event, botName, jobId, code) => {
+  const clean = String(code || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
+  return !!clean && botManager.sendToBot(String(botName), `CODE ${String(jobId).replace(/\s/g, '')} ${clean}`);
+});
+ipcMain.handle('bot:skipCode', (event, botName, jobId) => botManager.sendToBot(String(botName), `SKIP ${String(jobId).replace(/\s/g, '')}`));
 
 // Unattended mode: JOBBOT_AUTOSTART=trac,scorer starts those agents shortly after launch,
 // as if "Start applying" had been pressed (same licence gate). Unset = normal behaviour.

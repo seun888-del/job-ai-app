@@ -28,6 +28,7 @@ const { tailorStructured, structuredText } = require('./modules/cv_tailor_struct
 const { generateCoverLetter, generateSupportingStatement } = require('./modules/cover_letter');
 const { isRelevantRole }              = require('./modules/relevance_gate');
 const { llmAvailable, mode: llmMode } = require('../src/services/llm');
+const { isRetired }                   = require('./modules/retired_agents');
 
 // Minimum GENUINE (pre-addendum) keyword match a job must have before we let
 // the ATS addendum top it up. Below this the role is fundamentally off-target
@@ -525,7 +526,9 @@ async function main() {
     // 'checking' (login in progress) — so a CV is tailored only once the account's
     // session is confirmed, never into a dead or unverified session.
     const pausedSources = queue.tailoringPausedSources();
-    let pending = queue.getByStatus('pending');
+    // Jobs left in the queue by retired sign-in agents (Reed, LinkedIn...) are never applied
+    // to now, so don't spend AI tailoring them.
+    let pending = queue.getByStatus('pending').filter(j => !isRetired(j.source));
     if (pausedSources.length) {
       const before = pending.length;
       pending = pending.filter(j => !pausedSources.includes(j.source));

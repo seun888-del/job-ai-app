@@ -39,7 +39,7 @@ async function deviceId() {
 
 // Load everything the agents need from local storage.
 // ── Region (UK / USA), same as the app ───────────────────────────────────────
-// USA hides the Reed, NHS and Universal Credit cards, searches LinkedIn in the US,
+// USA hides the NHS and Universal Credit cards,
 // says "resume" not "CV" and shows dollar prices. First run picks it from the timezone.
 const tzLooksUS = () => { try { return (Intl.DateTimeFormat().resolvedOptions().timeZone || '').startsWith('America/'); } catch (_) { return false; } };
 const isUS = (settings) => (settings && settings.region) === 'us';
@@ -150,9 +150,11 @@ const AGENTS = [
   ['wellfound', 'Wellfound Agent', 'https://wellfound.com/login', 'Sign in to Wellfound'],
   ['ats', 'Company Sites Agent', '', ''],
 ];
-// UK: Trac and Reed. USA: Dice and Wellfound. LinkedIn and company sites run in both.
-// Indeed is hidden: its Cloudflare check loops even when a person passes it.
-const inRegion = (k, us) => k !== 'indeed' && (us ? k !== 'trac' && k !== 'reed' : k !== 'dice' && k !== 'wellfound');
+// Retired for now: these agents need the user to sign in to a job site. Their code stays so
+// they can come back by emptying this set (same list as the app, bot/modules/retired_agents.js).
+const RETIRED = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound']);
+// Company sites in both regions, plus NHS (Trac) in the UK.
+const inRegion = (k, us) => !RETIRED.has(k) && !(us && k === 'trac');
 const anyRunning = () => Object.values(agents).some((a) => a.running);
 // ── Setup-step beacon ───────────────────────────────────────────────────────
 // Where new users stall before their first application (activated, CV added, job
@@ -189,6 +191,7 @@ setInterval(checkSteps, 5 * 60 * 1000);
 // start() resolves when the agent has fully stopped; kept so an update can wait for it.
 // A restart waits for the previous run to finish its step, so two runs never overlap.
 function runAgent(key) {
+  if (RETIRED.has(key)) return; // retired sign-in agent: never started from any path
   const a = agents[key]; const prev = a.loop;
   a.loop = (async () => { if (prev) await prev.catch(() => {}); return a.start(); })();
   sendStep('agents_started');
@@ -446,6 +449,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     };
     const base = hasLicence && setupDone.cvs;
     const canRun = { trac: !us && base && setupDone.trac, reed: !us && base && setupDone.search, linkedin: base && setupDone.search, indeed: us && base && setupDone.search, dice: us && base && setupDone.search, wellfound: us && base && setupDone.search, ats: base && setupDone.search };
+    for (const k of RETIRED) canRun[k] = false;
     const running = anyRunning();
     const hour = new Date().getHours();
     const name = profile.firstName || trac.firstName || '';
@@ -510,8 +514,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         <ol class="get-started-steps">
           <li>${gsMark(setupDone.cvs, 1)}<span>Upload your CV. We fill in your details from it</span>${setupDone.cvs ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link cv-fill-btn">Upload CV →</button>'}</li>
           <li>${gsMark(setupDone.personal, 2)}<span>Check your details</span>${setupDone.personal ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="personal">Check details →</button>'}</li>
-          <li>${gsMark(false, 3)}<span>Sign in to your job sites in this Chrome. Use the <strong>Sign in</strong> buttons on the cards below</span></li>
-          <li>${gsMark(running, 4)}<span>Click <strong>Start applying</strong>. The AI scores jobs, tailors your CV and applies for you automatically</span>${running ? '<em class="gs-ok">Applying…</em>' : ''}</li>
+          <li>${gsMark(running, 3)}<span>Click <strong>Start applying</strong>. Job-AI applies on employers' own websites, so there are no job site accounts to sign in to</span>${running ? '<em class="gs-ok">Applying…</em>' : ''}</li>
         </ol>
         <span class="status-msg" id="gs-cv-st"></span>
       </div>
@@ -785,10 +788,10 @@ VIEWS.analytics = async function renderAnalytics() {
 
 // ── Help & FAQs (the app's, for the extension) ──
 const FAQS = [
-  ['How do I get started?', 'Open Setup (top right) and fill in Personal Details, CVs, Search Preferences and License. Set up on your phone? Then it is already done: type the 6-digit code on the License page. Next, sign in to Reed and LinkedIn using the buttons on the agent cards, and press Start applying. The "How to start applying" checklist on the Dashboard shows anything still missing.'],
-  ['Which job sites does Job-AI use?', 'Reed, LinkedIn, NHS jobs (through Trac) and company career sites. Each has its own agent card on the Dashboard.'],
-  ['How do I sign in to my job sites?', 'Click "Sign in to Reed" or "Sign in to LinkedIn" on the agent card and sign in as normal in this Chrome. The agents use that sign-in. Job-AI never sees your password. If a site signs you out, sign in again the same way.'],
-  ['What do the agents do?', 'Each agent searches its site for your job titles, skips jobs that do not fit, tailors your CV and cover letter to each job that does, and applies. They work in their own minimised Chrome windows, so leave those windows alone and keep this Job-AI tab open.'],
+  ['How do I get started?', 'Open Setup (top right) and fill in Personal Details, CVs, Search Preferences and License. Set up on your phone? Then it is already done: type the 6-digit code on the License page. Next, press Start applying. The "How to start applying" checklist on the Dashboard shows anything still missing.'],
+  ['Where does Job-AI apply?', 'On employers\' own career websites, through the Company Sites agent. In the UK the NHS (Trac) agent also applies to NHS jobs. Each has its own agent card on the Dashboard.'],
+  ['Do I need job site accounts?', 'No. Company Sites applies straight on each employer\'s website, so there is nothing to sign in to. The only sign in is NHS Trac, in the UK, if you use the NHS agent.'],
+  ['What do the agents do?', 'Each agent finds jobs that match your job titles, skips jobs that do not fit, tailors your CV and cover letter to each job that does, and applies. They work in their own minimised Chrome windows, so leave those windows alone and keep this Job-AI tab open.'],
   ['Why are some jobs showing as skipped?', 'Jobs are skipped when they do not fit what you asked for: the wrong work type or level, below your salary, an external application site, or a CV match under 45% (or under your own minimum if you set one). The Activity tab and the Tracker show the reason for each one.'],
   ['The agent says "Not signed in". What do I do?', 'Your session for that site has ended. Click the Sign in button on that agent card, sign in, and the agent carries on by itself.'],
   ['How do I add more CVs?', 'Open Setup, then CVs, and use "Add another CV". With more than one, the agents use the best fit for each job.'],
@@ -941,7 +944,7 @@ VIEWS.cvs = async function renderCVs() {
       ${(cv.roles || []).length ? `<div class="cv-card-section">
         <strong>Suggested roles</strong>
         <div class="tag-list">${cv.roles.map((r) => `<div class="tag">${esc(r)}</div>`).join('')}</div>
-        <p class="cv-suggest-hint">Add these to your search so the agents look for them on Reed, LinkedIn and company sites.</p>
+        <p class="cv-suggest-hint">Add these to your search so the agents look for them on company websites.</p>
         <div class="ext-inline"><button class="primary cv-add-terms" data-i="${i}">＋ Add these as search terms</button><span class="status-msg cv-terms-st" data-i="${i}"></span></div></div>` : ''}
       ${(cv.keywords || []).length ? `<div class="cv-card-section"><strong>Extracted keywords</strong>
         <div class="tag-list">${cv.keywords.map((k) => `<div class="tag">${esc(k)}</div>`).join('')}</div></div>` : ''}
@@ -972,7 +975,7 @@ VIEWS.search = async function renderSearch() {
   const { profile, settings } = await loadConfig();
   const sched = settings.schedule || {};
   content.innerHTML = `
-    <div class="page-header"><h2>Search Preferences</h2><p>Used by the Reed, LinkedIn and company sites agents.</p></div>
+    <div class="page-header"><h2>Search Preferences</h2><p>Used by the agents to find jobs that fit.</p></div>
     <div class="card"><div class="tracd-grid">
       <div class="field"><label>Job titles to search (one per line)</label><textarea id="s-terms" class="tracd" rows="5" placeholder="e.g. IT Support Analyst">${esc((profile.searchTerms || []).join('\n'))}</textarea></div>
       <div class="field"><label>Skip jobs with these words in the title (one per line)</label><textarea id="s-exclude" class="tracd" rows="5" placeholder="e.g. Senior">${esc((profile.excludeKeywords || []).join('\n'))}</textarea></div>
@@ -1302,16 +1305,15 @@ VIEWS['trac-details'] = async function renderTrac() {
 const TOUR_STEPS_SETUP = [
   { view: 'cvs', title: 'Step 1: Upload your CV', tip: 'Start here. We read your CV and fill in your name, contact details, experience and the job titles to search for. Upload it as a Word document (.docx) for the best results. PDF also works. Before each application, the AI rewrites your summary and bullet points to match that specific job.', action: 'Click "Add CV" and choose your CV. It is read on this device and never uploaded.' },
   { view: 'personal', title: 'Step 2: Check your details', tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this page is, the fewer forms the agents leave blank.', action: 'If you uploaded your CV, most of this is already filled in. Check it, complete anything missing and click Save.' },
-  { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want to apply for, for example "IT Support Analyst". The Reed, LinkedIn and company sites agents all use these terms.', action: 'Add at least one job title, set your work type, then click Save.' },
+  { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want to apply for, for example "IT Support Analyst". The agents use these terms to find jobs on company career sites.', action: 'Add at least one job title, set your work type, then click Save.' },
   { view: 'license', title: 'Step 4: Activate your license', tip: 'Enter the license key from your welcome email. The AI that tailors your CV runs on our cloud, so there is nothing extra to install.', action: 'Paste your license key into the box and click Activate.' },
-  { view: 'dashboard', title: 'Step 5: Sign in to your job sites', tip: 'The agents work inside this Chrome, using the accounts you are already signed in to. They never see your password.', action: 'Click "Sign in to Reed" or "Sign in to LinkedIn" on an agent card, sign in as normal, then come back to this tab. The company sites agent needs no sign in.' },
+  { view: 'dashboard', title: 'Step 5: Your agents', tip: 'The Company Sites agent finds jobs on employers\' own career pages and applies there directly, so there are no job site accounts to sign in to.', action: 'Leave Company Sites ticked. In the UK you also see the NHS (Trac) agent: keep it ticked if you want NHS jobs.' },
   { view: 'dashboard', title: 'All set: start applying', tip: 'Click Start applying and each agent opens its own minimised Chrome window and works inside it: searching, tailoring your CV and applying to matching jobs.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
   { view: 'trac-details', title: 'NHS jobs: the Trac Agent', tip: 'NHS jobs use a separate system called Trac with much longer forms, so the NHS agent has its own page: employment history, references, education and the monitoring questions.', action: 'Open "NHS / Trac details" and fill it in once, or click "Upload completed Trac PDF" to fill it from an old application. Then sign in to Trac with the button on the NHS agent card.' },
 ];
 // After a phone setup the pages are already filled in, so this tour is about using Job-AI.
 const USE_TOUR = (nhs) => [
-  { view: 'dashboard', title: 'Sign in to your job sites', tip: 'Your agents apply through your own Reed and LinkedIn accounts, inside this Chrome. This is the one thing to do on this computer: sign in once and you stay signed in. They never see your password.', action: 'Click "Sign in to Reed" and "Sign in to LinkedIn" on the agent cards, sign in as normal, then come back to this tab. The company sites agent needs no sign in.' },
-  { view: 'dashboard', title: 'Choose your agents and start', tip: 'Tick the agents you want, then press Start applying. Each one works in its own minimised Chrome window: finding jobs, tailoring your CV and applying.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
+  { view: 'dashboard', title: 'Start applying', tip: 'The Company Sites agent finds jobs on employers\' own websites, tailors your CV to each one and applies there. There are no job site accounts to sign in to. Press Start applying and it works in its own minimised Chrome window.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
   { view: 'tracker', title: 'See every application', tip: 'The Tracker lists every job your agents found and what happened to it, with the reason for anything they skipped.', action: 'Check it any time. Anything that needs you shows at the top of the Dashboard.' },
   ...(nhs ? [{ view: 'trac-details', title: 'NHS jobs', tip: 'NHS applications go through Trac. We filled in your jobs and qualifications from your CV. Trac forms also ask for your address, referees and a few declarations.', action: 'Check this page, add anything missing and click Save. Then sign in to Trac from the NHS agent card. Finished forms wait as "Ready to submit" unless you turn on Submit for me.' }] : []),
   { view: 'dashboard', title: 'Control it from your phone', tip: 'Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.', action: 'On iPhone, add it to your Home Screen to get notifications. Keep this computer on and Chrome open while the agents work.' },
@@ -1346,7 +1348,7 @@ async function initOnboarding() {
     <h2>Welcome to Job-AI</h2>
     <p>Your automated job application assistant, right inside Chrome. Set it up once and the agents search, tailor your CV, and apply to jobs for you.</p>
     <div class="welcome-features">
-      <div class="welcome-feature"><strong>4 Agents</strong><span>NHS (Trac), Reed, LinkedIn and company career sites</span></div>
+      <div class="welcome-feature"><strong>Company Sites</strong><span>Applies on employers' own career pages. No job site accounts needed</span></div>
       <div class="welcome-feature"><strong>AI CV Tailoring</strong><span>Every CV is rewritten to match the job before it is sent</span></div>
       <div class="welcome-feature"><strong>Private</strong><span>Your details and CV stay in this browser, on this device</span></div>
       <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
@@ -1418,6 +1420,7 @@ async function remoteGate() {
   const tracOk = !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length);
   const us = isUS(settings);
   const canRun = { trac: !us && base && tracOk, reed: !us && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, wellfound: us && base && search, ats: base && search };
+  for (const k of RETIRED) canRun[k] = false;
   const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
   return { license, cv, canRun, enabled };
 }
@@ -1434,7 +1437,7 @@ async function remoteStatus() {
     : !(g.cv && g.cv.text) ? 'Add your CV in Job-AI first.' : applied >= cap ? `Today's limit of ${cap} applications is reached. Agents carry on tomorrow.` : '';
   return {
     awake: awakeHeld,
-    agents: Object.keys(agents).map((k) => ({ key: k, label: REMOTE_LABELS[k], state: agents[k].running ? 'running' : 'stopped', enabled: g.enabled(k), canRun: g.canRun[k] })),
+    agents: Object.keys(agents).filter((k) => !RETIRED.has(k)).map((k) => ({ key: k, label: REMOTE_LABELS[k], state: agents[k].running ? 'running' : 'stopped', enabled: g.enabled(k), canRun: g.canRun[k] })),
     applied_today: applied, daily_cap: cap,
     in_queue: all.filter((j) => ['pending', 'cv_ready', 'applying'].includes(j.status)).length,
     failed: all.filter((j) => j.status === 'apply_failed').length,
@@ -1569,7 +1572,7 @@ async function remotePost(path, body, signal) {
   function addHint(text) { const el = document.createElement('div'); el.className = 'asst-hint'; el.textContent = text; log.appendChild(el); log.scrollTop = log.scrollHeight; }
   function openPanel() {
     panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false'); fab.classList.add('hidden');
-    if (!greeted) { greeted = true; addHint('Hi! I can help you use Job-AI: signing in to your job sites, why a job was skipped, search terms, CVs, limits and more. Ask me anything.'); }
+    if (!greeted) { greeted = true; addHint('Hi! I can help you use Job-AI: why a job was skipped, search terms, CVs, limits and more. Ask me anything.'); }
     setTimeout(() => input.focus(), 50);
   }
   function closePanel() { panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true'); fab.classList.remove('hidden'); }

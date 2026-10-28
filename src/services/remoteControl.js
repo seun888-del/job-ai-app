@@ -21,7 +21,9 @@ const { machineId } = require('./machineId');
 const WAIT_S = 20, RETRY_MS = 15000, EXTRA_MIN_MS = 15000, EXTRA_RESEND_MS = 15 * 60 * 1000;
 const LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', greenhouse: 'Company sites' };
 // What the dashboard shows (and which boxes are ticked); the renderer keeps this current.
-let prefs = { keys: ['trac', 'reed', 'linkedin', 'greenhouse'], enabled: null };
+let prefs = { keys: ['trac', 'greenhouse'], enabled: null };
+// Emailed codes an agent is waiting on (Company Sites), so the phone can enter them too.
+const codes = new Map(); // jobId -> { bot, title, company, retry, sending }
 let deps = null, running = false, waitCtl = null, nudgeTimer = null, extraSent = '', extraSentAt = 0, extraBuiltAt = 0;
 const TRAC_APPS_URL = 'https://apps.trac.jobs/applicationlist';
 const SITE = { reed: 'Reed', linkedin: 'LinkedIn', trac: 'NHS', greenhouse: 'Company site', ats: 'Company site', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound' };
@@ -61,8 +63,17 @@ async function buildStatus() {
     in_queue: (m.pending || 0) + (m.cv_ready || 0), failed: m.apply_failed || 0,
     needs_you: (m.ready_to_submit || 0) + (m.attention_skips || 0),
     recent, blocked,
+    codes: [...codes].filter(([, c]) => isOn(st[c.bot])).map(([id, c]) => ({ id, title: c.title, company: c.company, retry: c.retry, sending: c.sending })),
   };
 }
+
+// The agent asked for a code (again, if the last one was wrong) or finished with it.
+function codeNeeded(info) {
+  if (!info || !info.jobId) return;
+  codes.set(String(info.jobId), { bot: info.bot, title: String(info.title || ''), company: String(info.company || ''), retry: !!info.retry, sending: false });
+  nudge();
+}
+function codeDone(jobId) { if (codes.delete(String(jobId))) nudge(); }
 
 function tracDetails() { try { return JSON.parse(db.getProfile().trac_details || '{}') || {}; } catch (_) { return {}; } }
 
@@ -128,6 +139,16 @@ function applySettings(p) {
 }
 
 async function run(cmd) {
+  if (cmd.cmd === 'submit_code' || cmd.cmd === 'skip_code') {
+    const p = cmd.payload || {}, id = String(p.job_id || ''), c = codes.get(id);
+    if (!c) return { ok: false, message: 'That application is no longer waiting for a code.' };
+    const code = String(p.code || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
+    if (cmd.cmd === 'submit_code' && code.length < 4) return { ok: false, message: 'Paste the code from the email.' };
+    const line = cmd.cmd === 'submit_code' ? `CODE ${id.replace(/\s/g, '')} ${code}` : `SKIP ${id.replace(/\s/g, '')}`;
+    if (!botManager.sendToBot(c.bot, line)) { codes.delete(id); return { ok: false, message: 'The agent has stopped, so the code could not be used.' }; }
+    if (cmd.cmd === 'skip_code') codes.delete(id); else c.sending = true;
+    return { ok: true };
+  }
   if (cmd.cmd === 'set_settings') return applySettings(cmd.payload || {});
   if (cmd.cmd === 'set_computer') {
     if (!deps.computer) return { ok: false, message: 'Update Job-AI on this computer first.' };
@@ -219,4 +240,4 @@ function start(d) {
   setTimeout(loop, 5000);
 }
 
-module.exports = { start, nudge, setPrefs, _test: { buildStatus, buildExtra, run } };
+module.exports = { start, nudge, setPrefs, codeNeeded, codeDone, _test: { buildStatus, buildExtra, run } };
