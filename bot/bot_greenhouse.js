@@ -401,7 +401,7 @@ async function phase2_applyReadyCVs(browser) {
           // Needed to auto-answer Recruitee's required questions (RTW/sponsorship/salary).
           rightToWorkCountries: A.rightToWorkCountries, requiresSponsorship: A.requiresSponsorship,
           salaryExpectation: A.salaryExpectation, yearsExperience: A.yearsExperience, availability: A.availability,
-          location: A.location, address: A.address, drivingLicence: A.drivingLicence, eeoGender: A.eeoGender,
+          location: A.location, address: A.address, drivingLicence: A.drivingLicence, eeoGender: A.eeoGender, linkedin: A.linkedin,
         }, cvPath: job.cvPath, coverLetter: job.coverLetter || '', dryRun: !SUBMIT, ask: questionAi.recruiteeAsk(job, cvText) });
 
         if (r.submitted) {

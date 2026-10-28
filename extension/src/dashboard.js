@@ -903,7 +903,7 @@ VIEWS.personal = async function renderPersonal() {
       <div class="ext-inline"><button class="primary" id="cv-fill">Upload CV</button><span class="status-msg" id="cv-fill-st"></span></div></div>`}
     <div class="card"><h3>About you</h3><div class="tracd-grid">
       ${f('firstName', 'First name')}${f('middleName', 'Middle name(s)')}${f('lastName', 'Last name')}${f('email', 'Email', 'email')}${f('phone', 'Phone', 'tel')}
-      ${f('address', 'Address')}${f('location', 'City / town')}${f('country', 'Country', 'text', 'United Kingdom')}${f('linkedin', 'LinkedIn profile URL', 'url', 'https://www.linkedin.com/in/...')}
+      ${f('address', 'Address')}${f('location', 'City / town')}${f('country', 'Country', 'text', 'United Kingdom')}${f('linkedin', 'LinkedIn profile URL (many company forms ask for it; left empty, Job-AI writes N/A)', 'url', 'https://www.linkedin.com/in/...')}
     </div></div>
     <div class="card"><h3>Application answers</h3><p class="muted">How the agents answer common questions on job forms.</p><div class="tracd-grid">
       ${f('yearsExperience', 'Years of experience', 'number')}

@@ -2,7 +2,7 @@
 // Every function the shared agent code runs inside a web page, bundled by id.
 module.exports = {
   "f93d8a3ef8df9": el => el.files?.length || 0,
-  "fa970bfd884c6": () => {
+  "f50f30538e390": () => {
     const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
     const textOf = (e) => {
       const l = (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label');
@@ -32,7 +32,7 @@ module.exports = {
     }
     return [...new Set(out)];
   },
-  "f8fcfea8a925b": () => {
+  "f1582cc5c84c8": () => {
     const out = [];
     document.querySelectorAll('[data-jobai-yn]').forEach(e => e.removeAttribute('data-jobai-yn'));
     for (const box of document.querySelectorAll('div')) {
@@ -52,7 +52,7 @@ module.exports = {
     return out;
   },
   "f6bf25fe2b85d": el => el.click(),
-  "fa77ab52b1714": () => {
+  "ff8b72e744471": () => {
     const labelOf = (cb) => { const l = (cb.id && document.querySelector(`label[for="${CSS.escape(cb.id)}"]`)) || cb.closest('label'); return ((l && l.innerText) || cb.getAttribute('aria-label') || cb.value || '').replace(/\s+/g, ' ').trim(); };
     const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
     const all = [...document.querySelectorAll('input[type="checkbox"]')].filter(shown);
@@ -93,7 +93,7 @@ module.exports = {
   },
   "f281df73ea86f": el => el.checked,
   "f984ff3b07e9e": el => { const l = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label'); (l || el).click(); },
-  "f1b11dedd0ea7": ({ name, want }) => {
+  "f9062b1fb382d": ({ name, want }) => {
     const rs = Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`));
     for (const r of rs) {
       const w = r.closest('[role="radio"]');
@@ -107,7 +107,7 @@ module.exports = {
     }
     return false;
   },
-  "fc2ca7da7c7f4": el => {
+  "f4e85bb821ce6": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         // Also accept a WRAPPING <label> (no for=) — Workable nests the input
         // inside a <label> whose text is the question, with no fieldset/aria at
@@ -122,7 +122,7 @@ module.exports = {
         const label = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || wl?.innerText || '').trim();
         return { label, placeholder: el.placeholder || '' };
       },
-  "fd57881f394f5": el => {
+  "f4bc31026ff3c": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const fs   = el.closest('fieldset');
@@ -134,7 +134,7 @@ module.exports = {
         return { question, options };
       },
   "fc2e0d667fec4": el => !!(el.offsetParent || (el.labels && [...el.labels].some(l => l.offsetParent))),
-  "fb8c197215e66": el => {
+  "f31ac98430d87": el => {
         const name = el.name || '';
         const allR = name ? Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`)) : [el];
         // Option text: label[for] / wrapping <label> / the radio's parent text
@@ -180,13 +180,31 @@ module.exports = {
         return { groupName: name, legend: q, options };
       },
   "f24044144b7ba": () => true,
-  "f4fbbb957bca8": el => {
+  "f3241c962bcca": el => {
           const w = el.closest('[role="radio"],fieldset'); return el.required || el.getAttribute('aria-required') === 'true' || (w && w.getAttribute('aria-required') === 'true');
         },
   "f4d9d6c3d9a53": el => { const p = el.closest('[role="radio"]') || el.closest('label') || (el.labels && el.labels[0]) || el.parentElement; (p || el).click(); },
   "f347f48337a5c": el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.click(); },
   "f473f1b370347": (els, i) => { const el = els[i]; if (!el) return; const l = el.closest('label') || (el.id && document.querySelector(`label[for="${el.id}"]`)); (l || el).click(); },
-  "f71ae9f4c43c1": el => {
+  "fe62e436a89f6": () => {
+      for (const g of document.querySelectorAll('[class*="file-upload"], fieldset, [class*="field"]')) {
+        const head = (g.querySelector('label, legend, [class*="label"]') || {}).innerText || '';
+        if (!/cover letter/i.test(head) || !/\*/.test(head) || g.querySelector('textarea')) continue;
+        if (/\.(pdf|docx?|txt|rtf)\b/i.test(g.innerText)) continue; // a file is already attached
+        const b = [...g.querySelectorAll('button')].find((x) => /enter manually/i.test(x.innerText || x.getAttribute('aria-label') || ''));
+        if (b) { b.click(); return true; }
+      }
+      return false;
+    },
+  "f19badca2c5b1": () => {
+        for (const g of document.querySelectorAll('[class*="file-upload"], fieldset, [class*="field"]')) {
+          const head = (g.querySelector('label, legend, [class*="label"]') || {}).innerText || '';
+          const ta = /cover letter/i.test(head) && g.querySelector('textarea');
+          if (ta && !ta.value) { ta.setAttribute('data-jobai-cl', '1'); return true; }
+        }
+        return false;
+      },
+  "fb6a826e37db5": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const fs   = el.closest('fieldset');
@@ -195,22 +213,22 @@ module.exports = {
         const wl   = wrap?.querySelector('label, legend, [class*="label"]');
         return (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || wl?.innerText || el.placeholder || el.getAttribute('aria-label') || '').trim();
       },
-  "f3bf7b89e9a4e": el => {
+  "fef8298953616": el => {
         const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label') || el.parentElement;
         return { text: (lab?.innerText || '').toLowerCase(), id: el.id || '' };
       },
   "fb76b21ebf7e0": el => { const l = el.closest('label') || el.parentElement; (l || el).click(); },
   "f03b4b2773ef4": el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); },
-  "fb9acdf14d91a": () => {
+  "fa08702decda5": () => {
     const el = document.querySelector('input[name="cf-turnstile-response"], input[name*="turnstile" i], input[name="g-recaptcha-response"]');
     return !!(el && el.value && el.value.length > 20);
   },
-  "f58c6f6269920": () => {
+  "ffc9ff588cfa3": () => {
     const shown = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 60 && r.height > 60 && cs.visibility !== 'hidden' && cs.display !== 'none' && cs.opacity !== '0'; };
     const challenge = [...document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[title*="challenge" i], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"], iframe[src*="captcha-delivery"]')].some(shown);
     return challenge || /verify you are human|slide right to secure|are you a robot/i.test(document.body?.innerText || '');
   },
-  "f5f36b20a688f": () => {
+  "f635c2c739280": () => {
     let fields = 0, radios = 0, boxes = 0;
     for (const el of document.querySelectorAll('input[required], select[required], textarea[required]')) {
       if (el.offsetParent === null) continue;
@@ -229,7 +247,7 @@ module.exports = {
     }
     return { fields, radios, boxes };
   },
-  "f17724d6ac189": () => {
+  "ff6589b315bf6": () => {
             const t = (document.body?.innerText || '').toLowerCase();
             const success = /application (received|submitted)|thank you for applying|thanks for applying|successfully applied|we('| ha)ve received your|application complete/.test(t);
             const validationError = /please select|please (fill|complete)|this field is required|is required\b|please provide|please enter/.test(t);
@@ -243,14 +261,14 @@ module.exports = {
             const emailCode = /verification code (was|has been) sent|enter the \d+-character code|security code/i.test(t);
             return { success, validationError, submitting, formGone, turnstile, emailCode };
           },
-  "f37b54efac2b8": () => {
+  "f1a2da66b20f6": () => {
       const t = (document.body?.innerText || '').toLowerCase();
       return {
         success: /application (received|submitted)|thank you for (applying|your interest)|thanks for applying|successfully applied|we('| ha)ve received your|application complete/.test(t) || /confirmation/.test(location.href),
         wrong: /(invalid|incorrect|wrong|expired).{0,30}code|code.{0,30}(invalid|incorrect|expired|didn.t match)/.test(t),
       };
     },
-  "f9fea4f6b111d": el => {
+  "f98b62e23b18f": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const alb = el.getAttribute('aria-labelledby') || '';
@@ -261,13 +279,13 @@ module.exports = {
         const chosen = control && control.querySelector('[class*="single-value"],[class*="singleValue"],[class*="multi-value"],[class*="multiValue"]');
         return { question, has: !!(chosen && chosen.textContent.trim()) };
       },
-  "f3c8066d77ad1": el => {
+  "f68f2d02c3905": el => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
         const opts = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent);
         return opts.map(o => (o.innerText || o.textContent || '').trim());
       },
-  "f24fcff94188c": el => {
+  "f2e0ed16954c2": el => {
         el.focus();
         // react-select only opens on the full pointer + mouse sequence (a lone mousedown is ignored).
         const ctl = el.closest('[class*="control"]') || el.parentElement;
@@ -277,7 +295,7 @@ module.exports = {
         }
       },
   "f8a7cb68b42c2": el => { const b = el.parentElement && el.parentElement.querySelector('button'); if (b) b.click(); },
-  "f1ff3593896ac": (el, want) => {
+  "f104fc7478ef5": (el, want) => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
         const opt = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent)

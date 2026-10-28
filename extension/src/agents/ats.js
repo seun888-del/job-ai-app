@@ -121,7 +121,7 @@ export class AtsAgent extends SiteAgent {
         firstName: A.firstName, lastName: A.lastName, email: A.email, phone: A.phone, country: A.country,
         rightToWorkCountries: A.rightToWorkCountries, requiresSponsorship: A.requiresSponsorship,
         salaryExpectation: A.salaryExpectation, yearsExperience: A.yearsExperience, availability: A.availability,
-        location: A.location, address: A.address, drivingLicence: A.drivingLicence, eeoGender: A.eeoGender,
+        location: A.location, address: A.address, drivingLicence: A.drivingLicence, eeoGender: A.eeoGender, linkedin: A.linkedin,
       }, ask: questionAi.recruiteeAsk(job, job.cvText) });
       if (r.submitted) return true;
       // A required question the profile can't answer: never guess, hand it over.

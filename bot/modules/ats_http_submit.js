@@ -70,6 +70,7 @@ function answerRecruiteeQuestion(q, a = {}) {
       const yearly = Number(String(a.salaryExpectation).replace(/[^\d.]/g, ''));
       return { id: q.id, kind: q.kind, answer: /month/.test(body) && yearly > 1000 ? String(Math.round(yearly / 12)) : String(a.salaryExpectation) };
     }
+    if (/linkedin/.test(body)) return { id: q.id, kind: q.kind, answer: a.linkedin || 'N/A' };
     if (/post\s*code|postal code|zip/.test(body)) {
       const m = where.match(us ? US_ZIP : UK_POSTCODE);
       return m ? { id: q.id, kind: q.kind, answer: m[1].toUpperCase() } : unknown;

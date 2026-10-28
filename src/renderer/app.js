@@ -366,7 +366,7 @@ async function renderPersonal() {
       </div>
       <div class="field"><label>Location (city, state/county)</label><input id="location" value="${p.location || ''}"></div>
       <div class="field"><label>Address (street address, used to fill "Address Line 1" on applications)</label><input id="address" value="${p.address || ''}" placeholder="e.g. 12 High Street"></div>
-      <div class="field"><label>LinkedIn URL</label><input id="linkedin_url" value="${p.linkedin_url || ''}"></div>
+      <div class="field"><label>LinkedIn URL (many company forms ask for it; left empty, Job-AI writes N/A)</label><input id="linkedin_url" value="${p.linkedin_url || ''}" placeholder="https://www.linkedin.com/in/your-name"></div>
     </div>
 
     <div class="card">

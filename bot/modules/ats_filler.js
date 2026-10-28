@@ -410,7 +410,7 @@ async function _fillStep(page, job) {
     { val: `${firstName} ${lastName}`.trim(), sels: ['input[name="full_name"]',  'input[name="name"]',      'input[id*="full_name" i]',  'input[placeholder*="Full name" i]',  'input[autocomplete="name"]'] },
     { val: email,                             sels: ['input[type="email"]', 'input[name*="email" i]', 'input[id*="email" i]', 'input[placeholder*="Email" i]', 'input[autocomplete="email"]'] },
     { val: phone,                             sels: ['input[type="tel"]',   'input[name*="phone" i]', 'input[id*="phone" i]', 'input[placeholder*="Phone" i]', 'input[placeholder*="Mobile" i]', 'input[autocomplete="tel"]'] },
-    { val: linkedin || '',                    sels: ['input[name*="linkedin" i]', 'input[id*="linkedin" i]', 'input[placeholder*="LinkedIn" i]', 'input[aria-label*="LinkedIn" i]'] },
+    { val: linkedin || 'N/A',                 sels: ['input[name*="linkedin" i]', 'input[id*="linkedin" i]', 'input[placeholder*="LinkedIn" i]', 'input[aria-label*="LinkedIn" i]'] },
     { val: location || '',                    sels: ['input[name*="location" i]', 'input[id*="location" i]', 'input[placeholder*="Location" i]', 'input[autocomplete="address-level2"]'] },
   ];
 
@@ -627,6 +627,35 @@ async function _fillStep(page, job) {
       }
     } catch (_) {}
   }
+
+  // A required Cover Letter upload (Greenhouse): open its "Enter manually" box so the
+  // textarea step below types the letter in. Optional ones are left alone.
+  try {
+    const opened = await page.evaluate(() => {
+      for (const g of document.querySelectorAll('[class*="file-upload"], fieldset, [class*="field"]')) {
+        const head = (g.querySelector('label, legend, [class*="label"]') || {}).innerText || '';
+        if (!/cover letter/i.test(head) || !/\*/.test(head) || g.querySelector('textarea')) continue;
+        if (/\.(pdf|docx?|txt|rtf)\b/i.test(g.innerText)) continue; // a file is already attached
+        const b = [...g.querySelectorAll('button')].find((x) => /enter manually/i.test(x.innerText || x.getAttribute('aria-label') || ''));
+        if (b) { b.click(); return true; }
+      }
+      return false;
+    });
+    if (opened) {
+      // Its box is labelled by the "Enter manually" button, so fill it here, not by label.
+      await page.waitForTimeout(800);
+      const has = await page.evaluate(() => {
+        for (const g of document.querySelectorAll('[class*="file-upload"], fieldset, [class*="field"]')) {
+          const head = (g.querySelector('label, legend, [class*="label"]') || {}).innerText || '';
+          const ta = /cover letter/i.test(head) && g.querySelector('textarea');
+          if (ta && !ta.value) { ta.setAttribute('data-jobai-cl', '1'); return true; }
+        }
+        return false;
+      });
+      const ta = has && await page.$('textarea[data-jobai-cl]');
+      if (ta) { await _setValue(ta, await _buildAnswer('cover letter', 'textarea', job)); console.log('  [ATS] Cover letter typed in (required)'); }
+    }
+  } catch (_) {}
 
   // Textareas
   const textareas = await page.$$('textarea');
@@ -927,13 +956,16 @@ async function _buildAnswer(question, fieldType, job) {
 
   // Links: only LinkedIn is in the profile. A "Website/Portfolio/GitHub" box (a textarea on
   // some Greenhouse forms) is left blank, never given the cover letter.
-  if (/linkedin/i.test(q)) return linkedin || '';
+  // No LinkedIn in the profile: "N/A", so a required LinkedIn box doesn't block Submit.
+  if (/linkedin/i.test(q)) return linkedin || 'N/A';
   if (/website|portfolio|github|gitlab|\burls?\b|twitter|\bx \(formerly|personal site|blog|behance|dribbble/i.test(q)) return '';
 
-  const coverLetter = `Please see my attached CV for full details of my experience and qualifications. I am genuinely excited about the ${job.title} role at ${job.company} and believe my background makes me a strong fit. I am ${AVAIL_MAP[availability || 'immediately'] || 'immediately available'} and welcome the opportunity to discuss further.`;
+  // Job feeds give the board's short name ("tailscale"): capitalise it for the letter.
+  const coName = /^[a-z0-9]+$/.test(job.company || '') ? job.company[0].toUpperCase() + job.company.slice(1) : (job.company || 'your company');
+  const coverLetter = `Please see my attached CV for full details of my experience and qualifications. I am genuinely excited about the ${job.title} role at ${coName} and believe my background makes me a strong fit. I am ${AVAIL_MAP[availability || 'immediately'] || 'immediately available'} and welcome the opportunity to discuss further.`;
   // Other textareas are real questions ("Why this role?", a scenario): the rules and AI
   // below answer them, and the cover letter is only the fallback when the AI is unavailable.
-  if (/cover letter|covering letter/i.test(q) || (fieldType === 'textarea' && !q.trim())) return coverLetter;
+  if (/cover letter|covering letter/i.test(q) || (fieldType === 'textarea' && !q.trim())) return job.coverLetter || coverLetter;
   if (/notice period|availability|when can you start|available to start/i.test(q))
     return AVAIL_MAP[availability || 'immediately'] || 'Immediately available';
   if (/salary|compensation|expected pay|remuneration|expected salary|desired annual|on target earnings|\bote\b/i.test(q))
@@ -949,7 +981,7 @@ async function _buildAnswer(question, fieldType, job) {
   }
   if (/city|location|where.*based|where do you live/i.test(q))
     return (location || '').split(',')[0].trim() || location || '';
-  if (/linkedin/i.test(q))  return linkedin || '';
+  if (/linkedin/i.test(q))  return linkedin || 'N/A';
   if (/github/i.test(q))    return '';
   if (/pronoun/i.test(q))   return '';
   if (/(how|where) did you (hear|find|learn)|how.*find.*role|how.*learn/i.test(q)) return 'Job board / online search';
@@ -957,7 +989,7 @@ async function _buildAnswer(question, fieldType, job) {
     return 'Please see my CV for a full overview of my experience. I am available for interview at your earliest convenience.';
   if (/why.*role|why.*company|what.*attract|motivat|why (are you|do you want|would you like).*(interest|join|apply|work)|most interested in|interest(s|ed)? you (in|about)/i.test(q)) {
     const yrs = yearsExperience > 0 ? `${yearsExperience} years of` : 'solid';
-    return `The ${job.title} position at ${job.company} closely aligns with my ${yrs} experience and I am excited about the opportunity to contribute my skills.`;
+    return `The ${job.title} position at ${coName} closely aligns with my ${yrs} experience and I am excited about the opportunity to contribute my skills.`;
   }
 
   if (!q) return '';
@@ -1084,6 +1116,8 @@ async function _answerComboboxes(page, job) {
       }
       if (isLocation) chosen = options[0];
       else if (DEMOGRAPHIC_RE.test(q)) chosen = options.find(t => /prefer not|decline|don.?t wish|do not wish|rather not|not to (say|answer|disclose)/i.test(t)) || null;
+      // "Have you used Tailscale before?": the honest "not yet" option, never a guessed "Yes".
+      else if (/have you (ever )?used|are you (already )?(familiar|a (current )?(user|customer))|used .* before/i.test(q) && options.some(t => /haven.?t|have not|not yet|never|^no\b/i.test(t))) chosen = options.find(t => /haven.?t|have not|not yet|never|^no\b/i.test(t));
       // The agent found it online: never claim a referral, recruiter or event.
       else if (/how did you (hear|find|learn)|where did you (hear|see|find)|source of (this )?application/i.test(q))
         chosen = options.find(t => /career(s)? (page|site)|company (web)?site|job board|online|website|internet|search/i.test(t)) || options.find(t => /^other\b/i.test(t)) || null;
