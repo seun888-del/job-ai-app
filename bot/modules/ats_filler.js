@@ -49,10 +49,13 @@ const ACCOUNT_REQUIRED_ATS = new Set(['workday', 'taleo', 'successfactors', 'adp
 // Returns true (submitted), 'dry_run' (filled, not submitted), or false.
 // Answers already worked out for the form being filled (question → answer, '' = left blank).
 const _answerCache = new Map();
+// The company whose form is being filled ("previously worked here?" is checked against it).
+let _formCompany = '';
 
 async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
   const dryRun = opts.submit === false;
   _answerCache.clear();
+  _formCompany = String((job && job.company) || '');
   // No NHS details (US users never see that page): take work history and education from
   // the CV, so "Current company", "School" and employment-gap questions get answered.
   if (job && job.cvText) {
@@ -947,6 +950,12 @@ function _yesNoForQuestion(question) {
   const q = (question || '').toLowerCase();
   // "Are you connected to / do you know any current employees?": No (Job-AI finds the jobs, so no referral).
   if (/(connected|related|referred|relationship|friends?|know)\b.{0,40}\b(current |existing )?(employees?|staff|team members?|(some|any)(one|body) (who works|working|at))/.test(q) && !/previous(ly)?|former|employed by/.test(q)) return 'no';
+  // "Have you previously worked for this company?": only Yes when the work history shows it.
+  if (/(previously|ever|before|formerly)\b.{0,30}\b(employed|worked|work(ed)? for)|former employee|(employed|worked) (by|for|at) (this company|us|[a-z]+) (before|previously)/.test(q)) {
+    const co = _formCompany.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const worked = co.length > 2 && ((cfg.TRAC_DETAILS || {}).employment || []).some((e) => { const em = String(e.employer || '').toLowerCase().replace(/[^a-z0-9]/g, ''); return em && (em.includes(co) || co.includes(em)); });
+    return worked ? 'yes' : 'no';
+  }
   // "Are you a British citizen?": from the right-to-work status saved with the NHS details.
   const rtwStatus = String((cfg.TRAC_DETAILS || {}).rightToWork || '').toLowerCase();
   if (/\b(british|uk) citizen|citizen of the (uk|united kingdom)/.test(q) && rtwStatus) return /british citizen|uk citizen/.test(rtwStatus) ? 'yes' : 'no';
@@ -1042,8 +1051,16 @@ async function _buildAnswer(question, fieldType, job) {
   // Other textareas are real questions ("Why this role?", a scenario): the rules and AI
   // below answer them, and the cover letter is only the fallback when the AI is unavailable.
   if (/cover letter|covering letter/i.test(q) || (fieldType === 'textarea' && !q.trim())) return job.coverLetter || coverLetter;
-  if (/notice period|availability|when can you start|available to start/i.test(q))
-    return AVAIL_MAP[availability || 'immediately'] || 'Immediately available';
+  if (/notice period|availability|when can you start|available to start/i.test(q)) {
+    const notice = AVAIL_MAP[availability || 'immediately'] || 'Immediately available';
+    // "What is your notice period and salary expectations?": both, in one answer.
+    if (/salary|compensation|pay expectation|remuneration/i.test(q) && salaryExpectation) {
+      const n = Number(String(salaryExpectation).replace(/[^\d.]/g, ''));
+      const pay = n ? `${cfg.APPLICANT.country === 'United States' ? '$' : '£'}${n.toLocaleString('en-GB')}` : salaryExpectation;
+      return `${notice}, salary expectation ${pay} per year`;
+    }
+    return notice;
+  }
   if (/salary|compensation|expected pay|remuneration|expected salary|desired annual|on target earnings|\bote\b/i.test(q))
     // Required salary fields block submit when the profile has no figure; a
     // "Negotiable" is honest, widely accepted, and unblocks the application.
@@ -1097,7 +1114,7 @@ Job: ${job.title} at ${job.company}
 Form question: "${question}"
 
 Rules:
-- Use only the facts above. Never invent employers, job titles, dates, schools, links, numbers or experience.
+- Use only the facts above. Never invent employers, job titles, dates, schools, links, numbers or experience. Example answers inside the question (\"e.g. 2:1\") are not facts about the candidate; never copy them.
 - Experience with a specific skill, tool, standard, technology or industry counts only if the CV or work history shows it.
 - Asked which of some certifications, licences or clearances they hold: list the ones the CV shows; if it shows none of them, reply with exactly: None
 - A short field (company, job title, school, degree, a date, month, year, number or URL) takes just the value, nothing else. Fields about a job or school with no other context mean the most recent one.
@@ -1126,7 +1143,7 @@ Rules:
 // same rules/AI as native selects, then click it. Mouse events are dispatched in the page so this
 // works the same in Playwright and in the Chrome extension.
 // Whole words: "race" must not match "Abtrace", nor "identity" an IT skill like identity management.
-const DEMOGRAPHIC_RE = /gender|ethnic|\brac(e|ial)\b|hispanic|\blatin[oax]\b|sexual|disab|neurodiver|veteran|pronoun|religio|age range|\bwhat age\b|\byour age\b|\bage (group|bracket)\b|how old|transgender/i;
+const DEMOGRAPHIC_RE = /gender|\bnationality\b|ethnic|\brac(e|ial)\b|hispanic|\blatin[oax]\b|sexual|disab|neurodiver|veteran|pronoun|religio|age range|\bwhat age\b|\byour age\b|\bage (group|bracket)\b|how old|transgender/i;
 async function _answerComboboxes(page, job) {
   // Re-find the dropdowns before each one: picking an answer re-renders the form, which can
   // replace later inputs and leave stale handles behind.
@@ -1342,7 +1359,27 @@ function _workFact(question) {
     return part(end ? job.end : job.start, date[2]);
   }
   if (/^(school|university|institution|college)( name)?$/.test(q)) return edu.institution || edu.school || edu.place || '';
-  if (/^(discipline|field of study|major|subject)$/.test(q)) return edu.subject || edu.qualification || '';
+  // Degree result: only the grade on file, never a guess (Canonical's question even shows
+  // "2:1" as its example, which the AI copied).
+  if (/\b(degree|university|bachelor'?s?)\b.*\b(result|grade|classification|gpa)\b|\b(gpa|degree classification)\b/.test(q)) return edu.grade || '';
+  // "In the past ten years ... how many companies have you worked for?": counted from the
+  // work history (a job counts if it was still going inside the window).
+  const yrs = q.match(/(?:past|last) (\w+) years?.*how many (?:companies|employers|organi[sz]ations)|how many (?:companies|employers|organi[sz]ations).*(?:past|last) (\w+) years?/);
+  if (yrs && (D.employment || []).length) {
+    const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, fifteen: 15, twenty: 20 };
+    const w = yrs[1] || yrs[2], n = WORDS[w] || +w;
+    if (n) {
+      const from = new Date(); from.setFullYear(from.getFullYear() - n);
+      const ended = (d) => { const m = String(d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[2] - 1, +m[1]) : null; };
+      const firms = new Set(D.employment.filter((e) => { const end = ended(e.end); return !e.end || !end || end >= from; }).map((e) => String(e.employer || '').toLowerCase().trim()).filter(Boolean));
+      return String(firms.size);
+    }
+  }
+  // "Plagiarism or the use of AI will disqualify your application": the agent writes with
+  // AI, so it never agrees to that for the candidate. Left blank, the job waits for them.
+  if (/\b(use of ai|ai[- ]generated|generated content|chatgpt)\b/.test(q) && /disqualif|not (permitted|allowed)|prohibit/.test(q)) return '';
+  // "Bachelor of Science, Computer Networking..." / "BSc (Hons) in Computing" -> the subject.
+  if (/^(discipline|field of study|major|subject)$/.test(q)) return edu.subject || String(edu.qualification || '').replace(/^.*?,\s*/, '').replace(/^(bsc|ba|msc|ma|beng|meng|phd|hnd|hnc|btec|(bachelor|master)'?s?( of (science|arts|engineering))?|(bachelor|master)'?s? degree)( \(hons\))?\s+(of |in )?/i, '').trim();
   return undefined;
 }
 
@@ -1371,7 +1408,7 @@ Options:
 ${optionTexts.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
 A question about a specific date, month, year, school, degree or employer must come from the facts above (fields about a job or school with no other context mean the candidate's own most recent one, never the job being applied for; a job with no end date is current, so its end date is SKIP); if the facts don't give it, reply with exactly: SKIP
-Answer truthfully. For a willingness, availability or commitment question the candidate can reasonably meet (e.g. willing to work on-site, able to commute), choose the affirmative option. For a rating of their own skill or knowledge, pick a modest middle level unless the details above show real expertise; never overstate. Never claim a licence, certificate, clearance or past employer the details don't show. Asked which certifications or licences they hold, pick the none / no option when the details show none of them. For experience with a specific skill, tool, standard (e.g. ISO 27001), technology or industry, choose yes only if the CV or work history shows it; otherwise choose the no / none / lowest option. Reply with ONLY the exact text of the best option. No explanation.`;
+Answer truthfully. For a willingness, availability or commitment question the candidate can reasonably meet (e.g. willing to work on-site, able to commute), choose the affirmative option. For a rating of their own skill or knowledge, pick a modest middle level unless the details above show real expertise; never overstate. Never claim a licence, certificate, clearance or past employer the details don't show. Asked which certifications or licences they hold, pick the none / no option when the details show none of them. For experience with a specific skill, tool, standard (e.g. ISO 27001), technology or industry, choose yes only if the CV or work history shows it; otherwise choose the no / none / lowest option. For something about the candidate's past the details don't show (school results, grades, rankings), choose an option like "Cannot recall" or "Prefer not to say" if there is one, otherwise reply SKIP; never guess. Reply with ONLY the exact text of the best option. No explanation.`;
     // The model occasionally returns an empty/garbled reply; a blank required
     // radio blocks the whole submission, so retry a couple of times before giving
     // up (each blank answer is a lost application otherwise).
