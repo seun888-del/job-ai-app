@@ -1206,7 +1206,8 @@ async function _answerComboboxes(page, job) {
         const town = typed.split(',')[0].trim();
         for (let i = 0; !options.length && isLocation && town && i < 2; i++) {
           await box.fill('').catch(() => {});
-          await box.pressSequentially(town, { delay: 80 }).catch(() => {});
+          // type(): the app's element handles have no pressSequentially.
+          await Promise.resolve().then(() => box.type(town, { delay: 80 })).catch(() => {});
           await J(2500 + i * 1500, 3500 + i * 1500);
           options = await readOptions();
         }
