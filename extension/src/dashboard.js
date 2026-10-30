@@ -43,6 +43,16 @@ async function deviceId() {
 // says "resume" not "CV" and shows dollar prices. First run picks it from the timezone.
 const tzLooksUS = () => { try { return (Intl.DateTimeFormat().resolvedOptions().timeZone || '').startsWith('America/'); } catch (_) { return false; } };
 const isUS = (settings) => (settings && settings.region) === 'us';
+// US states for the setup's State field.
+const US_STATE_NAMES = { AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming' };
+function usStateOf(text) {
+  const t = String(text || '');
+  const code = (t.match(/,\s*([A-Z]{2})\b/g) || []).map((m) => m.replace(/[^A-Z]/g, '')).find((c) => US_STATE_NAMES[c]);
+  if (code) return code;
+  const hit = Object.entries(US_STATE_NAMES).sort((a, b) => b[1].length - a[1].length).find(([, n]) => new RegExp(`\\b${n}\\b`, 'i').test(t));
+  return hit ? hit[0] : '';
+}
+
 async function setRegion(region) {
   await store.patch('settings', { region });
   const profile = await store.get('profile');
@@ -1448,6 +1458,7 @@ async function initOnboarding() {
           <div class="field" style="margin-bottom:10px;grid-column:1 / -1"><label for="wc-street">Home address (house number and street)</label><input id="wc-street" autocomplete="address-line1"></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-town">Town or city</label><input id="wc-town" autocomplete="address-level2"></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-postcode" id="wc-postcode-l">Postcode</label><input id="wc-postcode" autocomplete="postal-code"></div>
+          <div class="field" id="wc-state-row" style="margin-bottom:10px"><label for="wc-state">State</label><select id="wc-state" autocomplete="address-level1"><option value="">Choose your state</option>${Object.entries(US_STATE_NAMES).map(([c, n]) => `<option value="${c}">${n}</option>`).join('')}</select></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-notice">Notice period</label><select id="wc-notice">${[['immediately', 'Can start now'], ['1week', '1 week'], ['2weeks', '2 weeks'], ['1month', '1 month'], ['2months', '2 months'], ['3months', '3 months']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-salary" id="wc-salary-l">Lowest salary (£ a year)</label><input id="wc-salary" inputmode="numeric" placeholder="e.g. 30000"></div>
         </div>
@@ -1500,6 +1511,7 @@ async function initOnboarding() {
       $('#wc-street').value = addr.replace(pc, '').replace(/[\s,]+$/, '').trim();
       $('#wc-postcode').value = pc.toUpperCase();
       $('#wc-town').value = String(P.location || '').split(',')[0].trim();
+      $('#wc-state').value = usStateOf(`${P.location || ''}, ${P.address || ''}`);
       $('#wc-notice').value = P.availability || 'immediately';
       $('#wc-salary').value = String(P.salaryExpectation || '').replace(/[^0-9]/g, '');
       const where = () => {
@@ -1508,6 +1520,7 @@ async function initOnboarding() {
         $('#wc-postcode-l').textContent = us ? 'ZIP code' : 'Postcode';
         $('#wc-salary-l').textContent = `Lowest salary (${us ? '$' : '£'} a year)`;
         $('#wc-nhs-row').style.display = us ? 'none' : 'flex';
+        $('#wc-state-row').style.display = us ? '' : 'none';
       };
       $('#wc-region').onchange = where; where();
       step('ws-check');
@@ -1532,6 +1545,8 @@ async function initOnboarding() {
       const salary = $('#wc-salary').value.replace(/[^0-9]/g, '');
       if (!street) { setSt('#w-st', 'Please add your home address. Many application forms ask for it.', true); return; }
       if (!town) { setSt('#w-st', 'Please add your town or city.', true); return; }
+      const state = region === 'us' ? $('#wc-state').value : '';
+      if (region === 'us' && !state) { setSt('#w-st', 'Please choose your state. Most US application forms ask for it.', true); return; }
       if (!(region === 'us' ? ZIP_US : PC_UK).test(postcode)) { setSt('#w-st', region === 'us' ? 'Please add a 5-digit ZIP code.' : 'Please add your postcode, like SW8 1BP.', true); return; }
       if (salary && (+salary < 5000 || +salary > 1000000)) { setSt('#w-st', 'Please type the salary as a yearly figure, like 30000.', true); return; }
       const country = region === 'us' ? 'United States' : 'United Kingdom';
@@ -1543,7 +1558,8 @@ async function initOnboarding() {
         address: `${street}, ${postcode}`, availability: $('#wc-notice').value, drivingLicence: $('#wc-licence').checked,
         ...(salary ? { salaryExpectation: salary } : {}),
         // Keep the county or state the CV gave ("Leeds, West Yorkshire") when the town is unchanged.
-        location: String(P.location || '').split(',')[0].trim().toLowerCase() === town.toLowerCase() ? P.location : town,
+        // US: "Town, ST" so forms asking for the state get it.
+        location: state ? `${town}, ${state}` : String(P.location || '').split(',')[0].trim().toLowerCase() === town.toLowerCase() ? P.location : town,
         // No sponsorship needed means they can already work there.
         rightToWorkCountries: (sponsor ? rtw.filter((c) => c !== country) : [...new Set([country, ...rtw])]).join(', '),
       });
