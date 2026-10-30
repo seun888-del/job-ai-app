@@ -54,6 +54,8 @@ function normalizeHeading(line) {
 // lowercase word, so they are left untouched. Also fixes the mixed-case "SaaS".
 function repairSpacing(line) {
   return line
+    // A first letter split off the word ("E nterprise"). Line start only, and never A or I.
+    .replace(/^([B-HJ-Z]) ([a-z]{2,})/, '$1$2')
     // Require 2+ lowercase after the capital so a plural acronym ("SOPs", "PCs",
     // "IDs", "APIs") is NOT split into "SO Ps" — only a real following word
     // ("Support", "Mutual", "Technician") triggers the space.
@@ -110,6 +112,18 @@ function parseJobHeader(line) {
   }
   if (!company) return null;
   return { title, company, dates, bullets: [] };
+}
+
+// A line that is only a date range: "August 2024 to Present", "Jan 2020 - Mar 2022", "2019 – 2021".
+// Some PDF readers put a role's dates on their own line instead of after the company.
+const MONTH_ABBR = 'Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec';
+function isDateLine(line) {
+  const t = line.trim();
+  if (!t || t.length > 60 || !/\b(19|20)\d{2}\b|\bPresent\b|\bCurrent\b/i.test(t)) return false;
+  return t
+    .replace(new RegExp(`\\b(${MONTHS}|${MONTH_ABBR})\\b\\.?`, 'gi'), '')
+    .replace(/\b(19|20)\d{2}\b|\b\d{1,2}\/|\b(present|current|now|to|until|till|date)\b/gi, '')
+    .replace(/[\s\-–—,./()]/g, '') === '';
 }
 
 function splitLines(cvText) {
@@ -172,6 +186,9 @@ function parseCV(cvText, opts = {}) {
     }
     const header = parseJobHeader(line);
     if (header) { experience.push(header); continue; }
+    // The role's dates on their own line, before any of its bullets.
+    const cur = experience[experience.length - 1];
+    if (cur && !cur.dates && !cur.bullets.length && isDateLine(line)) { cur.dates = line.replace(/\s{2,}/g, ' '); continue; }
     // A body line under a role with NO bullet marker. Many CVs (and PDF text
     // extraction that drops the • glyph) render bullets as plain paragraphs, so
     // we must still capture them: start a NEW bullet when the previous one ended
