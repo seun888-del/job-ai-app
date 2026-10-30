@@ -112,7 +112,7 @@ export class AtsAgent extends SiteAgent {
   // profile can't answer). With Send for me on (the default) it is skipped quietly and the agent
   // moves on, so the user only ever sees applications that went out. With it off, the user asked
   // to check each one, so it waits under Ready to send with Fill and open.
-  async park(job, why, kind = 'form') {
+  async park(job, why, kind = 'form', { hold = false } = {}) {
     const st = (await store.get('settings')) || {};
     // "Fully automatic": skip it. "Bring me the hard ones" or "Check every application": it waits.
     const skip = (await this.submitOn()) && !st.hardOnes;
@@ -121,11 +121,34 @@ export class AtsAgent extends SiteAgent {
       await store.updateJob(job.jobId, { status: 'skipped', reason: 'Skipped: ' + (why || 'needs a person to send it.') });
       this.log(`Skipped, moving on: ${job.title} @ ${job.company}${why ? ' (' + why.replace(/\.$/, '') + ')' : ''}`);
     } else {
-      await store.updateJob(job.jobId, { status: 'ready', reason: (why ? why + ' ' : '') + READY });
+      // The form is already filled in this tab: keep it, so Open shows it ready for the last step.
+      const heldTabId = hold ? await this.holdTab() : null;
+      await store.updateJob(job.jobId, { status: 'ready', waitKind: kind, heldTabId, reason: (why ? why + ' ' : '') + (heldTabId ? HELD : READY) });
       this.log(`Ready for you to send: ${job.title} @ ${job.company}${why ? ' (' + why.replace(/\.$/, '') + ')' : ''}`);
     }
     this.onChange();
     return 'ready';
+  }
+
+  // Hand the agent's filled tab over to the "Ready to send" window and give the agent a fresh
+  // one. Chrome must not discard it, or the filled form is lost. Capped so tabs don't pile up.
+  async holdTab() {
+    const page = this.page;
+    if (!page || page.isClosed()) return null;
+    const live = [];
+    for (const j of await store.byStatus('ready', this.source)) {
+      if (j.heldTabId && (await chrome.tabs.get(j.heldTabId).catch(() => null))) live.push(j.heldTabId);
+    }
+    if (live.length >= MAX_HELD) return null;
+    try {
+      const win = live.length ? (await chrome.tabs.get(live[0])).windowId : null;
+      if (win) await chrome.tabs.move(page.tabId, { windowId: win, index: -1 });
+      else await chrome.windows.create({ tabId: page.tabId, focused: false, state: 'minimized' });
+      await chrome.tabs.update(page.tabId, { autoDiscardable: false }).catch(() => {});
+      page._cleanup();
+      this.page = null;
+      return page.tabId;
+    } catch (_) { return null; }
   }
 
   async apply(job) {
@@ -146,7 +169,19 @@ export class AtsAgent extends SiteAgent {
       return { error: `${ats} did not accept the application (${r.reason}${r.status ? ' ' + r.status : ''})` };
     }
     // SmartRecruiters puzzles a browser after a few automated visits, so it always waits for the user.
-    if (!(await this.submitOn()) || ats === 'smartrecruiters') return this.park(job, '', ats === 'smartrecruiters' ? 'smartrecruiters' : 'review');
+    if (ats === 'smartrecruiters') return this.park(job, '', 'smartrecruiters');
+    if (!(await this.submitOn())) {
+      await this.ensurePage();
+      await this.page.goto(atsFiller.formUrl(job.url));
+      await sleep(1500 + Math.random() * 1500);
+      if (await blocked(this.page)) return this.park(job, 'The site asked for a human check.', 'review');
+      let filled = 0;
+      try {
+        await atsFiller.fillExternalForm(this.page, job, job.cvPath, ats, { submit: false });
+        filled = (await formState(this.page).catch(() => ({ filled: 0 }))).filled;
+      } catch (_) {}
+      return this.park(job, '', 'review', { hold: filled >= 2 });
+    }
     await this.ensurePage();
     await this.page.goto(atsFiller.formUrl(job.url));
     await sleep(1500 + Math.random() * 1500);
@@ -156,7 +191,8 @@ export class AtsAgent extends SiteAgent {
     if (r === true) return true;
     const why = { captcha: 'The site asked for a human check.', email_code: 'The site wanted a code from your email.', validation: "It asked a question your details can't answer.", empty: "It asked a question your details can't answer.", unconfirmed: "Sent, but the site didn't confirm it. It won't be sent again." }[atsFiller.lastSubmitOutcome()] || "The form couldn't be finished.";
     const kind = { captcha: 'captcha', email_code: 'email_code', validation: 'question', empty: 'question', unconfirmed: 'unconfirmed' }[atsFiller.lastSubmitOutcome()] || 'form';
-    return this.park(job, why, kind);
+    // Unconfirmed sends are done; everything else stopped on a filled form worth keeping.
+    return this.park(job, why, kind, { hold: kind !== 'unconfirmed' });
   }
 
   async record(job, r) {
@@ -174,6 +210,20 @@ export class AtsAgent extends SiteAgent {
 }
 
 const READY = 'Ready for you: press Fill and open, check it, then Submit.';
+const HELD = 'Filled in. Press Open, do the last step, then Submit.';
+const MAX_HELD = 8;
+// What's left for the user on a kept tab.
+const LAST_STEP = {
+  captcha: 'Already filled in. Pass the check on the page, then press Submit.',
+  email_code: 'Already filled in. Type the code from your email, then press Submit.',
+  question: 'Already filled in. Answer the highlighted question, then press Submit.',
+  form: 'Already filled in. Finish anything highlighted, then press Submit.',
+  review: 'Already filled in. Check it, then press Submit.',
+};
+// Close a kept tab once its job is sent or skipped.
+export function releaseHeld(job) {
+  if (job && job.heldTabId) chrome.tabs.remove(job.heldTabId).catch(() => {});
+}
 // One anonymous count per finished job (see __jobaiOutcome in dashboard.js).
 function outcome(job, kind) {
   if (globalThis.__jobaiOutcome) globalThis.__jobaiOutcome(atsFiller.detectATS(job.url) || job.ats || '', kind);
@@ -188,10 +238,18 @@ export async function fillAndOpen(jobId, onChange = () => {}) {
   const job = (await store.jobs()).find((j) => j.jobId === jobId && j.status === 'ready');
   if (!job) return { ok: false, message: 'That application is no longer waiting.' };
   const ats = atsFiller.detectATS(job.url);
-  const tab = await Page.open(atsFiller.formUrl(job.url), { active: true });
-  await sleep(2500);
-  let note = 'Filled. Check the form, pass any check, then press Submit.';
-  try {
+  const kept = job.heldTabId ? await chrome.tabs.get(job.heldTabId).catch(() => null) : null;
+  let tab, note = 'Filled. Check the form, pass any check, then press Submit.';
+  if (kept) {
+    tab = new Page(kept.id, kept.windowId);
+    await chrome.windows.update(kept.windowId, { state: 'normal', focused: true }).catch(() => {});
+    await chrome.tabs.update(kept.id, { active: true });
+    note = LAST_STEP[job.waitKind] || LAST_STEP.form;
+  } else {
+    tab = await Page.open(atsFiller.formUrl(job.url), { active: true });
+    await sleep(2500);
+  }
+  if (!kept) try {
     if (await blocked(tab)) note = 'Pass the check on the page, then fill in and submit the form.';
     else {
       await atsFiller.fillExternalForm(tab, job, job.cvPath, ats, { submit: false });

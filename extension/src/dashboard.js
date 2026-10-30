@@ -10,7 +10,7 @@ import { LinkedInAgent } from './agents/linkedin.js';
 import { IndeedAgent } from './agents/indeed.js';
 import { DiceAgent } from './agents/dice.js';
 import { WellfoundAgent } from './agents/wellfound.js';
-import { AtsAgent, feedJobs, fetchJD, fillAndOpen } from './agents/ats.js';
+import { AtsAgent, feedJobs, fetchJD, fillAndOpen, releaseHeld } from './agents/ats.js';
 import { Page } from './driver/page.js';
 import { scoreJob } from './agents/scorer.js';
 
@@ -153,8 +153,8 @@ const AGENTS = [
 // Retired for now: these agents need the user to sign in to a job site. Their code stays so
 // they can come back by emptying this set (same list as the app, bot/modules/retired_agents.js).
 const RETIRED = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound']);
-// Company sites in both regions, plus NHS (Trac) in the UK.
-const inRegion = (k, us) => !RETIRED.has(k) && !(us && k === 'trac');
+// Company sites in both regions, plus NHS (Trac) in the UK for those who asked for it.
+const inRegion = (k, us, nhs = true) => !RETIRED.has(k) && !(k === 'trac' && (us || !nhs));
 const anyRunning = () => Object.values(agents).some((a) => a.running);
 // ── Setup-step beacon ───────────────────────────────────────────────────────
 // Where new users stall before their first application (activated, CV added, job
@@ -478,6 +478,10 @@ VIEWS.dashboard = async function renderDashboardView() {
     const name = profile.firstName || trac.firstName || '';
     const apps = [...needs, ...ready].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
     // "Submit for me" switches: NHS is off by default, company sites on by default.
+    // NHS is opt-in: asked once at setup. Anyone who already gave Trac details keeps it.
+    const wantsNhs = !!settings.wantsNhs || setupDone.trac;
+    const nhsNav = $('#nav-setup [data-view="trac-details"]');
+    if (nhsNav) nhsNav.style.display = us || !wantsNhs ? 'none' : '';
     const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac), ats: !(settings.autoSubmit && settings.autoSubmit.ats === false) };
     const SUBMIT_HINT = {
       trac: (on) => on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.',
@@ -569,7 +573,7 @@ VIEWS.dashboard = async function renderDashboardView() {
           <button class="preflight-link${setupDone.personal ? ' is-done' : ''}" data-view="personal">${setupDone.personal ? '✓' : '👤'} Personal details</button>
           <button class="preflight-link${setupDone.search ? ' is-done' : ''}" data-view="search">${setupDone.search ? '✓' : '⚙️'} Search preferences</button>
           <button class="preflight-link${setupDone.cvs ? ' is-done' : ''}" data-view="cvs">${setupDone.cvs ? '✓' : '📄'} CVs</button>
-          ${us ? '' : `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>`}
+          ${us || !wantsNhs ? '' : `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>`}
           <button class="preflight-link${hasLicence ? ' is-done' : ''}" data-view="license">${hasLicence ? '✓' : '🔑'} License</button>
         </div>
       </div>
@@ -583,8 +587,8 @@ VIEWS.dashboard = async function renderDashboardView() {
 
       ${waiting.length ? `<div class="card card-wide nhs-apps-card">
         <h3 style="margin:0 0 4px">Ready to send (${waiting.length})</h3>
-        <p class="nhs-apps-hint">These company sites ask a person to press Submit. Fill and open fills it in for you: check it, tick any box, then press Submit.</p>
-        ${waiting.map((a) => { const why = String(a.reason || '').split(' Ready for you:')[0]; return `<div class="nhs-app"><div class="nhs-app-main"><div class="nhs-app-title">${esc(a.title)}</div><div class="nhs-app-meta">${esc(a.company || '')}</div>${why && !/^(Ready for you:|Filled in\.)/.test(why) ? `<div class="nhs-app-missing">${esc(why)}</div>` : ''}</div><span class="badge badge-success">Ready to send</span><div class="nhs-app-actions"><button class="primary fill-open" data-id="${esc(a.jobId)}">Fill and open</button><button class="secondary mark-sent" data-id="${esc(a.jobId)}">I sent it</button><button class="secondary skip-send" data-id="${esc(a.jobId)}">Skip</button></div></div>`; }).join('')}
+        <p class="nhs-apps-hint">These need you for one step. Most are already filled in: press Open, do that step, then press Submit.</p>
+        ${waiting.map((a) => { const why = String(a.reason || '').split(' Ready for you:')[0]; return `<div class="nhs-app"><div class="nhs-app-main"><div class="nhs-app-title">${esc(a.title)}</div><div class="nhs-app-meta">${esc(a.company || '')}</div>${why && !/^(Ready for you:|Filled in\.)/.test(why) ? `<div class="nhs-app-missing">${esc(why)}</div>` : ''}</div><span class="badge badge-success">Ready to send</span><div class="nhs-app-actions"><button class="primary fill-open" data-id="${esc(a.jobId)}" data-label="${a.heldTabId ? 'Open' : 'Fill and open'}">${a.heldTabId ? 'Open' : 'Fill and open'}</button><button class="secondary mark-sent" data-id="${esc(a.jobId)}">I sent it</button><button class="secondary skip-send" data-id="${esc(a.jobId)}">Skip</button></div></div>`; }).join('')}
       </div>` : ''}
 
       ${apps.length ? `<div class="card card-wide nhs-apps-card">
@@ -597,7 +601,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         <div class="dash-col-main">
           <div class="dash-col-title">Your agents</div>
           <p class="bot-controls-hint">Tick the agents you want, then press <strong>Start applying</strong>. Or start one on its own card.</p>
-          <div class="bot-controls">${AGENTS.filter(([k]) => inRegion(k, us)).map(card).join('')}</div>
+          <div class="bot-controls">${AGENTS.filter(([k]) => inRegion(k, us, wantsNhs)).map(card).join('')}</div>
         </div>
         <div class="dash-col-side">
           <div class="dash-col-title">Applications (last 14 days)</div>
@@ -667,12 +671,13 @@ VIEWS.dashboard = async function renderDashboardView() {
       s.enabled = { ...(s.enabled || {}), [e.target.dataset.bot]: e.target.checked };
       await store.set('settings', s); renderDashboard();
     }));
-    $$('.mark-sent').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'applied', appliedAt: new Date().toISOString(), reason: 'Sent by you' }); renderDashboard(); }));
-    $$('.skip-send').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'skipped', reason: 'Not sent (your choice)' }); renderDashboard(); }));
+    const heldFor = async (id) => releaseHeld((await store.jobs()).find((j) => j.jobId === id));
+    $$('.mark-sent').forEach((b) => b.addEventListener('click', async () => { await heldFor(b.dataset.id); await store.updateJob(b.dataset.id, { status: 'applied', appliedAt: new Date().toISOString(), reason: 'Sent by you' }); renderDashboard(); }));
+    $$('.skip-send').forEach((b) => b.addEventListener('click', async () => { await heldFor(b.dataset.id); await store.updateJob(b.dataset.id, { status: 'skipped', reason: 'Not sent (your choice)' }); renderDashboard(); }));
     $$('.fill-open').forEach((b) => b.addEventListener('click', async () => {
       b.disabled = true; b.textContent = 'Opening...';
       const r = await fillAndOpen(b.dataset.id, () => renderDashboard()).catch((e) => ({ ok: false, message: e.message }));
-      b.disabled = false; b.textContent = 'Fill and open';
+      b.disabled = false; b.textContent = b.dataset.label || 'Fill and open';
       if (r && !r.ok && r.message) store.log('⚠ ' + r.message);
     }));
     $$('.open-url, .nhs-open').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.url)));
@@ -1373,7 +1378,9 @@ const USE_TOUR = (nhs) => [
   { view: 'dashboard', title: 'Control it from your phone', tip: 'Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.', action: 'On iPhone, add it to your Home Screen to get notifications. Keep this computer on and Chrome open while the agents work.' },
 ];
 function startTour(steps = TOUR_STEPS_SETUP) {
-  const TOUR_STEPS = steps;
+  // No NHS page in the tour for people who didn't ask for NHS jobs.
+  const nhsNav = $('#nav-setup [data-view="trac-details"]');
+  const TOUR_STEPS = nhsNav && nhsNav.style.display === 'none' ? steps.filter((t) => t.view !== 'trac-details') : steps;
   let step = 0;
   const end = () => { const p = $('#tour-panel'); if (p) p.remove(); store.patch('settings', { tourDone: true }); navigate('dashboard'); };
   const show = async () => {
@@ -1448,6 +1455,7 @@ async function initOnboarding() {
         <div class="field" style="margin-bottom:8px"><label for="wc-titles">Job titles to apply for, separated by commas</label><textarea id="wc-titles" rows="3" style="width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--border-strong,var(--border));border-radius:8px;background:var(--surface,#fff);color:var(--text);resize:vertical"></textarea></div>
         <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
         <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-licence" style="width:16px;height:16px;margin:0"> <span>I have a full driving licence</span></label>
+        <label id="wc-nhs-row" style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-nhs" style="width:16px;height:16px;margin:0"> <span>Also apply for NHS jobs (needs a Trac account)</span></label>
         <button class="primary" id="w-done" style="width:100%">Find me jobs</button>
       </div>
       <div class="status-msg" id="w-st" style="margin-top:8px"></div></div>
@@ -1485,6 +1493,7 @@ async function initOnboarding() {
       $('#wc-region').value = isUS(st) ? 'us' : 'uk';
       $('#wc-sponsor').checked = !!P.requiresSponsorship;
       $('#wc-licence').checked = !!P.drivingLicence;
+      $('#wc-nhs').checked = !!st.wantsNhs;
       // The stored address is one line, "street, postcode" (the form filler splits it the same way).
       const addr = String(P.address || '').trim();
       const pc = (addr.match(PC_UK) || addr.match(ZIP_US) || [''])[0];
@@ -1498,6 +1507,7 @@ async function initOnboarding() {
         $('#wc-sponsor-l').textContent = `I need visa sponsorship to work in the ${us ? 'USA' : 'UK'}`;
         $('#wc-postcode-l').textContent = us ? 'ZIP code' : 'Postcode';
         $('#wc-salary-l').textContent = `Lowest salary (${us ? '$' : '£'} a year)`;
+        $('#wc-nhs-row').style.display = us ? 'none' : 'flex';
       };
       $('#wc-region').onchange = where; where();
       step('ws-check');
@@ -1538,6 +1548,16 @@ async function initOnboarding() {
         rightToWorkCountries: (sponsor ? rtw.filter((c) => c !== country) : [...new Set([country, ...rtw])]).join(', '),
       });
       await setRegion(region);
+      const nhs = region === 'uk' && $('#wc-nhs').checked;
+      await store.patch('settings', { wantsNhs: nhs });
+      if (nhs) {
+        // Start their Trac details from what they just checked. Only fills blanks.
+        const t = { ...((await store.get('trac')) || {}) };
+        const blank = (k, v) => { if (v && !t[k]) t[k] = v; };
+        blank('firstName', first); blank('lastName', last); blank('email', P.email); blank('mobile', phone); blank('city', town);
+        if (!(t.searchTerms || []).length) t.searchTerms = titles.slice(0, 40);
+        await store.set('trac', t);
+      }
       await loadConfig(); checkSteps();
       dismiss(); navigate('dashboard');
     };
