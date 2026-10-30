@@ -108,10 +108,18 @@ export class AtsAgent extends SiteAgent {
   // "Send for me" switch on the Company sites card. On by default.
   async submitOn() { const st = (await store.get('settings')) || {}; return !(st.autoSubmit && st.autoSubmit.ats === false); }
 
-  // Park a job for the user: it shows under Ready to send with Fill and open.
+  // A job that can't go out without a person (a human check, an emailed code, a question the
+  // profile can't answer). With Send for me on (the default) it is skipped quietly and the agent
+  // moves on, so the user only ever sees applications that went out. With it off, the user asked
+  // to check each one, so it waits under Ready to send with Fill and open.
   async park(job, why) {
-    await store.updateJob(job.jobId, { status: 'ready', reason: (why ? why + ' ' : '') + READY });
-    this.log(`Ready for you to send: ${job.title} @ ${job.company}${why ? ' (' + why.replace(/\.$/, '') + ')' : ''}`);
+    if (await this.submitOn()) {
+      await store.updateJob(job.jobId, { status: 'skipped', reason: 'Skipped: ' + (why || 'needs a person to send it.') });
+      this.log(`Skipped, moving on: ${job.title} @ ${job.company}${why ? ' (' + why.replace(/\.$/, '') + ')' : ''}`);
+    } else {
+      await store.updateJob(job.jobId, { status: 'ready', reason: (why ? why + ' ' : '') + READY });
+      this.log(`Ready for you to send: ${job.title} @ ${job.company}${why ? ' (' + why.replace(/\.$/, '') + ')' : ''}`);
+    }
     this.onChange();
     return 'ready';
   }
@@ -130,7 +138,7 @@ export class AtsAgent extends SiteAgent {
       if (r.submitted) return true;
       // A required question the profile can't answer: never guess, hand it over.
       if (r.reason === 'needs_media') return 'Asks for a video or file upload';
-      if (r.reason === 'needs_you') return this.park(job, 'A question needs your answer.');
+      if (r.reason === 'needs_you') return this.park(job, 'It asked a question your details can\'t answer.');
       return { error: `${ats} did not accept the application (${r.reason}${r.status ? ' ' + r.status : ''})` };
     }
     // SmartRecruiters puzzles a browser after a few automated visits, so it always waits for the user.
@@ -142,11 +150,20 @@ export class AtsAgent extends SiteAgent {
     const r = await atsFiller.fillExternalForm(this.page, job, job.cvPath, ats, { submit: true });
     reportOutcome(job.url, r === true ? 'sent' : atsFiller.lastSubmitOutcome());
     if (r === true) return true;
-    const why = { captcha: 'The site asked for a human check.', email_code: 'The site emailed you a code to finish it.', validation: 'A question needs your answer.', empty: 'A question needs your answer.', unconfirmed: "The site didn't confirm it. Check your email before sending again." }[atsFiller.lastSubmitOutcome()] || 'Needs you to finish it.';
+    const why = { captcha: 'The site asked for a human check.', email_code: 'The site wanted a code from your email.', validation: "It asked a question your details can't answer.", empty: "It asked a question your details can't answer.", unconfirmed: "Sent, but the site didn't confirm it. It won't be sent again." }[atsFiller.lastSubmitOutcome()] || "The form couldn't be finished.";
     return this.park(job, why);
   }
 
-  async record(job, r) { if (r !== 'ready') return super.record(job, r); }
+  async record(job, r) {
+    if (r === 'ready') return;
+    if ((r && r.error) || r === false || r === undefined) {
+      const why = r && r.error ? String(r.error).slice(0, 120) : "the form couldn't be finished";
+      await store.updateJob(job.jobId, { status: 'skipped', reason: 'Skipped: ' + why });
+      this.log(`Skipped, moving on: ${job.title} @ ${job.company} (${why})`);
+      return;
+    }
+    return super.record(job, r);
+  }
 }
 
 const READY = 'Ready for you: press Fill and open, check it, then Submit.';

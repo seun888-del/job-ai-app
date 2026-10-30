@@ -471,7 +471,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac), ats: !(settings.autoSubmit && settings.autoSubmit.ats === false) };
     const SUBMIT_HINT = {
       trac: (on) => on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.',
-      ats: (on) => on ? 'Sends them for you. Sites that ask you to prove you\'re human wait under Ready to send.' : 'Off: each one waits under Ready to send for you to check and submit.',
+      ats: (on) => on ? 'Sends them for you. Any it can\'t send on its own, it skips and moves on to the next job.' : 'Off: each one waits under Ready to send for you to check and submit.',
     };
     // Which agents "Start applying" runs (tick box on each card, like the app). All ticked by default.
     const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
