@@ -520,7 +520,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         </div>
       </div>
 
-      ${hasLicence ? '' : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 7 days, no card needed.</span><button class="no-license-cta open-url" data-url="${SETUP_URL}">Set up Job-AI →</button></div>`}
+      ${hasLicence ? '' : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 7 days, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
       ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
@@ -645,6 +645,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       if (r && !r.ok && r.message) store.log('⚠ ' + r.message);
     }));
     $$('.open-url, .nhs-open').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.url)));
+    $('#nl-setup')?.addEventListener('click', openSetup);
     $$('.nhs-statement').forEach((b) => b.addEventListener('click', () => { const p = $('#nhs-st-' + b.dataset.i); p.hidden = !p.hidden; b.textContent = p.hidden ? 'Supporting statement' : 'Hide supporting statement'; }));
   } finally { dashBusy = false; }
 };
@@ -1044,7 +1045,7 @@ VIEWS.license = async function renderLicense() {
     ${active ? '' : `<div class="card" id="trial-card">
       <h3 style="margin:0 0 6px">Set up Job-AI</h3>
       <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. Free for 7 days, no card needed. At the end you get a 6-digit code to type here.</p>
-      <div class="ext-inline" style="margin-top:12px"><button class="primary open-url" data-url="${SETUP_URL}">Set up Job-AI (2 minutes)</button></div>
+      <div class="ext-inline" style="margin-top:12px"><button class="primary" id="tr-setup">Set up Job-AI (2 minutes)</button></div>
       <div class="field" style="max-width:220px;margin-top:16px"><label>Got your code? Type it here</label><input id="tr-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
       <div class="ext-inline"><button class="secondary" id="tr-go">Connect</button><span class="status-msg" id="tr-st"></span></div>
       <p class="muted" style="margin-top:12px"><a class="tracker-link" href="#" id="tr-mail-show">Lost your code? Email me one</a></p>
@@ -1110,7 +1111,7 @@ VIEWS.license = async function renderLicense() {
 // details. Lost the code? Email one (a new email still gets a trial, as a fallback).
 function wireTrialCard() {
   if (!$('#trial-card')) return;
-  $('#trial-card .open-url').addEventListener('click', (e) => openTab(e.currentTarget.dataset.url));
+  $('#tr-setup').addEventListener('click', openSetup);
   $('#tr-mail-show').addEventListener('click', (e) => { e.preventDefault(); $('#tr-mail').hidden = false; $('#tr-email').focus(); });
   const send = async () => {
     const em = $('#tr-email').value.trim();
@@ -1361,6 +1362,8 @@ function startTour(steps = TOUR_STEPS_SETUP) {
   };
   show();
 }
+// Reopen the in-tab setup (welcome box) from the dashboard banner or the Licence page.
+async function openSetup() { await store.patch('settings', { welcomeSeen: false }); initOnboarding(); }
 async function initOnboarding() {
   const s = await store.get('settings');
   if (s.welcomeSeen) return;
@@ -1375,13 +1378,38 @@ async function initOnboarding() {
       <div class="welcome-feature"><strong>Private</strong><span>Your details and CV stay in this browser, on this device</span></div>
       <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
     </div>
-    ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
-      <strong style="display:block;margin-bottom:4px">Set up Job-AI</strong>
-      <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin-bottom:10px">Takes 2 minutes: your email, your CV and a few details. Free for 7 days, no card needed. Then type the 6-digit code it gives you here.</span>
-      <button class="primary" id="w-setup" style="width:100%;margin-bottom:12px">Set up Job-AI (2 minutes)</button>
-      <div id="w-codebox" style="display:flex;gap:8px"><input id="w-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="secondary" id="w-go" style="white-space:nowrap">Connect</button></div>
-      <div id="w-mailbox" style="display:none;gap:8px"><input id="w-email" type="email" autocomplete="email" placeholder="The email you set up with" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Send code</button></div>
-      <p style="margin:8px 0 0;font-size:13px"><a href="#" id="w-swap" class="tracker-link">Lost your code? Email me one</a></p>
+    ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" id="w-setup-box" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
+      <div id="ws-n" style="font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted,#4a453b)">Step 1 of 4</div>
+      <div id="ws-email">
+        <strong style="display:block;margin-top:4px">Start your free 7-day trial</strong>
+        <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin:4px 0 10px">No card needed. We'll email you a 6-digit code.</span>
+        <div style="display:flex;gap:8px"><input id="w-email" type="email" autocomplete="email" placeholder="you@email.com" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Email me a code</button></div>
+        <p style="margin:8px 0 0;font-size:13px"><a href="#" id="w-havecode" class="tracker-link">Already have a code?</a></p>
+      </div>
+      <div id="ws-code" hidden>
+        <strong style="display:block;margin-top:4px">Type the code we emailed you</strong>
+        <span id="ws-code-sub" style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin:4px 0 10px">It's in the subject line of the email. Not there? Check spam or junk.</span>
+        <div style="display:flex;gap:8px"><input id="w-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" aria-label="6-digit code" style="flex:1;min-width:0;font-size:20px;letter-spacing:4px;text-align:center"><button class="primary" id="w-go" style="white-space:nowrap">Continue</button></div>
+        <p style="margin:8px 0 0;font-size:13px"><a href="#" id="w-back" class="tracker-link">Use a different email</a></p>
+      </div>
+      <div id="ws-cv" hidden>
+        <strong style="display:block;margin-top:4px">Add your CV</strong>
+        <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin:4px 0 10px">We read it to fill in your details and find jobs that fit you. PDF or Word.</span>
+        <button class="primary" id="w-cv" style="width:100%">Choose my CV</button>
+      </div>
+      <div id="ws-check" hidden>
+        <strong style="display:block;margin-top:4px">Check these and you're done</strong>
+        <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin:4px 0 10px">Filled in from your CV. Change anything that's wrong.</span>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+          <div class="field" style="margin-bottom:10px"><label for="wc-first">First name</label><input id="wc-first" autocomplete="given-name"></div>
+          <div class="field" style="margin-bottom:10px"><label for="wc-last">Last name</label><input id="wc-last" autocomplete="family-name"></div>
+          <div class="field" style="margin-bottom:10px"><label for="wc-phone">Phone</label><input id="wc-phone" type="tel" autocomplete="tel"></div>
+          <div class="field" style="margin-bottom:10px"><label for="wc-region">Find jobs in</label><select id="wc-region"><option value="uk">The UK</option><option value="us">The USA</option></select></div>
+        </div>
+        <div class="field" style="margin-bottom:8px"><label for="wc-titles">Job titles to apply for, separated by commas</label><textarea id="wc-titles" rows="3" style="width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--border-strong,var(--border));border-radius:8px;background:var(--surface,#fff);color:var(--text);resize:vertical"></textarea></div>
+        <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
+        <button class="primary" id="w-done" style="width:100%">Find me jobs</button>
+      </div>
       <div class="status-msg" id="w-st" style="margin-top:8px"></div></div>
       <p style="margin:14px 0 8px;font-size:14px;color:var(--text-muted,#4a453b)">Or look around first:</p>`}
     <div class="welcome-actions"><button class="${globalThis.__jobaiClient === 'android' ? 'primary' : 'secondary'}" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div></div>`;
@@ -1389,20 +1417,14 @@ async function initOnboarding() {
   const dismiss = () => { overlay.remove(); store.patch('settings', { welcomeSeen: true }); };
   $('#w-tour').addEventListener('click', () => { dismiss(); startTour(); });
   $('#w-skip').addEventListener('click', dismiss);
-  if ($('#w-code')) {
-    // Set up on tryjobai.com/start, then type its code here. Lost it? Email one.
-    const hasCode = () => $('#w-code').value.replace(/\D/g, '').length > 0;
-    const showMail = (on) => { $('#w-mailbox').style.display = on ? 'flex' : 'none'; $('#w-codebox').style.display = on ? 'none' : 'flex'; $('#w-swap').textContent = on ? 'I have a code' : 'Lost your code? Email me one'; $(on ? '#w-email' : '#w-code').focus(); };
-    const go = async () => {
-      if (!hasCode()) { setSt('#w-st', ''); showMail(true); return; }
-      const b = $('#w-go'); b.disabled = true;
-      const done = await claimPhoneSetup($('#w-code').value, (t, err) => setSt('#w-st', t, err));
-      b.disabled = false;
-      if (done) setTimeout(async () => {
-        dismiss(); await navigate('dashboard');
-        const [s, t] = await Promise.all([store.get('settings'), store.get('trac')]);
-        startTour(USE_TOUR(!!(s.wantsNhs || (t && (t.employment || []).length))));
-      }, 1200);
+  if ($('#w-setup-box')) {
+    // Setup in four steps, all in this tab: email, the emailed code (starts the trial), CV, a quick check.
+    const STEPS = ['ws-email', 'ws-code', 'ws-cv', 'ws-check'];
+    const step = (id) => {
+      STEPS.forEach((x) => { $('#' + x).hidden = x !== id; });
+      $('#ws-n').textContent = `Step ${STEPS.indexOf(id) + 1} of 4`;
+      setSt('#w-st', '');
+      const f = $('#' + id + ' input'); if (f) f.focus();
     };
     const send = async () => {
       const em = $('#w-email').value.trim();
@@ -1411,15 +1433,55 @@ async function initOnboarding() {
       let r; try { r = await sendSetupCode(em); } catch (_) { r = { ok: false }; }
       $('#w-send').disabled = false;
       if (!r.ok) { setSt('#w-st', codeSentMsg(r, em), true); return; }
-      $('#w-code').value = ''; showMail(false);
-      setSt('#w-st', codeSentMsg(r, em));
+      $('#ws-code-sub').textContent = `Sent to ${em}. It's in the subject line of the email. Not there? Check spam or junk.`;
+      $('#w-code').value = ''; step('ws-code');
     };
-    $('#w-setup').addEventListener('click', () => openTab(SETUP_URL));
-    $('#w-go').addEventListener('click', go);
+    const showCheck = async () => {
+      const [{ profile: P }, st] = await Promise.all([loadConfig(), store.get('settings')]);
+      $('#wc-first').value = P.firstName || ''; $('#wc-last').value = P.lastName || ''; $('#wc-phone').value = P.phone || '';
+      $('#wc-titles').value = (P.searchTerms || []).join(', ');
+      $('#wc-region').value = isUS(st) ? 'us' : 'uk';
+      $('#wc-sponsor').checked = !!P.requiresSponsorship;
+      const where = () => { $('#wc-sponsor-l').textContent = `I need visa sponsorship to work in the ${$('#wc-region').value === 'us' ? 'USA' : 'UK'}`; };
+      $('#wc-region').onchange = where; where();
+      step('ws-check');
+    };
+    const go = async () => {
+      const b = $('#w-go'); b.disabled = true;
+      const done = await claimPhoneSetup($('#w-code').value, (t, err) => setSt('#w-st', t, err));
+      b.disabled = false;
+      if (!done) return;
+      // Set up on the phone already? The CV came with the code, so skip straight to the check.
+      if ((await getCvs()).length) showCheck(); else step('ws-cv');
+    };
+    const finish = async () => {
+      const titles = $('#wc-titles').value.split(',').map((t) => t.trim()).filter(Boolean);
+      const first = $('#wc-first').value.trim(), last = $('#wc-last').value.trim(), phone = $('#wc-phone').value.trim();
+      if (!first || !last) { setSt('#w-st', 'Please add your first and last name.', true); return; }
+      if (!phone) { setSt('#w-st', 'Please add your phone number. Employers ask for it.', true); return; }
+      if (!titles.length) { setSt('#w-st', 'Add at least one job title to apply for.', true); return; }
+      const region = $('#wc-region').value;
+      const country = region === 'us' ? 'United States' : 'United Kingdom';
+      const { profile: P } = await loadConfig();
+      const rtw = String(P.rightToWorkCountries || '').split(',').map((c) => c.trim()).filter(Boolean);
+      const sponsor = $('#wc-sponsor').checked;
+      await store.patch('profile', {
+        firstName: first, lastName: last, phone, searchTerms: titles, requiresSponsorship: sponsor,
+        // No sponsorship needed means they can already work there.
+        rightToWorkCountries: (sponsor ? rtw.filter((c) => c !== country) : [...new Set([country, ...rtw])]).join(', '),
+      });
+      await setRegion(region);
+      await loadConfig(); checkSteps();
+      dismiss(); navigate('dashboard');
+    };
     $('#w-send').addEventListener('click', send);
-    $('#w-swap').addEventListener('click', (e) => { e.preventDefault(); setSt('#w-st', ''); showMail($('#w-mailbox').style.display === 'none'); });
-    $('#w-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     $('#w-email').addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+    $('#w-havecode').addEventListener('click', (e) => { e.preventDefault(); $('#ws-code-sub').textContent = 'Type the 6-digit code from the Job-AI setup page or our email.'; step('ws-code'); });
+    $('#w-back').addEventListener('click', (e) => { e.preventDefault(); step('ws-email'); });
+    $('#w-go').addEventListener('click', go);
+    $('#w-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    $('#w-cv').addEventListener('click', () => pickCv('#w-st', () => showCheck()));
+    $('#w-done').addEventListener('click', finish);
   }
 }
 
