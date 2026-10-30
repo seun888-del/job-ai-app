@@ -112,8 +112,12 @@ export class AtsAgent extends SiteAgent {
   // profile can't answer). With Send for me on (the default) it is skipped quietly and the agent
   // moves on, so the user only ever sees applications that went out. With it off, the user asked
   // to check each one, so it waits under Ready to send with Fill and open.
-  async park(job, why) {
-    if (await this.submitOn()) {
+  async park(job, why, kind = 'form') {
+    const st = (await store.get('settings')) || {};
+    // "Fully automatic": skip it. "Bring me the hard ones" or "Check every application": it waits.
+    const skip = (await this.submitOn()) && !st.hardOnes;
+    outcome(job, (skip ? 'skip_' : 'wait_') + kind);
+    if (skip) {
       await store.updateJob(job.jobId, { status: 'skipped', reason: 'Skipped: ' + (why || 'needs a person to send it.') });
       this.log(`Skipped, moving on: ${job.title} @ ${job.company}${why ? ' (' + why.replace(/\.$/, '') + ')' : ''}`);
     } else {
@@ -138,25 +142,28 @@ export class AtsAgent extends SiteAgent {
       if (r.submitted) return true;
       // A required question the profile can't answer: never guess, hand it over.
       if (r.reason === 'needs_media') return 'Asks for a video or file upload';
-      if (r.reason === 'needs_you') return this.park(job, 'It asked a question your details can\'t answer.');
+      if (r.reason === 'needs_you') return this.park(job, 'It asked a question your details can\'t answer.', 'question');
       return { error: `${ats} did not accept the application (${r.reason}${r.status ? ' ' + r.status : ''})` };
     }
     // SmartRecruiters puzzles a browser after a few automated visits, so it always waits for the user.
-    if (!(await this.submitOn()) || ats === 'smartrecruiters') return this.park(job, '');
+    if (!(await this.submitOn()) || ats === 'smartrecruiters') return this.park(job, '', ats === 'smartrecruiters' ? 'smartrecruiters' : 'review');
     await this.ensurePage();
     await this.page.goto(atsFiller.formUrl(job.url));
     await sleep(1500 + Math.random() * 1500);
-    if (await blocked(this.page)) { reportOutcome(job.url, 'captcha'); return this.park(job, 'The site asked for a human check.'); }
+    if (await blocked(this.page)) { reportOutcome(job.url, 'captcha'); return this.park(job, 'The site asked for a human check.', 'captcha'); }
     const r = await atsFiller.fillExternalForm(this.page, job, job.cvPath, ats, { submit: true });
     reportOutcome(job.url, r === true ? 'sent' : atsFiller.lastSubmitOutcome());
     if (r === true) return true;
     const why = { captcha: 'The site asked for a human check.', email_code: 'The site wanted a code from your email.', validation: "It asked a question your details can't answer.", empty: "It asked a question your details can't answer.", unconfirmed: "Sent, but the site didn't confirm it. It won't be sent again." }[atsFiller.lastSubmitOutcome()] || "The form couldn't be finished.";
-    return this.park(job, why);
+    const kind = { captcha: 'captcha', email_code: 'email_code', validation: 'question', empty: 'question', unconfirmed: 'unconfirmed' }[atsFiller.lastSubmitOutcome()] || 'form';
+    return this.park(job, why, kind);
   }
 
   async record(job, r) {
     if (r === 'ready') return;
+    if (r === true) outcome(job, 'sent');
     if ((r && r.error) || r === false || r === undefined) {
+      outcome(job, r && r.error ? 'skip_refused' : 'skip_form');
       const why = r && r.error ? String(r.error).slice(0, 120) : "the form couldn't be finished";
       await store.updateJob(job.jobId, { status: 'skipped', reason: 'Skipped: ' + why });
       this.log(`Skipped, moving on: ${job.title} @ ${job.company} (${why})`);
@@ -167,6 +174,10 @@ export class AtsAgent extends SiteAgent {
 }
 
 const READY = 'Ready for you: press Fill and open, check it, then Submit.';
+// One anonymous count per finished job (see __jobaiOutcome in dashboard.js).
+function outcome(job, kind) {
+  if (globalThis.__jobaiOutcome) globalThis.__jobaiOutcome(atsFiller.detectATS(job.url) || job.ats || '', kind);
+}
 // Confirmation text the sites show after a real submission.
 const SENT_RE = /application (has been )?(received|submitted|sent)|thank you for (applying|your application|your interest)|thanks for applying|successfully (applied|submitted)|we('| ha)ve received your application|application complete/i;
 

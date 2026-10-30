@@ -176,6 +176,16 @@ async function sendStep(step) {
   } catch (_) {}
 }
 globalThis.__jobaiStep = sendStep;
+// How each company-site job ended (sent, skipped and why, or waiting), so we can see what
+// "Fully automatic" gives up. Anonymous: the random device id, the site type and the result.
+globalThis.__jobaiOutcome = async (ats, kind) => {
+  try {
+    await fetch(`${SETUP_BACKEND}/v1/telemetry/outcome`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ install_id: await deviceId(), ats, kind }), signal: AbortSignal.timeout(10000),
+    });
+  } catch (_) {}
+};
 async function checkSteps() {
   try {
     if (licenceActive(await store.get('license'))) sendStep('activated');
@@ -478,9 +488,23 @@ VIEWS.dashboard = async function renderDashboardView() {
     const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites' };
     const bySource = Object.keys(LABEL).map((s) => [s, applied.filter((j) => j.source === s).length]).filter(([, n]) => n);
 
+    // Company sites: what to do with a job that needs a person. auto = skip it (only "Applied"
+    // ever shows), assist = send the rest and bring those to the user, review = send nothing
+    // until the user checks it (the old "Send for me" off).
+    const atsMode = !submitOn.ats ? 'review' : settings.hardOnes ? 'assist' : 'auto';
+    const ATS_MODES = [
+      ['auto', 'Fully automatic', "You only see Applied. Jobs it can't finish on its own are skipped."],
+      ['assist', 'Bring me the hard ones', 'Sends what it can. Ones that need you (a human check, an emailed code, a question) wait under Ready to send. Better odds, a few taps.'],
+      ['review', 'Check every application', 'Nothing is sent until you check it and press Submit.'],
+    ];
     const card = ([key, label, url, signLabel]) => {
       const on = agents[key].running;
-      const toggle = key in submitOn ? `<label class="agent-submit-toggle">
+      const toggle = key === 'ats' ? `<div class="agent-submit-toggle" style="display:block">
+          <strong style="display:block;margin-bottom:6px">Jobs that need a person</strong>
+          ${ATS_MODES.map(([v, t, hint]) => `<label style="display:flex;gap:8px;align-items:flex-start;margin:0 0 6px;cursor:pointer;font-weight:400">
+            <input type="radio" name="ats-mode" class="ats-mode" value="${v}" ${atsMode === v ? 'checked' : ''} style="width:auto;margin-top:3px">
+            <span><strong>${t}</strong><br><small>${hint}</small></span></label>`).join('')}
+        </div>` : key in submitOn ? `<label class="agent-submit-toggle">
           <input type="checkbox" class="auto" data-bot="${key}" ${submitOn[key] ? 'checked' : ''}>
           <span><strong>${key === 'ats' ? 'Send for me' : 'Submit for me'}</strong><br><small>${SUBMIT_HINT[key](submitOn[key])}</small></span>
         </label>` : '';
@@ -623,6 +647,13 @@ VIEWS.dashboard = async function renderDashboardView() {
     $$('.preflight-link[data-view]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
     $$('.cv-fill-btn').forEach((b) => b.addEventListener('click', () => pickCv('#gs-cv-st', cvToPersonal)));
     $$('.signin').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.url)));
+    $$('.ats-mode').forEach((el) => el.addEventListener('change', async (e) => {
+      const v = e.target.value;
+      const s = await store.get('settings');
+      s.autoSubmit = { ...(s.autoSubmit || {}), ats: v !== 'review' };
+      s.hardOnes = v === 'assist';
+      await store.set('settings', s); renderDashboard();
+    }));
     $$('.auto').forEach((el) => el.addEventListener('change', async (e) => {
       const on = e.target.checked; const key = e.target.dataset.bot;
       if (on && key === 'trac' && !confirm('Let the NHS agent submit applications for you?\n\nIt only submits when every section on Trac is complete, and never forms that ask about AI use.')) { e.target.checked = false; return; }
