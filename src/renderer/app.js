@@ -1296,7 +1296,7 @@ async function renderLicense() {
         await refreshExpiryBanner();
         await updateNavProgress();
       } else {
-        showStatus(statusEl, LICENSE_ERRORS[result.error] || `Error: ${result.error}`, 'error');
+        showStatus(statusEl, result.suggest ? `Did you mean ${result.suggest}? Check your email and try again.` : (LICENSE_ERRORS[result.error] || `Error: ${result.error}`), 'error');
       }
     } finally {
       _activateBtn.disabled = false;

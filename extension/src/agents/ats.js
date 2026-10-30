@@ -99,6 +99,8 @@ export class AtsAgent extends SiteAgent {
       if (await httpSubmit.recruiteeNeedsMedia(job.url)) { await store.addJob({ ...job, source: this.source, status: 'skipped', reason: 'Asks for a video or file upload' }); continue; }
       const description = await fetchJD(job);
       await this.queueIfWanted(job, { ...job, description });
+      // First win: three queued is enough to get the first application out; the rest next round.
+      if (this.firstWin && (await store.byStatus('pending', this.source)).length >= 3) break;
       await sleep(800);
     }
   }

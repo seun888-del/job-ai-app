@@ -50,9 +50,14 @@ export class SiteAgent {
         const ok = await this.signIn().catch((e) => { this.log('Sign-in check failed: ' + e.message); return false; });
         if (!ok) { this.log(`Not signed in. Sign in to ${this.label} in Chrome, then it carries on.`); await this.wait(Date.now() + 2 * 60 * 1000); continue; }
         if (globalThis.__jobaiStep) globalThis.__jobaiStep('site_connected');
+        // First win: until the very first application has gone out, find a few jobs, tailor
+        // until one is ready and send it straight away, so a new user sees it working in
+        // minutes instead of after a full round of searching and tailoring.
+        this.firstWin = !(await store.jobs()).some((j) => j.status === 'applied');
         await this.search().catch((e) => this.log('Search error: ' + e.message));
-        await this.scorePending();
+        await this.scorePending({ untilOneReady: this.firstWin });
         await this.applyReady();
+        if (this.firstWin) { this.firstWin = false; await this.scorePending(); await this.applyReady(); }
         this.log('Round done. Searching again in a few minutes.');
         await this.wait(roundEnd);
       }
@@ -99,7 +104,7 @@ export class SiteAgent {
     if (ok) { this.log(`Found: ${job.title} @ ${job.company}`); this.onChange(); }
   }
 
-  async scorePending() {
+  async scorePending({ untilOneReady = false } = {}) {
     for (const job of await store.byStatus('pending', this.source)) {
       if (!this.running) return;
       // Only tailor what can still be sent today (+2 spare). The rest wait until tomorrow.
@@ -107,6 +112,7 @@ export class SiteAgent {
       if ((await store.readyBacklog()) >= left + 2) return;
       await scoreJob(job, (m) => this.log(m)).catch((e) => this.log('Scoring error: ' + e.message));
       this.onChange();
+      if (untilOneReady && (await store.byStatus('cv_ready', this.source)).length) return;
     }
   }
 

@@ -196,6 +196,19 @@ function runAgent(key) {
   a.loop = (async () => { if (prev) await prev.catch(() => {}); return a.start(); })();
   sendStep('agents_started');
 }
+// Live company-site jobs that fit the user's job titles, for the first-win prompt (30 min cache).
+let fwCache = null;
+async function firstWinCount(us) {
+  const key = (us ? 'US' : 'GB') + '|' + (cfg.JOB_SEARCHES || []).join(',');
+  if (fwCache && fwCache.key === key && Date.now() - fwCache.at < 30 * 60 * 1000) return fwCache.n;
+  try {
+    const titleMatch = require('../../bot/modules/title_match');
+    const m = titleMatch.compile(cfg.JOB_SEARCHES || []);
+    const n = (await feedJobs(us ? 'US' : 'GB')).filter((j) => titleMatch.titleMatches(j.title, m)).length;
+    fwCache = { key, n, at: Date.now() };
+    return n;
+  } catch (_) { return 0; }
+}
 async function startAgent(key) {
   if (!(await recheckLicence())) { navigate('license'); return; }
   runAgent(key);
@@ -492,7 +505,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       <div class="dash-head">
         <div>
           <h2 class="dash-greeting">Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}${name ? ', ' + esc(name) : ''}</h2>
-          <p class="dash-sub">${running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Monitor agent activity and track your application progress.'}</p>
+          <p class="dash-sub">${running && !applied.length ? 'Working on your first application. It usually goes out within a few minutes. Keep this tab open.' : running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Monitor agent activity and track your application progress.'}</p>
           <div class="region-row"><span class="region-label">Find jobs in:</span>
             <div class="region-switch" role="group" aria-label="Find jobs in">
               <button class="region-opt${us ? '' : ' active'}" data-region="uk">UK</button>
@@ -508,6 +521,12 @@ VIEWS.dashboard = async function renderDashboardView() {
       </div>
 
       ${hasLicence ? '' : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 7 days, no card needed.</span><button class="no-license-cta open-url" data-url="${SETUP_URL}">Set up Job-AI →</button></div>`}
+
+      ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
+        <p class="card-hint" style="margin:0">Press start and Job-AI tailors your CV and sends your first application, usually within a few minutes.</p></div>
+        <button class="primary" id="fw-start">▶ Send my first application</button>
+      </div>` : ''}
 
       <div class="card get-started-card">
         <h3>How to start applying</h3>
@@ -593,6 +612,8 @@ VIEWS.dashboard = async function renderDashboardView() {
       setTimeout(renderDashboard, 300);
     });
     $('#stop-all').addEventListener('click', () => { Object.values(agents).forEach((a) => a.stop()); renderDashboard(); });
+    $('#fw-start')?.addEventListener('click', () => $('#start-all').click());
+    if ($('#fw-count')) firstWinCount(us).then((n) => { const h = $('#fw-count'); if (h) h.textContent = n ? `${n >= 50 ? '50+' : n} live job${n === 1 ? '' : 's'} fit you right now` : 'Your agents are ready to find jobs for you'; });
     $$('.region-opt').forEach((b) => b.addEventListener('click', async () => {
       if (b.classList.contains('active')) return;
       // UK-only agents can't keep running once their cards are hidden.
@@ -1132,6 +1153,7 @@ function wirePhoneSetup(rerender) {
 function codeSentMsg(r, em) {
   if (r.ok) return `Code sent to ${em}. Type it here. Not there? Check spam.`;
   if (r.error === 'ended') return 'That email has already had a free trial. Subscribe at tryjobai.com to carry on.';
+  if (r.suggest) return `Did you mean ${r.suggest}? Check your email and try again.`;
   if (r.error === 'disposable_email') return 'Please use your normal email address.';
   if (r.error === 'too_many_trials' || r.http === 429) return 'Too many tries. Wait a few minutes.';
   return 'Could not send. Check your connection and try again.';
