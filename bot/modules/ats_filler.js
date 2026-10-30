@@ -1202,6 +1202,14 @@ async function _answerComboboxes(page, job) {
         await box.fill(typed).catch(() => {});
         await J(1500, 2200);
         options = await readOptions();
+        // Location searches are slow and picky: retry with just the town, typed key by key.
+        const town = typed.split(',')[0].trim();
+        for (let i = 0; !options.length && isLocation && town && i < 2; i++) {
+          await box.fill('').catch(() => {});
+          await box.pressSequentially(town, { delay: 80 }).catch(() => {});
+          await J(2500 + i * 1500, 3500 + i * 1500);
+          options = await readOptions();
+        }
       }
       if (!options.length) { console.log(`  [ATS] ⚠ No options for dropdown: "${q.substring(0, 50)}"`); await box.press('Escape').catch(() => {}); continue; }
 
