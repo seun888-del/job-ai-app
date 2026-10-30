@@ -728,7 +728,7 @@ async function _fillStep(page, job) {
         const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label') || el.parentElement;
         return { text: (lab?.innerText || '').toLowerCase(), id: el.id || '' };
       }).catch(() => ({ text: '', id: '' }));
-      if (!/agree|consent|terms|accept|gdpr|privacy|data protection|i have read|^\s*i understand|acknowledge/i.test(info.text)) continue;
+      if (!/agree|consent|terms|accept|gdpr|privacy|data protection|process (your|my) personal (information|data)|i have read|^\s*i understand|acknowledge/i.test(info.text)) continue;
       // A future-jobs mailing list is the applicant's choice, not part of applying.
       if (/future (job|role|opportunit|career)|marketing|newsletter|talent (pool|community)|contact me about/i.test(info.text)) continue;
       await J(200, 500);
@@ -1171,7 +1171,7 @@ async function _answerComboboxes(page, job) {
       const readOptions = () => box.evaluate(el => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
-        const opts = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent);
+        const opts = Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent);
         return opts.map(o => (o.innerText || o.textContent || '').trim());
       }).catch(() => []);
       const open = () => box.evaluate(el => {
@@ -1252,7 +1252,7 @@ async function _answerComboboxes(page, job) {
       const clicked = await box.evaluate((el, want) => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
-        const opt = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent)
+        const opt = Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent)
           .find(o => (o.innerText || o.textContent || '').trim() === want);
         if (!opt) return false;
         for (const t of ['pointermove', 'mousemove', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
@@ -1395,6 +1395,8 @@ function _workFact(question) {
 // ── AI option picker ───────────────────────────────────────────────────────
 async function _aiPickOption(question, optionTexts, job) {
   if (!question || !optionTexts.length) return null;
+  // Nationality and birthplace aren't in the profile, so the AI would only be guessing.
+  if (/\b(sole|dual|single) national|nationalit|country of birth|place of birth|born in\b/i.test(question)) return null;
   const cacheKey = `o:${question}|${optionTexts.join('|')}`;
   if (_answerCache.has(cacheKey)) return _answerCache.get(cacheKey);
   const picked = await _aiPickOptionUncached(question, optionTexts, job);
