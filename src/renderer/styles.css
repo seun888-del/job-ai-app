@@ -810,6 +810,9 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
   padding: 40px 44px 36px;
   max-width: 480px;
   width: 92%;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  box-sizing: border-box;
   box-shadow: var(--shadow-pop);
   animation: modal-slide-up 0.25s ease;
 }

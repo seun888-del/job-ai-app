@@ -1362,6 +1362,8 @@ function startTour(steps = TOUR_STEPS_SETUP) {
   };
   show();
 }
+const PC_UK = /\b[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}\b/i;
+const ZIP_US = /\b\d{5}(?:-\d{4})?\b/;
 // Reopen the in-tab setup (welcome box) from the dashboard banner or the Licence page.
 async function openSetup() { await store.patch('settings', { welcomeSeen: false }); initOnboarding(); }
 async function initOnboarding() {
@@ -1405,9 +1407,16 @@ async function initOnboarding() {
           <div class="field" style="margin-bottom:10px"><label for="wc-last">Last name</label><input id="wc-last" autocomplete="family-name"></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-phone">Phone</label><input id="wc-phone" type="tel" autocomplete="tel"></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-region">Find jobs in</label><select id="wc-region"><option value="uk">The UK</option><option value="us">The USA</option></select></div>
+          <div class="field" style="margin-bottom:10px;grid-column:1 / -1"><label for="wc-street">Home address (house number and street)</label><input id="wc-street" autocomplete="address-line1"></div>
+          <div class="field" style="margin-bottom:10px"><label for="wc-town">Town or city</label><input id="wc-town" autocomplete="address-level2"></div>
+          <div class="field" style="margin-bottom:10px"><label for="wc-postcode" id="wc-postcode-l">Postcode</label><input id="wc-postcode" autocomplete="postal-code"></div>
+          <div class="field" style="margin-bottom:10px"><label for="wc-notice">Notice period</label><select id="wc-notice">${[['immediately', 'Can start now'], ['1week', '1 week'], ['2weeks', '2 weeks'], ['1month', '1 month'], ['2months', '2 months'], ['3months', '3 months']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
+          <div class="field" style="margin-bottom:10px"><label for="wc-salary" id="wc-salary-l">Lowest salary (£ a year)</label><input id="wc-salary" inputmode="numeric" placeholder="e.g. 30000"></div>
         </div>
+        <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:0 0 10px">Employers' forms ask for these. With them filled in, Job-AI can send your applications without stopping to ask you.</p>
         <div class="field" style="margin-bottom:8px"><label for="wc-titles">Job titles to apply for, separated by commas</label><textarea id="wc-titles" rows="3" style="width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--border-strong,var(--border));border-radius:8px;background:var(--surface,#fff);color:var(--text);resize:vertical"></textarea></div>
         <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
+        <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-licence" style="width:16px;height:16px;margin:0"> <span>I have a full driving licence</span></label>
         <button class="primary" id="w-done" style="width:100%">Find me jobs</button>
       </div>
       <div class="status-msg" id="w-st" style="margin-top:8px"></div></div>
@@ -1422,6 +1431,8 @@ async function initOnboarding() {
     const STEPS = ['ws-email', 'ws-code', 'ws-cv', 'ws-check'];
     const step = (id) => {
       STEPS.forEach((x) => { $('#' + x).hidden = x !== id; });
+      // Past the first step the feature boxes and intro just push the form off small screens.
+      $$('.welcome-features, .welcome-modal > p').forEach((el) => { el.style.display = id === 'ws-email' ? '' : 'none'; });
       $('#ws-n').textContent = `Step ${STEPS.indexOf(id) + 1} of 4`;
       setSt('#w-st', '');
       const f = $('#' + id + ' input'); if (f) f.focus();
@@ -1442,7 +1453,21 @@ async function initOnboarding() {
       $('#wc-titles').value = (P.searchTerms || []).join(', ');
       $('#wc-region').value = isUS(st) ? 'us' : 'uk';
       $('#wc-sponsor').checked = !!P.requiresSponsorship;
-      const where = () => { $('#wc-sponsor-l').textContent = `I need visa sponsorship to work in the ${$('#wc-region').value === 'us' ? 'USA' : 'UK'}`; };
+      $('#wc-licence').checked = !!P.drivingLicence;
+      // The stored address is one line, "street, postcode" (the form filler splits it the same way).
+      const addr = String(P.address || '').trim();
+      const pc = (addr.match(PC_UK) || addr.match(ZIP_US) || [''])[0];
+      $('#wc-street').value = addr.replace(pc, '').replace(/[\s,]+$/, '').trim();
+      $('#wc-postcode').value = pc.toUpperCase();
+      $('#wc-town').value = String(P.location || '').split(',')[0].trim();
+      $('#wc-notice').value = P.availability || 'immediately';
+      $('#wc-salary').value = String(P.salaryExpectation || '').replace(/[^0-9]/g, '');
+      const where = () => {
+        const us = $('#wc-region').value === 'us';
+        $('#wc-sponsor-l').textContent = `I need visa sponsorship to work in the ${us ? 'USA' : 'UK'}`;
+        $('#wc-postcode-l').textContent = us ? 'ZIP code' : 'Postcode';
+        $('#wc-salary-l').textContent = `Lowest salary (${us ? '$' : '£'} a year)`;
+      };
       $('#wc-region').onchange = where; where();
       step('ws-check');
     };
@@ -1461,12 +1486,23 @@ async function initOnboarding() {
       if (!phone) { setSt('#w-st', 'Please add your phone number. Employers ask for it.', true); return; }
       if (!titles.length) { setSt('#w-st', 'Add at least one job title to apply for.', true); return; }
       const region = $('#wc-region').value;
+      const street = $('#wc-street').value.trim(), town = $('#wc-town').value.trim();
+      const postcode = $('#wc-postcode').value.trim().toUpperCase();
+      const salary = $('#wc-salary').value.replace(/[^0-9]/g, '');
+      if (!street) { setSt('#w-st', 'Please add your home address. Many application forms ask for it.', true); return; }
+      if (!town) { setSt('#w-st', 'Please add your town or city.', true); return; }
+      if (!(region === 'us' ? ZIP_US : PC_UK).test(postcode)) { setSt('#w-st', region === 'us' ? 'Please add a 5-digit ZIP code.' : 'Please add your postcode, like SW8 1BP.', true); return; }
+      if (salary && (+salary < 5000 || +salary > 1000000)) { setSt('#w-st', 'Please type the salary as a yearly figure, like 30000.', true); return; }
       const country = region === 'us' ? 'United States' : 'United Kingdom';
       const { profile: P } = await loadConfig();
       const rtw = String(P.rightToWorkCountries || '').split(',').map((c) => c.trim()).filter(Boolean);
       const sponsor = $('#wc-sponsor').checked;
       await store.patch('profile', {
         firstName: first, lastName: last, phone, searchTerms: titles, requiresSponsorship: sponsor,
+        address: `${street}, ${postcode}`, availability: $('#wc-notice').value, drivingLicence: $('#wc-licence').checked,
+        ...(salary ? { salaryExpectation: salary } : {}),
+        // Keep the county or state the CV gave ("Leeds, West Yorkshire") when the town is unchanged.
+        location: String(P.location || '').split(',')[0].trim().toLowerCase() === town.toLowerCase() ? P.location : town,
         // No sponsorship needed means they can already work there.
         rightToWorkCountries: (sponsor ? rtw.filter((c) => c !== country) : [...new Set([country, ...rtw])]).join(', '),
       });
