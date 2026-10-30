@@ -1440,7 +1440,10 @@ Answer truthfully. For a willingness, availability or commitment question the ca
 // hosted job page redirects to their own careers site (Coinbase, Stripe...).
 function formUrl(url) {
   const m = String(url || '').match(/greenhouse\.io\/([^/?#]+)\/jobs\/(\d+)/i);
-  return m ? `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}` : url;
+  if (m) return `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}`;
+  // Pinpoint: the advert's own application form, not the advert.
+  const p = String(url || '').match(/^(https:\/\/[a-z0-9-]+\.pinpointhq\.com\/[a-z-]+\/postings\/[0-9a-f-]+)\/?(?:[?#].*)?$/i);
+  return p ? `${p[1]}/applications/new` : url;
 }
 
 module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, submitEmailCode, formUrl, lastSubmitOutcome: () => lastOutcome, _yesNoForQuestion, _pickRadioOption, _pickDropdownOption };
