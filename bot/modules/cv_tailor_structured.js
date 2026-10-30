@@ -169,6 +169,8 @@ function originalIndex(text) {
   // Also index each word without trailing/leading punctuation, so a tool ending a
   // sentence ("...and ServiceNow.") still counts as present.
   for (const w of [...words]) words.add(w.replace(/^[./-]+|[./-]+$/g, ''));
+  // And each part of a joined name, so 'AICPA-CIMA' or 'ISO/IEC' counts for 'AICPA' and 'CIMA'.
+  for (const w of [...words]) for (const part of w.split(/[./-]+/)) if (part) words.add(part);
   for (const n of (low.match(/\d[\d,]*\.?\d*%?/g) || [])) words.add(n.replace(/,/g, ''));
   return words;
 }
