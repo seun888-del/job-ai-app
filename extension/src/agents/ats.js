@@ -32,7 +32,7 @@ async function getJson(url, opts = {}) {
 
 // Auto-appliable company-site jobs for the user's search terms (same feed the app uses).
 export async function feedJobs(country) {
-  const terms = (cfg.JOB_SEARCHES || []).slice(0, 5).map((t) => String(t).trim()).filter(Boolean).join(',');
+  const terms = (cfg.JOB_SEARCHES || []).slice(0, 15).map((t) => String(t).trim()).filter(Boolean).join(',');
   const url = `${BACKEND}/v1/jobs/candidates?country=${country}&limit=200` + (terms ? `&terms=${encodeURIComponent(terms)}` : '');
   const data = await getJson(url, { headers: llm.headers() });
   return (data.jobs || [])
