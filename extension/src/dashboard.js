@@ -300,6 +300,18 @@ setTimeout(resumeAfterChromeStart, 2000);
   loadConfig().catch(() => {});
 })();
 
+// One time: the match check now looks at the advert's must-haves only. Jobs from the last two
+// weeks skipped under the old 45% rule get checked again (one AI call each).
+(async () => {
+  const s = await store.get('settings');
+  if (s.matchLevelRecheck) return;
+  const since = Date.now() - 14 * 864e5;
+  for (const j of await store.jobs()) {
+    if (j.status === 'skipped' && /^Not a close enough match \(\d+%\)$/.test(j.reason || '') && Number(j.cvScore) >= 20 && Date.parse(j.updatedAt || 0) >= since) await store.updateJob(j.jobId, { status: 'pending', reason: '', retryCount: 0 });
+  }
+  await store.patch('settings', { matchLevelRecheck: true });
+})();
+
 // Just updated: restart the agents that were running before it.
 (async () => {
   const { resumeAfterUpdate: r } = await chrome.storage.local.get('resumeAfterUpdate');
@@ -1050,7 +1062,7 @@ VIEWS.search = async function renderSearch() {
       <div class="field"><label>Blocked companies (one per line)</label><textarea id="s-block" class="tracd" rows="5" placeholder="e.g. Agency name">${esc((profile.blockedCompanies || []).join('\n'))}</textarea></div>
       <div class="field"><label>Search location</label><input id="s-where" type="text" value="${esc(profile.searchLocation || (isUS(settings) ? 'United States' : 'United Kingdom'))}"></div>
       <div class="field"><label>Maximum job posting age</label><select id="s-age">${[['r86400', 'Past 24 hours'], ['r604800', 'Past week'], ['r1209600', 'Past 2 weeks'], ['r2592000', 'Past month']].map(([v, l]) => `<option value="${v}" ${(profile.jobAge || 'r1209600') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div class="field"><label>Minimum CV match (%)</label><input id="s-min" type="number" min="45" max="100" placeholder="Any" value="${esc(profile.minScore || '')}"><small class="muted">Leave empty to apply to every job that fits your CV.</small></div>
+      <div class="field"><label>How close a match</label><select id="s-level">${[['wide', 'Wider: apply to more jobs'], ['balanced', 'Balanced (recommended)'], ['strict', 'Strict: close matches only']].map(([v, l]) => `<option value="${v}" ${(profile.matchLevel || (Number(profile.minScore) >= 70 ? 'strict' : 'balanced')) === v ? 'selected' : ''}>${l}</option>`).join('')}</select><small class="muted">Jobs are only skipped when your CV misses what the advert must have.</small></div>
       <div class="field"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="s-wt" value="${v}" ${(profile.workTypePriority || ['remote', 'hybrid', 'onsite']).includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
       <div class="field"><label>Contract</label><div class="tracd-sectors">${[['full_time', 'Full-time'], ['part_time', 'Part-time'], ['contract', 'Fixed-term / contract']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="s-type" value="${v}" ${(profile.employmentType || ['full_time']).includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
       <div class="field"><label>Applications a day</label><select id="s-cap">${[5, 10, 15, 20, 25].map((n) => `<option value="${n}" ${Number(settings.dailyCap || 15) === n ? 'selected' : ''} ${n > cfg.PLAN_CAP ? 'disabled' : ''}>${n}${n > cfg.PLAN_CAP ? ' (Pro)' : ''}</option>`).join('')}</select></div>
@@ -1070,7 +1082,7 @@ VIEWS.search = async function renderSearch() {
   $('#s-save').addEventListener('click', async () => {
     await store.patch('profile', {
       searchTerms: lines('#s-terms').slice(0, 40), excludeKeywords: lines('#s-exclude').slice(0, 80),
-      searchLocation: $('#s-where').value.trim() || 'United Kingdom', minScore: Number($('#s-min').value) ? Math.max(45, Math.min(100, Number($('#s-min').value))) : null,
+      searchLocation: $('#s-where').value.trim() || 'United Kingdom', matchLevel: $('#s-level').value, minScore: null,
       workTypePriority: $$('.s-wt:checked').map((c) => c.value), employmentType: $$('.s-type:checked').map((c) => c.value),
     });
     await store.patch('profile', { blockedCompanies: lines('#s-block').slice(0, 100), jobAge: $('#s-age').value });

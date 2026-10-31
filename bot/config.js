@@ -65,6 +65,7 @@ const cfg = {
   SKIP_EXTERNAL_SITES: true,
   MAX_APPLICATIONS_PER_DAY: 15,
   MIN_SCORE: 0,
+  MATCH_LEVEL: 'balanced',
   SCHEDULE_ENABLED: false,
   SCHEDULE_DAYS: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
   SCHEDULE_START: 9,
@@ -169,7 +170,9 @@ const cfg = {
       cfg.MAX_APPLICATIONS_PER_DAY = Math.min(profile.max_applications_per_day ?? 15, planCap);
       cfg.PLAN_CAP = planCap;
       console.log(`[Config] Daily application cap: ${cfg.MAX_APPLICATIONS_PER_DAY}/day (plan ceiling ${planCap} — ${planCap === DAILY_APPLICATION_CAP ? 'paid' : 'trial'})`);
-      cfg.MIN_SCORE = profile.min_match_score ?? 0;
+      // The older % box still applies until a match level is chosen (70+ there meant close matches only).
+      cfg.MATCH_LEVEL = profile.match_level || ((profile.min_match_score ?? 0) >= 70 ? 'strict' : 'balanced');
+      cfg.MIN_SCORE = profile.match_level ? 0 : (profile.min_match_score ?? 0);
 
       cfg.SCHEDULE_ENABLED = !!(prefs.schedule_enabled);
       cfg.SCHEDULE_DAYS = (prefs.schedule_days || 'Mon,Tue,Wed,Thu,Fri').split(',');

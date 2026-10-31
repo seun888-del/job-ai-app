@@ -48,11 +48,33 @@ function reportOutcome(url, outcome) {
   fetch(`${BACKEND}/v1/jobs/outcome`, { method: 'POST', headers: { ...llm.headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ url, outcome }), signal: AbortSignal.timeout(10000) }).catch(() => {});
 }
 
-// Job description: Greenhouse's job API, otherwise the posting page's text.
+// Ashby's board API lists every job with its text; one call per company per run.
+const ashbyBoards = new Map();
+// Job description: the ATS's job API where it has one, otherwise the posting page's text.
+// Workable and Ashby pages draw their text with JavaScript, so a plain fetch reads only a
+// few words and those jobs were all skipped as having no description.
 export async function fetchJD(job) {
-  const m = String(job.url).match(/greenhouse[^/]*\/([^/]+)\/jobs\/(\d+)/i);
+  const url = String(job.url);
+  const m = url.match(/greenhouse[^/]*\/([^/]+)\/jobs\/(\d+)/i);
   if (m) {
     try { const d = await getJson(`https://boards-api.greenhouse.io/v1/boards/${m[1]}/jobs/${m[2]}`); return stripHtml(d.content).slice(0, 8000); } catch (_) {}
+  }
+  const wk = url.match(/apply\.workable\.com\/([^/]+)\/j\/([A-Z0-9]+)/i);
+  if (wk) {
+    try {
+      const d = await getJson(`https://apply.workable.com/api/v2/accounts/${wk[1]}/jobs/${wk[2]}`);
+      const t = stripHtml([d.description, d.requirements, d.benefits].filter(Boolean).join(' '));
+      if (t) return t.slice(0, 8000);
+    } catch (_) {}
+  }
+  const ab = url.match(/jobs\.ashbyhq\.com\/([^/]+)\/([0-9a-f-]{36})/i);
+  if (ab) {
+    try {
+      if (!ashbyBoards.has(ab[1])) ashbyBoards.set(ab[1], getJson(`https://api.ashbyhq.com/posting-api/job-board/${ab[1]}`));
+      const d = await ashbyBoards.get(ab[1]);
+      const p = ((d && d.jobs) || []).find((x) => x.id === ab[2]);
+      if (p && (p.descriptionPlain || p.descriptionHtml)) return String(p.descriptionPlain || stripHtml(p.descriptionHtml)).replace(/\s+/g, ' ').trim().slice(0, 8000);
+    } catch (_) { ashbyBoards.delete(ab[1]); }
   }
   try {
     const r = await fetch(job.url, { signal: AbortSignal.timeout(20000) });

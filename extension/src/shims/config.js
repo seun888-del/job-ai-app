@@ -24,7 +24,7 @@ const cfg = {
   MAX_APPLICATIONS_PER_DAY: 25,
   PLAN_CAP: 25,
   SCHEDULE: null,
-  MIN_SCORE: 0,  // same as the app: no minimum unless the user sets one (the 45% floor still applies)
+  MATCH_LEVEL: 'balanced',  // how picky the must-haves check is: wide, balanced or strict
   async init() {},
 
   // Map the extension's stored profile onto the field names the shared modules expect
@@ -69,7 +69,8 @@ const cfg = {
     cfg.SKIP_EXTERNAL_SITES = profile.skipExternalSites !== false;
     cfg.PLAN_CAP = license.status === 'active' ? 25 : 5;
     cfg.MAX_APPLICATIONS_PER_DAY = Math.min(Number(settings.dailyCap || 15), cfg.PLAN_CAP);
-    cfg.MIN_SCORE = Number(profile.minScore) || 0;
+    // Older versions had a % box; 70 or more there meant close matches only.
+    cfg.MATCH_LEVEL = profile.matchLevel || (Number(profile.minScore) >= 70 ? 'strict' : 'balanced');
     cfg.SCHEDULE = settings.schedule || null;
     const full = `${first} ${last}`.trim();
     cfg.RESUME_FILENAME = full ? `${full} Resume.pdf` : 'Resume.pdf';

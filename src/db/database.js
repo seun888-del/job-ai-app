@@ -130,6 +130,9 @@ async function init(userDataPath) {
   if (!profileCols.includes('eeo_disability')) {
     db.exec('ALTER TABLE profile ADD COLUMN eeo_disability TEXT');
   }
+  if (!profileCols.includes('match_level')) {
+    db.exec('ALTER TABLE profile ADD COLUMN match_level TEXT');
+  }
   if (!profileCols.includes('eeo_veteran')) {
     db.exec('ALTER TABLE profile ADD COLUMN eeo_veteran TEXT');
   }

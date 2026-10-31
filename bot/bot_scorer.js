@@ -30,11 +30,6 @@ const { isRelevantRole }              = require('./modules/relevance_gate');
 const { llmAvailable, mode: llmMode } = require('../src/services/llm');
 const { isRetired }                   = require('./modules/retired_agents');
 
-// Minimum GENUINE (pre-addendum) keyword match a job must have before we let
-// the ATS addendum top it up. Below this the role is fundamentally off-target
-// (e.g. a Finance or Product Owner job for an AI candidate) and must stay
-// skipped — the addendum must never rescue an unrelated role into an application.
-const QUICK_FAIL_THRESHOLD = 45;
 const BOOST_TARGET         = 85;
 const STUCK_TIMEOUT_MS     = 10 * 60 * 1000;
 
@@ -144,9 +139,12 @@ async function scoreWithBoost(cv, jdText) {
   // check and got boosted to 100% by the addendum, so completely unrelated jobs
   // (0 keyword hits) were applied to. Any base score below the floor — including
   // 0 — is a hard skip with no addendum rescue.
-  if (score < QUICK_FAIL_THRESHOLD) {
-    console.log(`  [Scorer Agent] ${score}% below quick-fail threshold — skipping this CV (no addendum)`);
-    return { score, cvText: cleanedText, rawCvText: cleanedText, missingKeywords, allKeywords };
+  // The fit check is on must-haves (cv_scorer.matchFit): missing nice-to-haves never skip a
+  // job. A CV that isn't a fit gets no addendum, so it can never be topped up into one.
+  const fit = cvScorer.matchFit(cleanedText, allKeywords, cfg.MATCH_LEVEL);
+  if (!fit.pass) {
+    console.log(`  [Scorer Agent] Not a fit (${fit.reason}), skipping this CV (no addendum)`);
+    return { score, fit, cvText: cleanedText, rawCvText: cleanedText, missingKeywords, allKeywords };
   }
 
   // Addendum: append missing keywords at the bottom for ATS (no rewriting of CV body)
@@ -159,7 +157,7 @@ async function scoreWithBoost(cv, jdText) {
     console.log(`  [Scorer Agent] After addendum: ${score}%`);
   }
 
-  return { score, cvText, rawCvText: cleanedText, missingKeywords: missingKeywords || [], allKeywords: allKeywords || [] };
+  return { score, fit, cvText, rawCvText: cleanedText, missingKeywords: missingKeywords || [], allKeywords: allKeywords || [] };
 }
 
 async function processJob(job) {
@@ -213,7 +211,7 @@ async function processJob(job) {
 
   // NHS jobs are judged on essential-criteria evidence (below), so skip the keyword score's AI
   // call: the AI account has a per-minute limit shared by every user.
-  let { score, unscored, cvText: boostedText, rawCvText, missingKeywords, allKeywords } = job.source === 'trac'
+  let { score, fit, unscored, cvText: boostedText, rawCvText, missingKeywords, allKeywords } = job.source === 'trac'
     ? await (async () => { const t = cleanText(await cvSelector.extractCVText(bestCV.path)); return { score: 0, cvText: t, rawCvText: t, missingKeywords: [] }; })()
     : await scoreWithBoost(bestCV, job.description);
   // The AI couldn't read the advert's keywords: try the job again later, then skip it.
@@ -233,6 +231,7 @@ async function processJob(job) {
   let bestMissing      = missingKeywords;
   let bestAllKeywords  = allKeywords || [];
   let bestCvName       = bestCV.name;
+  let bestFit          = fit;
 
   // If the primary CV didn't reach target, try the others in keyword-score order
   if (score < BOOST_TARGET && job.source !== 'trac') {
@@ -246,7 +245,9 @@ async function processJob(job) {
       console.log(`\n  [Scorer Agent] ${score}% — trying next CV: ${altCV.name}`);
       const result = await scoreWithBoost(altCV, job.description);
 
-      if (result.score > bestScore) {
+      const pass = !!(result.fit && result.fit.pass), bestPass = !!(bestFit && bestFit.pass);
+      if ((pass && !bestPass) || (pass === bestPass && result.score > bestScore)) {
+        bestFit       = result.fit;
         bestScore     = result.score;
         bestCvText    = result.cvText;
         bestRawCvText = result.rawCvText;
@@ -255,7 +256,7 @@ async function processJob(job) {
         bestCvName    = altCV.name;
       }
 
-      if (result.score >= BOOST_TARGET) break;
+      if (pass && result.score >= BOOST_TARGET) break;
     }
   }
 
@@ -303,6 +304,12 @@ async function processJob(job) {
       ...(statement ? { coverLetter: statement } : {}),
     });
     console.log(`  [Scorer Agent] ✓ NHS job ${bestScore}% (${bestCvName}), supporting statement ${statement ? 'written' : 'not available, the agent will write answers per section'}${REVIEW_MODE ? ', held for your review' : ''}: ${job.title}`);
+    return;
+  }
+
+  if (bestFit && !bestFit.pass) {
+    queue.update(job.jobId, { status: 'skipped', cvScore: bestScore, reason: `Not a close enough match (${bestFit.reason})` });
+    console.log(`  [Scorer Agent] ✗ Not a close enough match (${bestFit.reason}): ${job.title}`);
     return;
   }
 

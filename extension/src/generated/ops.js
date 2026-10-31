@@ -286,10 +286,10 @@ module.exports = {
         const chosen = control && control.querySelector('[class*="single-value"],[class*="singleValue"],[class*="multi-value"],[class*="multiValue"]');
         return { question, has: !!(chosen && chosen.textContent.trim()) };
       },
-  "f3c8066d77ad1": el => {
+  "f87896960ea1a": el => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
-        const opts = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent);
+        const opts = Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent);
         return opts.map(o => (o.innerText || o.textContent || '').trim());
       },
   "f24fcff94188c": el => {
@@ -302,10 +302,10 @@ module.exports = {
         }
       },
   "f8a7cb68b42c2": el => { const b = el.parentElement && el.parentElement.querySelector('button'); if (b) b.click(); },
-  "f1ff3593896ac": (el, want) => {
+  "f0f66612e6ebc": (el, want) => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
-        const opt = Array.from((menu || document).querySelectorAll('[role="option"]')).filter(o => o.offsetParent)
+        const opt = Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent)
           .find(o => (o.innerText || o.textContent || '').trim() === want);
         if (!opt) return false;
         for (const t of ['pointermove', 'mousemove', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {

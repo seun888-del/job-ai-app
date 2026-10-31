@@ -889,9 +889,13 @@ async function renderSearch() {
         <span class="field-hint">Total across all agents. Capped at 25/day to protect your accounts and keep applications looking human.</span>
       </div>
       <div class="field">
-        <label>Minimum match score (%)</label>
-        <input id="min_score" type="number" min="0" max="100" placeholder="e.g. 60">
-        <span class="field-hint">Only apply to jobs where the tailored CV scores at or above this threshold. Leave blank to apply to all.</span>
+        <label>How close a match</label>
+        <select id="match_level">
+          <option value="wide">Wider: apply to more jobs</option>
+          <option value="balanced">Balanced (recommended)</option>
+          <option value="strict">Strict: close matches only</option>
+        </select>
+        <span class="field-hint">Jobs are only skipped when your CV misses what the advert must have.</span>
       </div>
       <div class="checkbox-field">
         <input id="seek_sponsorship" type="checkbox">
@@ -941,7 +945,7 @@ async function renderSearch() {
       ? 'Total across all agents. Capped at 25/day to protect your accounts and keep applications looking human.'
       : 'Free trial: up to 5 applications/day. Upgrade to Pro for up to 25/day.';
   }
-  document.getElementById('min_score').value = profile.min_match_score ?? '';
+  document.getElementById('match_level').value = profile.match_level || ((profile.min_match_score ?? 0) >= 70 ? 'strict' : 'balanced');
   document.getElementById('seek_sponsorship').checked = !!profile.seek_sponsorship;
 
   document.getElementById('save-prefs').addEventListener('click', async () => {
@@ -953,7 +957,8 @@ async function renderSearch() {
     });
     await window.api.profile.save({
       max_applications_per_day: Math.min(Number(document.getElementById('max_apps').value) || 15, planCap),
-      min_match_score: document.getElementById('min_score').value !== '' ? Number(document.getElementById('min_score').value) : null,
+      match_level: document.getElementById('match_level').value,
+      min_match_score: null,
       seek_sponsorship: document.getElementById('seek_sponsorship').checked ? 1 : 0,
     });
     showStatus(document.getElementById('status'), 'Saved');

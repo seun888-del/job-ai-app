@@ -179,6 +179,26 @@ async function scoreCV(cvText, jdText) {
   return { score, missingKeywords: missing, allKeywords: keywords };
 }
 
+// How picky the match check is (Search preferences). A job passes when its overall match
+// reaches "any", OR the CV covers at least "ess" percent of the advert's must-haves: missing
+// nice-to-haves alone never skip a job (tailoring brings them forward). Meeting none of two or
+// more must-haves always skips. Checked on the CV as written, before any keyword addendum.
+const MATCH_LEVELS = { wide: { any: 35, ess: 30 }, balanced: { any: 45, ess: 40 }, strict: { any: 70, ess: 70 } };
+function matchFit(cvText, allKeywords, level) {
+  const L = MATCH_LEVELS[level] || MATCH_LEVELS.balanced;
+  const kws = !allKeywords || !allKeywords.length ? [] : typeof allKeywords[0] === 'string' ? normaliseKeywords(allKeywords) : allKeywords;
+  if (!kws.length) return { pass: true, score: 0, essOk: 0, essTotal: 0, reason: '' };
+  const { score } = computeScore(cvText, kws);
+  const cvLower = String(cvText || '').toLowerCase();
+  const ess = kws.filter(k => k.essential);
+  const essOk = ess.filter(k => keywordCovered(cvLower, k)).length;
+  const many = ess.length >= 2;
+  const pass = many && !essOk ? false : score >= L.any || (many && (essOk / ess.length) * 100 >= L.ess);
+  const reason = pass ? '' : many ? `meets ${essOk} of ${ess.length} must-haves` : `${score}% match`;
+  console.log(`  [Scorer] Fit (${level || 'balanced'}): ${score}%, must-haves ${essOk}/${ess.length} → ${pass ? 'pass' : 'skip'}`);
+  return { pass, score, essOk, essTotal: ess.length, reason };
+}
+
 // Rescore after injecting keywords — deterministic, no LLM call.
 // Uses the keyword objects from the original scoreCV call. Tolerates the old
 // flat string[] form (older callers) by normalising first.
@@ -190,4 +210,4 @@ function rescoreCV(cvText, allKeywords) {
   return { score, missingKeywords: missing };
 }
 
-module.exports = { scoreCV, rescoreCV, extractJDKeywords, computeScore, hasTerm };
+module.exports = { scoreCV, rescoreCV, extractJDKeywords, computeScore, hasTerm, matchFit, MATCH_LEVELS };

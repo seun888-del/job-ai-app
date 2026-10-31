@@ -13,7 +13,6 @@ const { writePDF, writeStructuredPDF, buildPaths } = require('../../../bot/modul
 const { generateCoverLetter } = require('../../../bot/modules/cover_letter');
 const { isRelevantRole } = require('../../../bot/modules/relevance_gate');
 
-const QUICK_FAIL = 45;
 const BOOST_TARGET = 85;
 
 function boostCVText(cvText, keywords) {
@@ -74,8 +73,8 @@ export async function scoreJob(job, log) {
 
   await store.updateJob(job.jobId, { status: 'processing' });
   log(`Scoring: ${jobTitle} @ ${job.company}${cvs.length > 1 ? ` (${cvs.length} CVs)` : ''}`);
-  // Same rule as the app's Scorer, for each CV: under QUICK_FAIL that CV is not a fit (no keyword
-  // boost); above it the missing keywords are added. The best CV is used for this job.
+  // Same rule as the app's Scorer, for each CV: the must-haves check (cv_scorer.matchFit) decides
+  // if it fits; a fitting CV gets the missing keywords added. The best fitting CV is used.
   let best = null;
   for (const c of cvs) {
     const raw = cleanText(c.text);
@@ -87,19 +86,16 @@ export async function scoreJob(job, log) {
       if (n > 2) { log('Could not score ' + job.title + ', skipped.'); await store.updateJob(job.jobId, { status: 'skipped', reason: "Couldn't check how well your CV matches this job" }); return; }
       log('Scoring failed (' + e.message + '), will retry later.'); await store.updateJob(job.jobId, { status: 'pending', retryCount: n }); return;
     }
+    const fit = cvScorer.matchFit(raw, r.allKeywords, cfg.MATCH_LEVEL);
     let score = r.score, text = raw;
-    if (score >= QUICK_FAIL && score < BOOST_TARGET && (r.missingKeywords || []).length) { text = boostCVText(raw, r.missingKeywords); score = cvScorer.rescoreCV(text, r.allKeywords).score; }
-    if (!best || score > best.score) best = { cv: c, raw, cvText: text, score, missing: r.missingKeywords || [], all: r.allKeywords || [] };
+    if (fit.pass && score < BOOST_TARGET && (r.missingKeywords || []).length) { text = boostCVText(raw, r.missingKeywords); score = cvScorer.rescoreCV(text, r.allKeywords).score; }
+    if (!best || (fit.pass && !best.fit.pass) || (fit.pass === best.fit.pass && score > best.score)) best = { cv: c, raw, cvText: text, score, fit, missing: r.missingKeywords || [], all: r.allKeywords || [] };
   }
   const cv = best.cv, raw = best.raw, cvText0 = best.cvText, missing = best.missing;
   let score = best.score, cvText = cvText0;
-  if (score < QUICK_FAIL) {
-    await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `Not a close enough match (${score}%)` });
-    log(`Skipped: ${jobTitle} (not a close enough match, ${score}%)`); return;
-  }
-  if (score < cfg.MIN_SCORE) {
-    await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `CV scored ${score}% (you set ${cfg.MIN_SCORE}%)` });
-    log(`Skipped: ${jobTitle} (CV scored ${score}%, your minimum is ${cfg.MIN_SCORE}%)`); return;
+  if (!best.fit.pass) {
+    await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `Not a close enough match (${best.fit.reason})` });
+    log(`Skipped: ${jobTitle} (not a close enough match, ${best.fit.reason})`); return;
   }
 
   // Tailored CV in the app's fixed layout.
