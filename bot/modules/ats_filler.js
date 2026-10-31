@@ -956,9 +956,24 @@ function _yesNoForQuestion(question) {
     const worked = co.length > 2 && ((cfg.TRAC_DETAILS || {}).employment || []).some((e) => { const em = String(e.employer || '').toLowerCase().replace(/[^a-z0-9]/g, ''); return em && (em.includes(co) || co.includes(em)); });
     return worked ? 'yes' : 'no';
   }
-  // "Are you a British citizen?": from the right-to-work status saved with the NHS details.
+  // "Are you a British citizen?": the security clearance answer, else the right-to-work status
+  // saved with the NHS details.
   const rtwStatus = String((cfg.TRAC_DETAILS || {}).rightToWork || '').toLowerCase();
-  if (/\b(british|uk) citizen|citizen of the (uk|united kingdom)/.test(q) && rtwStatus) return /british citizen|uk citizen/.test(rtwStatus) ? 'yes' : 'no';
+  if (/\b(british|uk) citizen|citizen of the (uk|united kingdom)/.test(q)) {
+    const bc = cfg.APPLICANT.britishCitizen;
+    if (bc === 'yes' || bc === 'no') return bc;
+    if (rtwStatus) return /british citizen|uk citizen/.test(rtwStatus) ? 'yes' : 'no';
+  }
+  // Security clearance residency: "lived in the UK for the past 5 years without over 30 days
+  // abroad?", "any gaps outside the UK of 3 months or more?". ukResidence: 'all' (lived here, no
+  // trip over 30 days), 'short' (a trip of 30 days to 3 months), 'long' (3+ months away, or
+  // here under 5 years). Unset: no answer, so the job is skipped rather than guessed.
+  const res = cfg.APPLICANT.ukResidence;
+  if (['all', 'short', 'long'].includes(res) && /\b(5|five)\b/.test(q) && /\b(uk|united kingdom|britain)\b|abroad|overseas/.test(q)) {
+    const month = /30 days|one month|a month\b|4 weeks|four weeks/.test(q);
+    if (/(lived|living|resided|residing|resident) in the (uk|united kingdom)|(uk|united kingdom|british) resident/.test(q)) return month ? (res === 'all' ? 'yes' : 'no') : (res === 'long' ? 'no' : 'yes');
+    if (/outside|abroad|overseas|out of the (uk|united kingdom)|left the/.test(q)) return month ? (res === 'all' ? 'no' : 'yes') : (res === 'long' ? 'yes' : 'no');
+  }
   if (/gaps? in (your )?(employment|work history|career)|employment gaps?/.test(q)) {
     const gap = _hasEmploymentGap(q);
     if (gap !== null) return gap ? 'yes' : 'no';

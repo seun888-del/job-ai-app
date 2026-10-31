@@ -46,6 +46,8 @@ const cfg = {
       requiresSponsorship: !!profile.requiresSponsorship,
       seekSponsorship: !!profile.seekSponsorship,
       drivingLicence: !!profile.drivingLicence,
+      britishCitizen: profile.britishCitizen || '',
+      ukResidence: profile.ukResidence || '',
       salaryExpectation: profile.salaryExpectation || '',
       country: profile.country || 'United Kingdom',
       experienceLevel: profile.experienceLevel || '',

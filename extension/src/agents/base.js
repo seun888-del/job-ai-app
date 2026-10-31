@@ -1,5 +1,5 @@
-// Shared loop for the Reed, LinkedIn and company-site agents: each works in its own minimised
-// Chrome window and repeats  search -> score (tailor CV) -> apply  every round, stopping at the
+// Shared loop for the Reed, LinkedIn and company-site agents: each works in its own tab of one
+// shared minimised Chrome window and repeats  search -> score (tailor CV) -> apply  every round, stopping at the
 // daily limit. Site-specific steps come from the subclass: signIn(), search(), apply(job).
 import cfg from '../shims/config.js';
 import * as store from '../lib/store.js';
@@ -16,6 +16,53 @@ export function detectWorkType(d) {
   if (/\bfully remote\b|\b100%\s*remote\b|\bremote only\b|\bremote position\b|\bwork from home\b|\bwfh\b|\bremote working\b|\bremote role\b|\bremote job\b/.test(d)) return 'remote';
   if (/\bhybrid\b/.test(d)) return 'hybrid';
   return 'onsite';
+}
+
+// A minimised window. Chrome on Windows restores it (normal, often focused) the first time a
+// page draws in it, so watch for that and minimise it again. The watch ends a few seconds after
+// the first restore, or when Job-AI shows the window on purpose (showWindow).
+const watching = new Map();
+export async function openMinimised(opts = { url: 'about:blank' }) {
+  const win = await chrome.windows.create({ ...opts, focused: false, state: 'minimized' }).catch(() => null);
+  if (!win) return null;
+  if (win.state !== 'minimized') await chrome.windows.update(win.id, { state: 'minimized' }).catch(() => {});
+  let ending = false;
+  const stop = () => { chrome.windows.onBoundsChanged.removeListener(fix); chrome.windows.onRemoved.removeListener(gone); watching.delete(win.id); };
+  const gone = (id) => { if (id === win.id) stop(); };
+  const fix = async (w) => {
+    if (w.id !== win.id) return;
+    const x = await chrome.windows.get(win.id).catch(() => null);
+    if (!x || x.state === 'minimized' || !watching.has(win.id)) return;
+    chrome.windows.update(win.id, { state: 'minimized' }).catch(() => {});
+    if (!ending) { ending = true; setTimeout(stop, 3000); }
+  };
+  chrome.windows.onBoundsChanged.addListener(fix);
+  chrome.windows.onRemoved.addListener(gone);
+  watching.set(win.id, stop);
+  return win.id;
+}
+export function showWindow(id) {
+  const stop = watching.get(id); if (stop) stop();
+  return chrome.windows.update(id, { state: 'normal', focused: true }).catch(() => {});
+}
+
+// All agents share one minimised window, each in its own tab. It closes when the last one stops.
+let sharedWin = null;
+const winUsers = new Set();
+export async function agentWindow(agent) {
+  winUsers.add(agent);
+  const id = sharedWin && (await sharedWin);
+  if (id && (await chrome.windows.get(id).catch(() => null))) return id;
+  sharedWin = openMinimised();
+  return sharedWin;
+}
+export async function releaseWindow(agent) {
+  winUsers.delete(agent);
+  const id = agent.windowId;
+  if (!id) return;
+  if (winUsers.size) { if (agent.page && !agent.page.isClosed()) await chrome.tabs.remove(agent.page.tabId).catch(() => {}); return; }
+  sharedWin = null;
+  await chrome.windows.remove(id).catch(() => {});
 }
 
 // Closing an agent's browser window stops that agent, same as closing the app's browser.
@@ -67,17 +114,16 @@ export class SiteAgent {
       if (this._unwatch) this._unwatch();
       this._unwatch = null;
       this.running = false;
-      if (this.windowId) await chrome.windows.remove(this.windowId).catch(() => {});
+      await releaseWindow(this);
       this.page = null; this.windowId = null;
       this.onChange();
     }
   }
-  // The agent's own minimised window, opened on first use.
+  // The agents' shared minimised window, opened on first use.
   async ensurePage() {
     if (this.page && !this.page.isClosed()) return this.page;
     if (!this.windowId) {
-      const win = await chrome.windows.create({ url: 'about:blank', focused: false, state: 'minimized' }).catch(() => null);
-      this.windowId = win && win.id;
+      this.windowId = await agentWindow(this);
       if (!this._unwatch) this._unwatch = stopOnWindowClose(this);
     }
     this.page = await Page.open('about:blank', { windowId: this.windowId });

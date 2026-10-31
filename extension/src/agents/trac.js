@@ -4,7 +4,7 @@
 import cfg from '../shims/config.js';
 import * as store from '../lib/store.js';
 import { Page } from '../driver/page.js';
-import { stopOnWindowClose } from './base.js';
+import { stopOnWindowClose, agentWindow, releaseWindow, showWindow } from './base.js';
 
 const trac = require('../../../bot/modules/trac_source');
 const salary = require('../../../bot/modules/salary_filter');
@@ -44,9 +44,8 @@ export class TracAgent {
     this.log(`Starting (${(await this.autoSubmit()) ? 'Submit for me is ON' : 'you submit applications yourself'}).`);
     let unwatch = () => {};
     try {
-      // One background window for the agent's pages, so your own tabs are never touched.
-      const win = await chrome.windows.create({ url: 'about:blank', focused: false, state: 'minimized' }).catch(() => null);
-      this.windowId = win && win.id;
+      // The agents' shared background window, so your own tabs are never touched.
+      this.windowId = await agentWindow(this);
       unwatch = stopOnWindowClose(this);
       this.page = await Page.open('about:blank', { windowId: this.windowId });
       while (this.running) {
@@ -59,7 +58,7 @@ export class TracAgent {
         await this.prepare().catch((e) => this.log('Prepare error: ' + e.message));
         if (!this.running) break;
         // Trac asks for a sign-in: bring the agent window up so the user can do it.
-        const signedIn = await ensureTracLogin(this.page, (m) => { this.log(m); if (/Waiting for you to complete login/i.test(m) && this.windowId) chrome.windows.update(this.windowId, { state: 'normal', focused: true }).catch(() => {}); });
+        const signedIn = await ensureTracLogin(this.page, (m) => { this.log(m); if (/Waiting for you to complete login/i.test(m) && this.windowId) { chrome.tabs.update(this.page.tabId, { active: true }).catch(() => {}); showWindow(this.windowId); } });
         if (signedIn && this.windowId) chrome.windows.update(this.windowId, { state: 'minimized' }).catch(() => {});
         if (!signedIn) { this.log('Not signed in to Trac. Sign in in the Job-AI window, then it carries on.'); await this.wait(cycleEnd); continue; }
         if (globalThis.__jobaiStep) globalThis.__jobaiStep('site_connected');
@@ -75,7 +74,7 @@ export class TracAgent {
     } finally {
       unwatch();
       this.running = false;
-      if (this.windowId) await chrome.windows.remove(this.windowId).catch(() => {});
+      await releaseWindow(this);
       this.page = null; this.windowId = null;
       this.onChange();
     }

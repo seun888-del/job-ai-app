@@ -992,6 +992,11 @@ VIEWS.activity = async function renderActivity() {
 
 // ── Setup: Personal details ──────────────────────────────────────────────────
 const saveBar = (id, label = 'Save') => `<div class="card"><div class="ext-inline"><button class="primary" id="${id}">${label}</button><span class="status-msg" id="${id}-st"></span></div></div>`;
+// Security clearance questions (British citizen, 5 years in the UK). Used by Personal Details and setup.
+const CLEARANCE = [
+  ['britishCitizen', 'British citizen?', [['', 'Not set'], ['yes', 'Yes'], ['no', 'No']]],
+  ['ukResidence', 'Your last 5 years', [['', 'Not set'], ['all', 'Lived in the UK, no trip abroad over 30 days'], ['short', 'Lived in the UK, a trip of 30 days to 3 months'], ['long', '3+ months abroad, or in the UK under 5 years']]],
+];
 VIEWS.personal = async function renderPersonal() {
   const { profile: P } = await loadConfig();
   const f = (k, l, type = 'text', ph = '') => `<div class="field"><label>${esc(l)}</label><input class="p-in" data-k="${k}" type="${type}" value="${esc(P[k] ?? '')}" placeholder="${esc(ph)}"></div>`;
@@ -1011,6 +1016,9 @@ VIEWS.personal = async function renderPersonal() {
       ${f('salaryExpectation', 'Minimum salary (£ a year)', 'text', 'e.g. 28000')}
     </div>
     <div class="tracd-sectors" style="margin-top:12px">${[['requiresSponsorship', 'I need visa sponsorship'], ['seekSponsorship', 'Only apply to jobs that offer sponsorship'], ['willingToRelocate', 'Willing to relocate'], ['drivingLicence', 'I have a driving licence']].map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="p-flag" data-k="${k}" ${P[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
+    <div class="card"><h3>Security clearance</h3><p class="muted">Some UK employers, often government suppliers, ask these. Left blank, those jobs are skipped.</p><div class="tracd-grid">
+      ${CLEARANCE.map(([k, l, o]) => `<div class="field"><label>${l}</label><select class="p-sel" data-k="${k}">${o.map(([v, t]) => `<option value="${v}" ${(P[k] || '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`).join('')}
+    </div></div>
     <div class="card"><h3>Equality monitoring</h3><p class="muted">Leave as "Prefer not to say" if you'd rather not share.</p><div class="tracd-grid">
       ${[['eeoGender', 'Gender', ['', 'Male', 'Female', 'Non-binary']], ['eeoEthnicity', 'Ethnicity', ['', 'White', 'Mixed', 'Asian', 'Black', 'Arab', 'Other']], ['eeoDisability', 'Disability', ['', 'No', 'Yes']], ['eeoVeteran', 'Veteran', ['', 'No', 'Yes']]].map(([k, l, o]) => `<div class="field"><label>${l}</label><select class="p-sel" data-k="${k}">${o.map((x) => `<option value="${x}" ${(P[k] || '') === x ? 'selected' : ''}>${x || 'Prefer not to say'}</option>`).join('')}</select></div>`).join('')}
     </div></div>
@@ -1491,7 +1499,9 @@ async function initOnboarding() {
           <div class="field" id="wc-state-row" style="margin-bottom:10px"><label for="wc-state">State</label><select id="wc-state" autocomplete="address-level1"><option value="">Choose your state</option>${Object.entries(US_STATE_NAMES).map(([c, n]) => `<option value="${c}">${n}</option>`).join('')}</select></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-notice">Notice period</label><select id="wc-notice">${[['immediately', 'Can start now'], ['1week', '1 week'], ['2weeks', '2 weeks'], ['1month', '1 month'], ['2months', '2 months'], ['3months', '3 months']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-salary" id="wc-salary-l">Lowest salary (£ a year)</label><input id="wc-salary" inputmode="numeric" placeholder="e.g. 30000"></div>
+          ${CLEARANCE.map(([k, l, o]) => `<div class="field wc-clear" style="margin-bottom:10px${k === 'ukResidence' ? ';grid-column:1 / -1' : ''}"><label for="wc-${k}">${l}</label><select id="wc-${k}">${o.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></div>`).join('')}
         </div>
+        <p class="wc-clear" style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:-4px 0 10px">Security clearance questions some UK employers ask. Leave as Not set to skip those jobs.</p>
         <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:0 0 10px">Employers' forms ask for these. With them filled in, Job-AI can send your applications without stopping to ask you.</p>
         <div class="field" style="margin-bottom:8px"><label for="wc-titles">Job titles to apply for, separated by commas</label><textarea id="wc-titles" rows="3" style="width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--border-strong,var(--border));border-radius:8px;background:var(--surface,#fff);color:var(--text);resize:vertical"></textarea></div>
         <div class="field" style="margin-bottom:10px"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="wc-wt" value="${v}"><span>${l}</span></label>`).join('')}</div></div>        <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
@@ -1545,6 +1555,7 @@ async function initOnboarding() {
       $('#wc-state').value = usStateOf(`${P.location || ''}, ${P.address || ''}`);
       $('#wc-notice').value = P.availability || 'immediately';
       $('#wc-salary').value = String(P.salaryExpectation || '').replace(/[^0-9]/g, '');
+      $('#wc-britishCitizen').value = P.britishCitizen || ''; $('#wc-ukResidence').value = P.ukResidence || '';
       attachAutofill().catch(() => {});
       const where = () => {
         const us = $('#wc-region').value === 'us';
@@ -1553,6 +1564,7 @@ async function initOnboarding() {
         $('#wc-salary-l').textContent = `Lowest salary (${us ? '$' : '£'} a year)`;
         $('#wc-nhs-row').style.display = us ? 'none' : 'flex';
         $('#wc-state-row').style.display = us ? '' : 'none';
+        $$('.wc-clear').forEach((e) => { e.style.display = us ? 'none' : ''; });
       };
       $('#wc-region').onchange = where; where();
       step('ws-check');
@@ -1589,6 +1601,7 @@ async function initOnboarding() {
       const sponsor = $('#wc-sponsor').checked;
       await store.patch('profile', {
         firstName: first, lastName: last, phone, searchTerms: titles, requiresSponsorship: sponsor, workTypePriority: workTypes,        address: `${street}, ${postcode}`, availability: $('#wc-notice').value, drivingLicence: $('#wc-licence').checked,
+        ...(region === 'uk' ? { britishCitizen: $('#wc-britishCitizen').value, ukResidence: $('#wc-ukResidence').value } : {}),
         ...(salary ? { salaryExpectation: salary } : {}),
         // Keep the county or state the CV gave ("Leeds, West Yorkshire") when the town is unchanged.
         // US: "Town, ST" so forms asking for the state get it.

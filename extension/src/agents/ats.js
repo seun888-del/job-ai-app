@@ -8,7 +8,7 @@
 import cfg from '../shims/config.js';
 import * as store from '../lib/store.js';
 import { Page } from '../driver/page.js';
-import { SiteAgent } from './base.js';
+import { SiteAgent, openMinimised, showWindow } from './base.js';
 
 const atsFiller = require('../../../bot/modules/ats_filler');
 const httpSubmit = require('../../../bot/modules/ats_http_submit');
@@ -165,7 +165,7 @@ export class AtsAgent extends SiteAgent {
     try {
       const win = live.length ? (await chrome.tabs.get(live[0])).windowId : null;
       if (win) await chrome.tabs.move(page.tabId, { windowId: win, index: -1 });
-      else await chrome.windows.create({ tabId: page.tabId, focused: false, state: 'minimized' });
+      else await openMinimised({ tabId: page.tabId });
       await chrome.tabs.update(page.tabId, { autoDiscardable: false }).catch(() => {});
       page._cleanup();
       this.page = null;
@@ -264,7 +264,7 @@ export async function fillAndOpen(jobId, onChange = () => {}) {
   let tab, note = 'Filled. Check the form, pass any check, then press Submit.';
   if (kept) {
     tab = new Page(kept.id, kept.windowId);
-    await chrome.windows.update(kept.windowId, { state: 'normal', focused: true }).catch(() => {});
+    await showWindow(kept.windowId);
     await chrome.tabs.update(kept.id, { active: true });
     note = LAST_STEP[job.waitKind] || LAST_STEP.form;
   } else {
