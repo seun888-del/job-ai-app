@@ -513,6 +513,10 @@ VIEWS.dashboard = async function renderDashboardView() {
     const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
     const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites' };
     const bySource = Object.keys(LABEL).map((s) => [s, applied.filter((j) => j.source === s).length]).filter(([, n]) => n);
+    // Many jobs skipped as not a close match this week: offer the Wider match level once.
+    const weekAgo = Date.now() - 7 * 864e5;
+    const tooFar = all.filter((j) => j.status === 'skipped' && /^Not a close enough match/.test(j.reason || '') && Date.parse(j.updatedAt || 0) >= weekAgo);
+    const offerWider = tooFar.length >= 8 && profile.matchLevel !== 'wide' && !settings.widerOfferOff;
 
     // Company sites: what to do with a job that needs a person. auto = skip it (only "Applied"
     // ever shows), assist = send the rest and bring those to the user, review = send nothing
@@ -571,6 +575,8 @@ VIEWS.dashboard = async function renderDashboardView() {
       </div>
 
       ${hasLicence ? '' : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 7 days, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
+
+      ${offerWider ? `<div class="no-license-banner"><span>${tooFar.length} jobs this week were skipped as not a close enough match. Try a wider match?</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="wider-yes">Try Wider</button><button class="welcome-skip-link" id="wider-no">No thanks</button></span></div>` : ''}
 
       ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
@@ -704,6 +710,13 @@ VIEWS.dashboard = async function renderDashboardView() {
     }));
     $$('.open-url, .nhs-open').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.url)));
     $('#nl-setup')?.addEventListener('click', openSetup);
+    $('#wider-yes')?.addEventListener('click', async () => {
+      // Wider from now on, and this week's close misses get checked again.
+      await store.patch('profile', { matchLevel: 'wide', minScore: null });
+      for (const j of tooFar) await store.updateJob(j.jobId, { status: 'pending', reason: '', retryCount: 0 });
+      await loadConfig(); renderDashboard();
+    });
+    $('#wider-no')?.addEventListener('click', async () => { await store.patch('settings', { widerOfferOff: true }); renderDashboard(); });
     $$('.nhs-statement').forEach((b) => b.addEventListener('click', () => { const p = $('#nhs-st-' + b.dataset.i); p.hidden = !p.hidden; b.textContent = p.hidden ? 'Supporting statement' : 'Hide supporting statement'; }));
   } finally { dashBusy = false; }
 };
@@ -1476,9 +1489,7 @@ async function initOnboarding() {
         </div>
         <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:0 0 10px">Employers' forms ask for these. With them filled in, Job-AI can send your applications without stopping to ask you.</p>
         <div class="field" style="margin-bottom:8px"><label for="wc-titles">Job titles to apply for, separated by commas</label><textarea id="wc-titles" rows="3" style="width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--border-strong,var(--border));border-radius:8px;background:var(--surface,#fff);color:var(--text);resize:vertical"></textarea></div>
-        <div class="field" style="margin-bottom:10px"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="wc-wt" value="${v}"><span>${l}</span></label>`).join('')}</div></div>
-        <div class="field" style="margin-bottom:10px"><label for="wc-level">How close a match</label><select id="wc-level">${[['wide', 'Wider: apply to more jobs'], ['balanced', 'Balanced (recommended)'], ['strict', 'Strict: close matches only']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
-        <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
+        <div class="field" style="margin-bottom:10px"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="wc-wt" value="${v}"><span>${l}</span></label>`).join('')}</div></div>        <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
         <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-licence" style="width:16px;height:16px;margin:0"> <span>I have a full driving licence</span></label>
         <label id="wc-nhs-row" style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-nhs" style="width:16px;height:16px;margin:0"> <span>Also apply for NHS jobs (needs a Trac account)</span></label>
         <button class="primary" id="w-done" style="width:100%">Find me jobs</button>
@@ -1518,9 +1529,7 @@ async function initOnboarding() {
       $('#wc-region').value = isUS(st) ? 'us' : 'uk';
       $('#wc-sponsor').checked = !!P.requiresSponsorship;
       const wt = (P.workTypePriority || []).length ? P.workTypePriority : ['remote', 'hybrid', 'onsite'];
-      $$('.wc-wt').forEach((c) => { c.checked = wt.includes(c.value); });
-      $('#wc-level').value = P.matchLevel || (Number(P.minScore) >= 70 ? 'strict' : 'balanced');
-      $('#wc-licence').checked = !!P.drivingLicence;
+      $$('.wc-wt').forEach((c) => { c.checked = wt.includes(c.value); });      $('#wc-licence').checked = !!P.drivingLicence;
       $('#wc-nhs').checked = !!st.wantsNhs;
       // The stored address is one line, "street, postcode" (the form filler splits it the same way).
       const addr = String(P.address || '').trim();
@@ -1573,8 +1582,7 @@ async function initOnboarding() {
       const rtw = String(P.rightToWorkCountries || '').split(',').map((c) => c.trim()).filter(Boolean);
       const sponsor = $('#wc-sponsor').checked;
       await store.patch('profile', {
-        firstName: first, lastName: last, phone, searchTerms: titles, requiresSponsorship: sponsor, workTypePriority: workTypes, matchLevel: $('#wc-level').value, minScore: null,
-        address: `${street}, ${postcode}`, availability: $('#wc-notice').value, drivingLicence: $('#wc-licence').checked,
+        firstName: first, lastName: last, phone, searchTerms: titles, requiresSponsorship: sponsor, workTypePriority: workTypes,        address: `${street}, ${postcode}`, availability: $('#wc-notice').value, drivingLicence: $('#wc-licence').checked,
         ...(salary ? { salaryExpectation: salary } : {}),
         // Keep the county or state the CV gave ("Leeds, West Yorkshire") when the town is unchanged.
         // US: "Town, ST" so forms asking for the state get it.
