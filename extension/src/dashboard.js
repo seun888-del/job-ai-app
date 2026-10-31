@@ -341,28 +341,33 @@ const AUTOFILL_KEYS = {
   'p-in': { firstName: 'given-name', lastName: 'family-name', email: 'email', phone: 'tel', location: 'address-level2', linkedin: 'url' },
   't-text': { firstName: 'given-name', middleName: 'additional-name', lastName: 'family-name', email: 'email', mobile: 'tel', address: 'address-line1', city: 'address-level2', county: 'address-level1', postcode: 'postal-code', country: 'country-name' },
 };
+// The setup check step's boxes, by id.
+const SETUP_AUTOFILL = { 'wc-first': 'given-name', 'wc-last': 'family-name', 'wc-phone': 'tel', 'wc-street': 'address-line1', 'wc-town': 'address-level2', 'wc-postcode': 'postal-code' };
 async function attachAutofill() {
   const P = (await store.get('profile')) || {}, T = (await store.get('trac')) || {};
+  // The profile keeps the address as one line, "street, postcode".
+  const addr = String(P.address || '').trim();
+  const pc = (addr.match(PC_UK) || addr.match(ZIP_US) || [''])[0];
   const known = {
     'given-name': [P.firstName, T.firstName], 'additional-name': [T.middleName], 'family-name': [P.lastName, T.lastName],
-    email: [P.email, T.email], tel: [P.phone, T.mobile], 'address-line1': [T.address], 'address-level2': [P.location, T.city],
-    'address-level1': [T.county], 'postal-code': [T.postcode], 'country-name': [T.country], url: [P.linkedin],
+    email: [P.email, T.email], tel: [P.phone, T.mobile], 'address-line1': [addr.replace(pc, '').replace(/[\s,]+$/, ''), T.address],
+    'address-level2': [P.location, String(P.location || '').split(',')[0], T.city], 'address-level1': [T.county], 'postal-code': [pc.toUpperCase(), T.postcode],
+    'country-name': [T.country], url: [P.linkedin],
+  };
+  const attach = (el, kind, listId) => {
+    el.setAttribute('autocomplete', kind);
+    el.setAttribute('name', kind);
+    const values = [...new Set((known[kind] || []).map((v) => String(v || '').trim()).filter(Boolean))];
+    if (!values.length) return;
+    let dl = document.getElementById(listId);
+    if (!dl) { dl = document.createElement('datalist'); dl.id = listId; el.after(dl); }
+    dl.innerHTML = values.map((v) => `<option value="${esc(v)}"></option>`).join('');
+    el.setAttribute('list', listId);
   };
   for (const [cls, keys] of Object.entries(AUTOFILL_KEYS)) {
-    for (const el of $$('input.' + cls)) {
-      const kind = keys[el.dataset.k];
-      if (!kind) continue;
-      el.setAttribute('autocomplete', kind);
-      el.setAttribute('name', kind);
-      const values = [...new Set((known[kind] || []).map((v) => String(v || '').trim()).filter(Boolean))];
-      if (!values.length) continue;
-      const listId = 'af-' + cls + '-' + el.dataset.k;
-      let dl = document.getElementById(listId);
-      if (!dl) { dl = document.createElement('datalist'); dl.id = listId; el.after(dl); }
-      dl.innerHTML = values.map((v) => `<option value="${esc(v)}"></option>`).join('');
-      el.setAttribute('list', listId);
-    }
+    for (const el of $$('input.' + cls)) if (keys[el.dataset.k]) attach(el, keys[el.dataset.k], 'af-' + cls + '-' + el.dataset.k);
   }
+  for (const [id, kind] of Object.entries(SETUP_AUTOFILL)) { const el = document.getElementById(id); if (el) attach(el, kind, 'af-' + id); }
 }
 
 function navigate(v) {
@@ -1540,6 +1545,7 @@ async function initOnboarding() {
       $('#wc-state').value = usStateOf(`${P.location || ''}, ${P.address || ''}`);
       $('#wc-notice').value = P.availability || 'immediately';
       $('#wc-salary').value = String(P.salaryExpectation || '').replace(/[^0-9]/g, '');
+      attachAutofill().catch(() => {});
       const where = () => {
         const us = $('#wc-region').value === 'us';
         $('#wc-sponsor-l').textContent = `I need visa sponsorship to work in the ${us ? 'USA' : 'UK'}`;
