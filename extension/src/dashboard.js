@@ -1476,6 +1476,7 @@ async function initOnboarding() {
         </div>
         <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:0 0 10px">Employers' forms ask for these. With them filled in, Job-AI can send your applications without stopping to ask you.</p>
         <div class="field" style="margin-bottom:8px"><label for="wc-titles">Job titles to apply for, separated by commas</label><textarea id="wc-titles" rows="3" style="width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--border-strong,var(--border));border-radius:8px;background:var(--surface,#fff);color:var(--text);resize:vertical"></textarea></div>
+        <div class="field" style="margin-bottom:10px"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="wc-wt" value="${v}"><span>${l}</span></label>`).join('')}</div></div>
         <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
         <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-licence" style="width:16px;height:16px;margin:0"> <span>I have a full driving licence</span></label>
         <label id="wc-nhs-row" style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-nhs" style="width:16px;height:16px;margin:0"> <span>Also apply for NHS jobs (needs a Trac account)</span></label>
@@ -1515,6 +1516,8 @@ async function initOnboarding() {
       $('#wc-titles').value = (P.searchTerms || []).join(', ');
       $('#wc-region').value = isUS(st) ? 'us' : 'uk';
       $('#wc-sponsor').checked = !!P.requiresSponsorship;
+      const wt = (P.workTypePriority || []).length ? P.workTypePriority : ['remote', 'hybrid', 'onsite'];
+      $$('.wc-wt').forEach((c) => { c.checked = wt.includes(c.value); });
       $('#wc-licence').checked = !!P.drivingLicence;
       $('#wc-nhs').checked = !!st.wantsNhs;
       // The stored address is one line, "street, postcode" (the form filler splits it the same way).
@@ -1551,6 +1554,8 @@ async function initOnboarding() {
       if (!first || !last) { setSt('#w-st', 'Please add your first and last name.', true); return; }
       if (!phone) { setSt('#w-st', 'Please add your phone number. Employers ask for it.', true); return; }
       if (!titles.length) { setSt('#w-st', 'Add at least one job title to apply for.', true); return; }
+      const workTypes = $$('.wc-wt:checked').map((c) => c.value);
+      if (!workTypes.length) { setSt('#w-st', 'Choose at least one: remote, hybrid or on-site.', true); return; }
       const region = $('#wc-region').value;
       const street = $('#wc-street').value.trim(), town = $('#wc-town').value.trim();
       const postcode = $('#wc-postcode').value.trim().toUpperCase();
@@ -1566,7 +1571,7 @@ async function initOnboarding() {
       const rtw = String(P.rightToWorkCountries || '').split(',').map((c) => c.trim()).filter(Boolean);
       const sponsor = $('#wc-sponsor').checked;
       await store.patch('profile', {
-        firstName: first, lastName: last, phone, searchTerms: titles, requiresSponsorship: sponsor,
+        firstName: first, lastName: last, phone, searchTerms: titles, requiresSponsorship: sponsor, workTypePriority: workTypes,
         address: `${street}, ${postcode}`, availability: $('#wc-notice').value, drivingLicence: $('#wc-licence').checked,
         ...(salary ? { salaryExpectation: salary } : {}),
         // Keep the county or state the CV gave ("Leeds, West Yorkshire") when the town is unchanged.
