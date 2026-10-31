@@ -105,7 +105,7 @@ export class SiteAgent {
         await this.scorePending({ untilOneReady: this.firstWin });
         await this.applyReady();
         if (this.firstWin) { this.firstWin = false; await this.scorePending(); await this.applyReady(); }
-        this.log('Round done. Searching again in a few minutes.');
+        this.log(`Round done. Next search at ${new Date(roundEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`);
         await this.wait(roundEnd);
       }
     } catch (e) {

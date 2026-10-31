@@ -110,6 +110,10 @@ export class AtsAgent extends SiteAgent {
     const found = jobs.length;
     jobs = jobs.filter((j) => titleMatch.titleMatches(j.title, matchers)).slice(0, 50);
     this.log(`${found} company-site job(s) in the feed, ${jobs.length} match your job titles.`);
+    let fresh = 0;
+    for (const job of jobs) if (!(await store.hasJob(job.jobId))) fresh++;
+    // The feed gets new jobs every few hours, so a quick re-check often has nothing new.
+    if (jobs.length && !fresh) this.log('All of them were checked before. New jobs are added every few hours; more job titles find more.');
     for (const job of jobs) {
       if (!this.running) return;
       if (await store.hasJob(job.jobId)) continue;
