@@ -31,6 +31,9 @@ function titleMatches(title, matchers) {
   const have = new Set(words(title));
   // "Helpdesk" / "help desk" jobs are IT service desk jobs.
   if (have.has('helpdesk') || /\bhelp desk\b/.test(f)) ['it', 'service', 'desk'].forEach((w) => have.add(w));
+  // IT support jobs that don't say "IT": "2nd Line Support Consultant", "Technical Support
+  // Engineer", "Infrastructure Support Engineer", "IS Support Specialist", "Support Engineer".
+  if (/ (technical|tech|ict|is|infrastructure|applications?|systems?|desktop|cloud|(1st|2nd|3rd|first|second|third) line) support |\b(1st|2nd|3rd|first|second|third) line\b| support engineer /.test(f)) have.add('it');
   return matchers.some((m) => f.includes(' ' + m.phrase + ' ') || (m.need.length > 0 && m.need.every((w) => have.has(w))));
 }
 
