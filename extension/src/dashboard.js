@@ -491,6 +491,9 @@ VIEWS.dashboard = async function renderDashboardView() {
     const ucOn = !us && (profile.country || 'United Kingdom') === 'United Kingdom';
     const ucPending = all.filter((j) => j.status === 'applied' && !j.ucLoggedAt);
     const hasLicence = licenceActive(license);
+    // Trial days left (null when not on a trial), and a trial or plan that has run out.
+    const trialLeft = hasLicence && license.status === 'trial' && license.expiresAt ? Math.max(0, Math.ceil((new Date(license.expiresAt) - Date.now()) / 86400000)) : null;
+    const ended = !hasLicence && !!license.key && license.status !== 'device_trial_used';
     const setupDone = {
       personal: !!(profile.firstName && profile.lastName && profile.email && profile.phone),
       cvs: !!(cv && cv.text),
@@ -579,7 +582,12 @@ VIEWS.dashboard = async function renderDashboardView() {
         </div>
       </div>
 
-      ${hasLicence ? '' : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 7 days, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
+      ${hasLicence ? (trialLeft !== null && trialLeft <= 3 ? `<div class="no-license-banner"><span>Your free trial ends ${trialLeft <= 1 ? 'today' : `in ${trialLeft} days`}.${applied.length ? ` Job-AI has sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you so far.` : ''} Keep your agents applying, first month half price.</span><button class="no-license-cta" id="keep-jobai">Keep Job-AI →</button></div>` : '')
+        : ended ? `<div class="card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+          <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${applied.length ? `Job-AI sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you` : 'Your free trial has ended'}</h3>
+          <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan and they start again straight away, up to 25 a day. Your first month is half price.</p></div>
+          <button class="primary" id="keep-jobai">Keep Job-AI</button></div>`
+        : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 7 days, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
       ${offerWider ? `<div class="no-license-banner"><span>${tooFar.length} jobs this week were skipped as not a close enough match. Try a wider match?</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="wider-yes">Try Wider</button><button class="welcome-skip-link" id="wider-no">No thanks</button></span></div>` : ''}
 
@@ -715,6 +723,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     }));
     $$('.open-url, .nhs-open').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.url)));
     $('#nl-setup')?.addEventListener('click', openSetup);
+    $('#keep-jobai')?.addEventListener('click', () => openTab(`https://tryjobai.com/pricing?lk=${encodeURIComponent(license.key)}&utm_source=extension&utm_campaign=${ended ? 'trial_ended' : 'trial_ending'}`));
     $('#wider-yes')?.addEventListener('click', async () => {
       // Wider from now on, and this week's close misses get checked again.
       await store.patch('profile', { matchLevel: 'wide', minScore: null });
@@ -1136,6 +1145,9 @@ VIEWS.license = async function renderLicense() {
       <div id="tr-mail" hidden><div class="field" style="max-width:320px"><label>The email you set up with</label><input id="tr-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
       <div class="ext-inline"><button class="secondary" id="tr-send">Send code</button><span class="status-msg" id="tr-mail-st"></span></div></div>
     </div>`}
+    ${!active && license.key && license.status !== 'device_trial_used' ? `<div class="card"><h3 style="margin:0 0 6px">Keep Job-AI</h3>
+      <p class="muted" style="margin:0 0 12px">Your access has ended. Pick a plan and your agents start again with the same key, settings and CV. First month half price.</p>
+      <button class="primary" id="lic-keep">Choose a plan</button></div>` : ''}
     <div class="card">${active ? '' : '<h3 style="margin:0 0 6px">Already have a key?</h3>'}
       ${license.key ? `<div class="stat-row"><span class="stat-label">Key</span><span class="stat-value">•••• ${esc(license.key.slice(-4))}</span></div>
       <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value">${active ? (license.status === 'trial' ? 'Free trial' : 'Active') : license.status === 'device_trial_used' ? 'Trial already used on this device' : 'Not active'}</span></div>
@@ -1155,6 +1167,7 @@ VIEWS.license = async function renderLicense() {
       <div id="ph-mail" hidden><div class="field" style="max-width:320px"><label>Your email</label><input id="ph-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
       <div class="ext-inline"><button class="secondary" id="ph-send">Send code</button><span class="status-msg" id="ph-mail-st"></span></div></div>
     </div>`}`;
+  $('#lic-keep')?.addEventListener('click', () => openTab(`https://tryjobai.com/pricing?lk=${encodeURIComponent(license.key)}&utm_source=extension&utm_campaign=licence_page`));
   // Same as the app: open Stripe's billing portal for this licence.
   $('#manage-sub')?.addEventListener('click', async () => {
     const b = $('#manage-sub'); b.disabled = true; setSt('#manage-st', 'Opening secure billing portal…');
