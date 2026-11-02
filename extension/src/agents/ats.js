@@ -114,20 +114,31 @@ export class AtsAgent extends SiteAgent {
     for (const job of jobs) if (!(await store.hasJob(job.jobId))) fresh++;
     // The feed gets new jobs every few hours, so a quick re-check often has nothing new.
     if (jobs.length && !fresh) this.log('All of them were checked before. New jobs are added every few hours; more job titles find more.');
+    const why = {}; let checked = 0, queued = 0;
+    const skip = (r) => { why[r] = (why[r] || 0) + 1; };
     for (const job of jobs) {
-      if (!this.running) return;
+      if (!this.running) break;
       if (await store.hasJob(job.jobId)) continue;
+      checked++;
       const ats = atsFiller.detectATS(job.url);
-      if (atsFiller.ACCOUNT_REQUIRED_ATS.has(ats)) continue;
+      if (atsFiller.ACCOUNT_REQUIRED_ATS.has(ats)) { skip('need a site account'); continue; }
       // SmartRecruiters shows a puzzle after a few automated visits: leave it out.
-      if (ats === 'smartrecruiters') continue;
+      if (ats === 'smartrecruiters') { skip('site blocks automated forms'); continue; }
       // A required video or file upload can never go out unattended: skip before any CV tailoring.
-      if (await httpSubmit.recruiteeNeedsMedia(job.url)) { await store.addJob({ ...job, source: this.source, status: 'skipped', reason: 'Asks for a video or file upload' }); continue; }
+      if (await httpSubmit.recruiteeNeedsMedia(job.url)) { skip('ask for a video or file'); await store.addJob({ ...job, source: this.source, status: 'skipped', reason: 'Asks for a video or file upload' }); continue; }
       const description = await fetchJD(job);
       await this.queueIfWanted(job, { ...job, description });
-      // First win: three queued is enough to get the first application out; the rest next round.
-      if (this.firstWin && (await store.byStatus('pending', this.source)).length >= 3) break;
+      const saved = (await store.jobs()).find((j) => j.jobId === job.jobId);
+      if (saved && saved.status === 'skipped') skip(String(saved.reason || 'other').toLowerCase());
+      else if (saved && saved.status === 'pending') queued++;
+      else if (!saved) skip('blocked title or company');
+      // First win: three queued is enough to get the first application out; the rest straight after.
+      if (this.firstWin && (await store.byStatus('pending', this.source)).length >= 3) { this.log('Sending one application first, then checking the rest.'); break; }
       await sleep(800);
+    }
+    if (checked) {
+      const reasons = Object.entries(why).map(([r, n]) => `${n} ${r}`).join(', ');
+      this.log(`Checked ${checked} new job(s): ${queued} sent for CV matching` + (reasons ? `, skipped ${reasons}.` : '.'));
     }
   }
 
