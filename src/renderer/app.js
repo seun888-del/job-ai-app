@@ -866,6 +866,14 @@ async function renderSearch() {
     </div>
 
     <div class="card">
+      <h3>Extra job sites</h3>
+      <p class="card-hint">Job-AI already applies on employers' own websites with no accounts. If you also want it to apply on these sites, tick them. Each one <strong>needs your own account on that site</strong>: its agent card on the Dashboard then has a Sign in button. Job-AI never sees your password.</p>
+      ${extraForRegion((regionProfile?.country || 'United Kingdom') === 'United States').map(([k, l]) => `<div class="checkbox-field"><input id="extra_${k}" class="extra-site" data-site="${k}" type="checkbox" ${String(prefs.extra_sites || '').split(',').includes(k) ? 'checked' : ''}><label for="extra_${k}">${l}</label></div>`).join('')}
+      <p class="card-hint" style="margin-top:6px">LinkedIn can limit accounts it thinks are automated, so use it at your own risk and keep your daily limit low.</p>
+      <div class="status-msg" id="status-extra-sites"></div>
+    </div>
+
+    <div class="card">
       <h3>Review before applying</h3>
       <p class="card-hint">When on, Job-AI tailors your CV and cover letter for each job and then <strong>holds it for your approval</strong> instead of applying straight away. You review the tailored CV and letter on the dashboard, then Approve to send or Skip. When off, applications are sent automatically (the default).</p>
       <div class="checkbox-field">
@@ -1083,6 +1091,19 @@ async function renderSearch() {
       }
     });
   }
+
+  // Extra job sites — save immediately on change.
+  document.querySelectorAll('.extra-site').forEach((cb) => cb.addEventListener('change', async () => {
+    const cur = new Set(String((await window.api.searchPrefs.get()).extra_sites || '').split(',').filter(Boolean));
+    if (cb.checked) cur.add(cb.dataset.site); else cur.delete(cb.dataset.site);
+    try {
+      await window.api.searchPrefs.save({ extra_sites: [...cur].join(',') });
+      showStatus(document.getElementById('status-extra-sites'), cb.checked
+        ? `${cb.nextElementSibling.textContent} is on. Sign in on its card on the Dashboard, then press Start applying.`
+        : `${cb.nextElementSibling.textContent} is off.`);
+      showToast('Saved');
+    } catch (e) { cb.checked = !cb.checked; }
+  }));
 
   // Review-before-apply toggle — saves immediately on change.
   const reviewToggle = document.getElementById('review_before_apply');
@@ -1354,10 +1375,17 @@ async function renderLicense() {
 }
 
 // â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Retired for now: these agents need the user to sign in to a job site. Their code stays (and
-// they stay in BOT_LABELS for old activity) so they can come back by emptying this set. The
-// dashboard, phone control and Start applying use Company Sites, plus NHS (Trac) in the UK.
+// Sign-in agents are off unless the user turns them on under Extra job sites (Search
+// Preferences), because each needs the user's own account. UK: Reed. USA: Dice, Wellfound.
+// LinkedIn in both. Indeed stays off. Same rule as bot/modules/retired_agents.js.
+const EXTRA_SITES = [['reed', 'Reed', 'uk'], ['linkedin', 'LinkedIn', 'both'], ['dice', 'Dice', 'us'], ['wellfound', 'Wellfound', 'us']];
+const extraForRegion = (isUS) => EXTRA_SITES.filter(([, , r]) => r === 'both' || r === (isUS ? 'us' : 'uk'));
 const RETIRED_AGENTS = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound']);
+function applyExtraSites(extraCsv, isUS) {
+  const on = String(extraCsv || '').split(',').map(s => s.trim());
+  RETIRED_AGENTS.clear(); RETIRED_AGENTS.add('indeed');
+  for (const [k, , r] of EXTRA_SITES) if (!on.includes(k) || (r !== 'both' && r !== (isUS ? 'us' : 'uk'))) RETIRED_AGENTS.add(k);
+}
 const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', wellfound: 'Wellfound Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent' };
 
 let botLogUnsub = null;
@@ -2073,6 +2101,7 @@ async function renderDashboard() {
   };
   const anyConnected = Object.values(connectedStatus || {}).some(Boolean);
   const isUS = (profile?.country || 'United Kingdom') === 'United States';
+  try { applyExtraSites((await window.api.searchPrefs.get()).extra_sites, isUS); } catch (_) {}
   _isUKUser = !isUS;  // gates the UK-only Universal Credit tour step
   // A currently-valid license (not just any key) is required to start the agents.
   dashboardHasLicense = licenseIsActive(license);

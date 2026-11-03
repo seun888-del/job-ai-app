@@ -194,6 +194,11 @@ async function init(userDataPath) {
   if (!searchPrefsCols.includes('headless_only')) {
     db.exec('ALTER TABLE search_preferences ADD COLUMN headless_only INTEGER DEFAULT 0');
   }
+  // Extra job sites the user turned on (comma list: reed, linkedin, dice, wellfound). Each
+  // needs the user's own account. Empty = Company Sites (+ NHS Trac) only, the default.
+  if (!searchPrefsCols.includes('extra_sites')) {
+    db.exec("ALTER TABLE search_preferences ADD COLUMN extra_sites TEXT DEFAULT ''");
+  }
 
   // One-time backfill: tracker rows can be left without a URL (e.g. when the queue
   // row that held it was lost), so the role-title link did nothing. Both Reed and

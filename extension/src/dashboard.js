@@ -102,6 +102,7 @@ async function loadConfig() {
   if (!(await store.get('settings')).region) await setRegion(tzLooksUS() ? 'us' : 'uk');
   const [license, profile, trac, settings] = await Promise.all([store.get('license'), store.get('profile'), store.get('trac'), store.get('settings')]);
   applyRegionWording(isUS(settings));
+  applyExtraSites(settings);
   globalThis.__jobaiLicense = license.key || '';
   globalThis.__jobaiDevice = await deviceId();
   cfg.load({ profile, trac, settings, license });
@@ -160,10 +161,23 @@ const AGENTS = [
   ['wellfound', 'Wellfound Agent', 'https://wellfound.com/login', 'Sign in to Wellfound'],
   ['ats', 'Company Sites Agent', '', ''],
 ];
-// Retired for now: these agents need the user to sign in to a job site. Their code stays so
-// they can come back by emptying this set (same list as the app, bot/modules/retired_agents.js).
+// Extra job sites: off unless the user turns them on in Search Preferences, because each one
+// applies through the user's own account on that site, signed in in this Chrome.
+// UK: Reed. USA: Dice and Wellfound. LinkedIn in both. Indeed stays off for everyone: its
+// Cloudflare check loops even when a person passes it. Same rule as the app (retired_agents.js).
+const EXTRA_SITES = [['reed', 'Reed', 'uk'], ['linkedin', 'LinkedIn', 'both'], ['dice', 'Dice', 'us'], ['wellfound', 'Wellfound', 'us']];
+const ALWAYS_OFF = ['indeed'];
 const RETIRED = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound']);
-// Company sites in both regions, plus NHS (Trac) in the UK for those who asked for it.
+const extraForRegion = (us) => EXTRA_SITES.filter(([, , r]) => r === 'both' || r === (us ? 'us' : 'uk'));
+function applyExtraSites(settings) {
+  const on = (settings && settings.extraSites) || {};
+  const us = isUS(settings);
+  RETIRED.clear();
+  for (const k of ALWAYS_OFF) RETIRED.add(k);
+  for (const [k, , r] of EXTRA_SITES) if (!on[k] || (r !== 'both' && r !== (us ? 'us' : 'uk'))) RETIRED.add(k);
+}
+// Company sites in both regions, NHS (Trac) in the UK for those who asked for it, plus any
+// extra job sites the user turned on.
 const inRegion = (k, us, nhs = true) => !RETIRED.has(k) && !(k === 'trac' && (us || !nhs));
 const anyRunning = () => Object.values(agents).some((a) => a.running);
 // ── Setup-step beacon ───────────────────────────────────────────────────────
@@ -904,6 +918,7 @@ const FAQS = [
   ['How do I add more CVs?', 'Open Setup, then CVs, and use "Add another CV". With more than one, the agents use the best fit for each job.'],
   ['What is the minimum match score?', 'How closely your CV must match a job before Job-AI applies. Leave it empty (Any) and it applies to every job that fits your CV, like the desktop app. Set a number in Search Preferences to be pickier.'],
   ['The agents are running but no jobs are being found. Why?', 'Every matching job may already have been handled. Add more job titles in Search Preferences, widen the work types, or allow older job postings.'],
+  ['Can Job-AI apply on Reed, LinkedIn or other job sites?', 'Yes, if you have an account there. Open Search Preferences and tick the sites under Extra job sites (Reed and LinkedIn in the UK, LinkedIn, Dice and Wellfound in the USA). Each one then gets an agent card on the Dashboard: press its Sign in button, sign in as normal in this Chrome, and it applies through your account. LinkedIn can limit accounts it thinks are automated, so keep your daily limit low there.'],
   ['Can I check each application before it is sent?', 'Yes. Turn on "Review before applying" in Search Preferences. Each tailored CV and cover letter then waits on the Dashboard for you to approve or skip.'],
   ['Can I control Job-AI from my phone?', 'Yes. Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.'],
   ['Is my data stored online?', 'Your details, CVs and job list stay in this Chrome on this device. To let you control Job-AI from your phone, a short summary (job titles, companies, stages) is kept on our server. Your passwords are never seen or stored.'],
@@ -1110,6 +1125,11 @@ VIEWS.search = async function renderSearch() {
       </div>
       <div class="field"><label>Active days</label><div class="tracd-sectors">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<label class="sector-chip"><input type="checkbox" class="s-day" value="${d}" ${(sched.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']).includes(d) ? 'checked' : ''}><span>${d}</span></label>`).join('')}</div></div>
     </div>
+    <div class="card"><h3>Extra job sites</h3>
+      <p class="muted" style="margin-top:0">Job-AI already applies on employers' own websites with no accounts. If you also want it to apply on these sites, tick them below. Each one <strong>needs your own account on that site</strong>, signed in in this Chrome. Job-AI never sees your password.</p>
+      <div class="tracd-sectors">${extraForRegion(isUS(settings)).map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="s-extra" value="${k}" ${(settings.extraSites || {})[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      <p class="muted" style="margin:8px 0 0;font-size:13px">Once ticked, the site gets its own agent card on the Dashboard with a Sign in button. ${extraForRegion(isUS(settings)).some(([k]) => k === 'linkedin') ? 'LinkedIn can limit accounts it thinks are automated, so use it at your own risk and keep your daily limit low.' : ''}</p>
+    </div>
     <div class="card"><h3>Review before applying</h3>
       <label class="checkbox-label" style="align-items:flex-start"><input type="checkbox" id="s-review" ${settings.reviewBeforeApply ? 'checked' : ''}><span>Let me review each tailored CV and cover letter before it applies<br><small class="muted">Each one waits on the Dashboard for you to approve or skip.</small></span></label>
     </div>
@@ -1121,7 +1141,10 @@ VIEWS.search = async function renderSearch() {
       workTypePriority: $$('.s-wt:checked').map((c) => c.value), employmentType: $$('.s-type:checked').map((c) => c.value),
     });
     await store.patch('profile', { blockedCompanies: lines('#s-block').slice(0, 100), jobAge: $('#s-age').value });
-    await store.patch('settings', { dailyCap: Number($('#s-cap').value), reviewBeforeApply: $('#s-review').checked,
+    const extraSites = { ...(settings.extraSites || {}) };
+    for (const c of $$('.s-extra')) extraSites[c.value] = c.checked;
+    for (const [k] of EXTRA_SITES) if (!extraSites[k] && agents[k] && agents[k].running) agents[k].stop();
+    await store.patch('settings', { extraSites, dailyCap: Number($('#s-cap').value), reviewBeforeApply: $('#s-review').checked,
       schedule: { enabled: $('#s-sched').checked, start: Number($('#s-from').value), end: Number($('#s-to').value), days: $$('.s-day:checked').map((c) => c.value) } });
     await loadConfig();
     setSt('#s-save-st', '✓ Saved.');
@@ -1425,7 +1448,7 @@ VIEWS['trac-details'] = async function renderTrac() {
 const TOUR_STEPS_SETUP = [
   { view: 'cvs', title: 'Step 1: Upload your CV', tip: 'Start here. We read your CV and fill in your name, contact details, experience and the job titles to search for. Upload it as a Word document (.docx) for the best results. PDF also works. Before each application, the AI rewrites your summary and bullet points to match that specific job.', action: 'Click "Add CV" and choose your CV. It is read on this device and never uploaded.' },
   { view: 'personal', title: 'Step 2: Check your details', tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this page is, the fewer forms the agents leave blank.', action: 'If you uploaded your CV, most of this is already filled in. Check it, complete anything missing and click Save.' },
-  { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want to apply for, for example "IT Support Analyst". The agents use these terms to find jobs on company career sites.', action: 'Add at least one job title, set your work type, then click Save.' },
+  { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want to apply for, for example "IT Support Analyst". The agents use these terms to find jobs on company career sites. Have a Reed or LinkedIn account? You can also tick it under Extra job sites.', action: 'Add at least one job title, set your work type, then click Save.' },
   { view: 'license', title: 'Step 4: Activate your license', tip: 'Enter the license key from your welcome email. The AI that tailors your CV runs on our cloud, so there is nothing extra to install.', action: 'Paste your license key into the box and click Activate.' },
   { view: 'dashboard', title: 'Step 5: Your agents', tip: 'The Company Sites agent finds jobs on employers\' own career pages and applies there directly, so there are no job site accounts to sign in to.', action: 'Leave Company Sites ticked. In the UK you also see the NHS (Trac) agent: keep it ticked if you want NHS jobs.' },
   { view: 'dashboard', title: 'All set: start applying', tip: 'Click Start applying and each agent opens its own minimised Chrome window and works inside it: searching, tailoring your CV and applying to matching jobs.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },

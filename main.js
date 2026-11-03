@@ -794,10 +794,12 @@ ipcMain.handle('bot:start', async (event, botName) => {
 // Shared by the button and by JOBBOT_AUTOSTART (unattended runs).
 // loginPrompt: someone is at the computer, so a signed-out site may ask them to sign in.
 async function startBotGated(botName, { loginPrompt = false } = {}) {
-  // Sign-in agents (Reed, LinkedIn...) are retired for now: refuse them from every path
-  // (Start button, phone, resume after a restart). See bot/modules/retired_agents.js.
-  if (require('./bot/modules/retired_agents').isRetired(botName)) {
-    const err = new Error('This agent has been retired. Job-AI now applies through Company Sites.');
+  // Sign-in agents (Reed, LinkedIn...) only run when the user turned them on under Extra job
+  // sites: refuse them otherwise from every path (Start button, phone, resume after a restart).
+  const ra = require('./bot/modules/retired_agents');
+  let extra = []; try { extra = ra.parseExtra(db.getSearchPreferences().extra_sites); } catch (_) {}
+  if (ra.isRetired(botName, extra)) {
+    const err = new Error('This job site is turned off. Turn it on under Extra job sites in Search Preferences.');
     err.code = 'retired';
     throw err;
   }

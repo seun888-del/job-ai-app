@@ -162,6 +162,9 @@ function start(botName, userDataPath, opts = {}) {
   try {
     if (db.getSearchPreferences().review_before_apply) env.JOBBOT_REVIEW_BEFORE_APPLY = '1';
   } catch (_) { /* prefs unavailable → review off */ }
+  // Extra job sites (Reed, LinkedIn, Dice, Wellfound) the user turned on. The Scorer only
+  // tailors queued jobs from sites that are on (bot/modules/retired_agents.js).
+  try { env.JOBBOT_EXTRA_SITES = String(db.getSearchPreferences().extra_sites || ''); } catch (_) { env.JOBBOT_EXTRA_SITES = ''; }
 
   // The ATS Auto-Apply agent's ONLY source is the backend candidate feed (there
   // is no site to scrape), so it always uses the feed regardless of the toggle.
