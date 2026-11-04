@@ -729,7 +729,7 @@ async function getDailyLimit() {
   const applied = await queueReader.getTodayAppliedCount();
   const lic = db.getLicense();
   const isPaid = !!(lic && lic.status === 'active');
-  const planCap = isPaid ? 25 : 5;
+  const planCap = isPaid ? 25 : 15;
   let chosen = 15;
   try { const p = db.getProfile(); if (p && Number.isFinite(p.max_applications_per_day)) chosen = p.max_applications_per_day; } catch (_) {}
   const cap = Math.min(chosen, planCap);

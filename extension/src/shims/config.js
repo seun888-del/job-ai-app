@@ -69,7 +69,7 @@ const cfg = {
     cfg.CONTRACT_TYPE = profile.contractType || 'any';
     cfg.JOB_AGE = profile.jobAge || 'r1209600';
     cfg.SKIP_EXTERNAL_SITES = profile.skipExternalSites !== false;
-    cfg.PLAN_CAP = license.status === 'active' ? 25 : 5;
+    cfg.PLAN_CAP = license.status === 'active' ? 25 : 15;
     cfg.MAX_APPLICATIONS_PER_DAY = Math.min(Number(settings.dailyCap || 15), cfg.PLAN_CAP);
     // Older versions had a % box; 70 or more there meant close matches only.
     cfg.MATCH_LEVEL = profile.matchLevel || (Number(profile.minScore) >= 70 ? 'strict' : 'balanced');
