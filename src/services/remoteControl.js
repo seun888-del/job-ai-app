@@ -53,6 +53,7 @@ async function buildStatus() {
     status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting',
     at: j.updated_at ? new Date(String(j.updated_at).replace(' ', 'T') + (/[zZ+]/.test(String(j.updated_at)) ? '' : 'Z')).toISOString() : '',
   }));
+  const skips = (await queueReader.getSkipReasons().catch(() => null)) || {};
   const blocked = !licensed ? (lic && lic.license_key ? 'Your Job-AI access has ended. Subscribe to keep applying.' : 'Activate Job-AI on your computer first.')
     : !hasCv ? 'Add your CV on your computer first.'
     : limit && limit.reached ? `Today's limit of ${limit.cap} applications is reached. Agents carry on tomorrow.` : '';
@@ -63,6 +64,8 @@ async function buildStatus() {
     in_queue: (m.pending || 0) + (m.cv_ready || 0), failed: m.apply_failed || 0,
     needs_you: (m.ready_to_submit || 0) + (m.attention_skips || 0),
     recent, blocked,
+    // Why jobs were skipped this week, so the backend can tell a stuck user what to change.
+    skipped: skips.skipped || 0, skip_reasons: skips.reasons || [],
     codes: [...codes].filter(([, c]) => isOn(st[c.bot])).map(([id, c]) => ({ id, title: c.title, company: c.company, retry: c.retry, sending: c.sending })),
   };
 }

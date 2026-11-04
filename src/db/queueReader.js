@@ -375,6 +375,32 @@ function getAnalytics() {
   }, null);
 }
 
+// Why jobs were skipped in the last 7 days, counted by reason (percentages dropped so
+// "Meets 2 of 6 (33%)" and "(40%)" group together). Sent with the phone-control status so
+// the backend can tell a user whose agents run but send nothing what is blocking them.
+// NHS drafts waiting for the user are not skips; they are counted under needs_you.
+function getSkipReasons() {
+  return withQueueDb(db => {
+    try {
+      const rows = all(db, `SELECT reason, COUNT(*) AS count FROM queue
+        WHERE status = 'skipped' AND reason IS NOT NULL AND reason != '' AND reason NOT LIKE 'Draft saved on Trac%'
+          AND updated_at >= datetime('now', '-7 days')
+        GROUP BY reason`);
+      const by = {}; let total = 0;
+      for (const r of rows) {
+        const raw = String(r.reason);
+        // Same wording as the extension where the cause is the same; per-job detail dropped.
+        const k = (/best score|below .*threshold/i.test(raw) ? 'Not a close enough match'
+          : raw.replace(/\([^)]*\)/g, '').replace(/\d+%/g, '').split(/:|\s[—-]\s/)[0])
+          .replace(/\s+/g, ' ').trim().slice(0, 80);
+        if (!k) continue;
+        by[k] = (by[k] || 0) + r.count; total += r.count;
+      }
+      return { skipped: total, reasons: Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([reason, count]) => ({ reason, count })) };
+    } catch (_) { return { skipped: 0, reasons: [] }; }
+  }, { skipped: 0, reasons: [] });
+}
+
 // NHS/Trac applications the user may want to open: ready to submit, or saved as a draft that
 // needs them. Each carries its Trac link (draft_url) when the agent has recorded it.
 function getTracApplications() {
@@ -441,4 +467,4 @@ function getReconnectNeeded() {
   }, []);
 }
 
-module.exports = { init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getReviewQueue, getReviewCount, resolveReview, requeueForReview, getAssistQueue, skipAssist };
+module.exports = { init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getSkipReasons, getReviewQueue, getReviewCount, resolveReview, requeueForReview, getAssistQueue, skipAssist };
