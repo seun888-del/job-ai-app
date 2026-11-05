@@ -4,6 +4,7 @@
 // licensed Job-AI backend exactly like the desktop app.
 import llm from '../shims/llm.js';
 import { TAILOR_VERSION } from '../../../bot/modules/tailor_version.js';
+import cfg from '../shims/config.js';
 
 const DEFAULTS = {
   license: { key: '' },
@@ -67,6 +68,21 @@ export async function readyBacklog() {
 export async function appliedToday() {
   const d = new Date().toISOString().slice(0, 10);
   return (await jobs()).filter((j) => (j.status === 'applied' && String(j.appliedAt || '').startsWith(d)) || String(j.countedAt || '').startsWith(d)).length;
+}
+
+// "Only move for more money": applications in the last 30 days against the monthly limit.
+// capUsed() is what the agents check against the daily cap: today's count, raised so the
+// cap is reached early when the month's allowance runs out.
+export async function monthLeft() {
+  if (!cfg.MOVE || !cfg.MOVE.on) return Infinity;
+  const since = Date.now() - 30 * 864e5;
+  const n = (await jobs()).filter((j) => (j.status === 'applied' && Date.parse(j.appliedAt || 0) >= since) || Date.parse(j.countedAt || 0) >= since).length;
+  return cfg.MOVE.monthly - n;
+}
+export async function capUsed() {
+  const today = await appliedToday();
+  const left = await monthLeft();
+  return left === Infinity ? today : Math.max(today, cfg.MAX_APPLICATIONS_PER_DAY - Math.max(0, left));
 }
 
 // ── Activity log (shown on the dashboard) ─────────────────────────────────────

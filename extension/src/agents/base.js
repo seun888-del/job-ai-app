@@ -155,7 +155,7 @@ export class SiteAgent {
     for (const job of await store.byStatus('pending', this.source)) {
       if (!this.running) return;
       // Only tailor what can still be sent today (+2 spare). The rest wait until tomorrow.
-      const left = Math.max(0, cfg.MAX_APPLICATIONS_PER_DAY - (await store.appliedToday()));
+      const left = Math.max(0, cfg.MAX_APPLICATIONS_PER_DAY - (await store.capUsed()));
       if ((await store.readyBacklog()) >= left + 2) return;
       await scoreJob(job, (m) => this.log(m)).catch((e) => this.log('Scoring error: ' + e.message));
       this.onChange();
@@ -168,7 +168,7 @@ export class SiteAgent {
     const ready = (await store.byStatus('cv_ready', this.source)).sort((a, b) => (order[a.workType] ?? 99) - (order[b.workType] ?? 99));
     for (const job of ready) {
       if (!this.running) return;
-      if ((await store.appliedToday()) >= cfg.MAX_APPLICATIONS_PER_DAY) { this.log('Daily limit reached.'); return; }
+      if ((await store.capUsed()) >= cfg.MAX_APPLICATIONS_PER_DAY) { this.log(cfg.MOVE.on && (await store.monthLeft()) <= 0 ? "This month's limit is reached." : 'Daily limit reached.'); return; }
       await store.updateJob(job.jobId, { status: 'applying' });
       this.log(`Applying: ${job.title} @ ${job.company}`);
       let r;

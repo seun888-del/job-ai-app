@@ -1153,6 +1153,10 @@ VIEWS.cvs = async function renderCVs() {
 VIEWS.search = async function renderSearch() {
   const { profile, settings } = await loadConfig();
   const sched = settings.schedule || {};
+  const mv = profile.moveForMore || {};
+  const mvLeft = await store.monthLeft();
+  const money = (n) => (isUS(settings) ? '$' : '£') + Number(n).toLocaleString('en-GB');
+  const mvSum = cfg.MOVE.on ? `On: only jobs paying ${money(cfg.MOVE.min)} or more. ${Math.max(0, cfg.MOVE.monthly - Math.max(0, mvLeft))} of ${cfg.MOVE.monthly} used in the last 30 days.` : 'Off.';
   content.innerHTML = `
     <div class="page-header"><h2>Search Preferences</h2><p>Used by the agents to find jobs that fit.</p></div>
     <div class="card"><div class="tracd-grid">
@@ -1179,11 +1183,25 @@ VIEWS.search = async function renderSearch() {
       <div class="tracd-sectors">${extraForRegion(isUS(settings)).map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="s-extra" value="${k}" ${(settings.extraSites || {})[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
       <p class="muted" style="margin:8px 0 0;font-size:13px">Once ticked, the site gets its own agent card on the Dashboard with a Sign in button. ${extraForRegion(isUS(settings)).some(([k]) => k === 'linkedin') ? 'LinkedIn can limit accounts it thinks are automated, so use it at your own risk and keep your daily limit low.' : ''}</p>
     </div>
+    <div class="card"><h3>Only move for more money</h3>
+      <p class="muted" style="margin-top:0">Happy where you are? Job-AI then only applies to jobs whose advert shows a salary well above yours, never to your employer, and only a few a month.</p>
+      <label class="checkbox-label"><input type="checkbox" id="mv-on" ${mv.on ? 'checked' : ''}> Turn on</label>
+      <div class="tracd-grid" style="margin-top:10px">
+        <div class="field"><label>Your salary now (a year)</label><input id="mv-now" type="text" inputmode="numeric" value="${esc(String(mv.current || '').replace(/[^0-9]/g, ''))}" placeholder="e.g. 32000"></div>
+        <div class="field"><label>Only apply if it pays at least</label><select id="mv-up">${[10, 15, 20, 25, 30].map((n) => `<option value="${n}" ${Number(mv.uplift || 15) === n ? 'selected' : ''}>${n}% more</option>`).join('')}</select></div>
+        <div class="field"><label>Most applications a month</label><select id="mv-month">${[4, 8, 12, 20].map((n) => `<option value="${n}" ${Number(mv.monthly || 8) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+        <div class="field"><label>Your employer (never apply there)</label><input id="mv-emp" type="text" value="${esc(mv.employer || '')}" placeholder="e.g. Barts Health NHS Trust"></div>
+      </div>
+      <p class="muted" style="margin:2px 0 0;font-size:13px">${esc(mvSum)}</p>
+    </div>
     <div class="card"><h3>Review before applying</h3>
       <label class="checkbox-label" style="align-items:flex-start"><input type="checkbox" id="s-review" ${settings.reviewBeforeApply ? 'checked' : ''}><span>Let me review each tailored CV and cover letter before it applies<br><small class="muted">Each one waits on the Dashboard for you to approve or skip.</small></span></label>
     </div>
     ${saveBar('s-save')}`;
   $('#s-save').addEventListener('click', async () => {
+    const mvNow = parseInt($('#mv-now').value.replace(/[^0-9]/g, ''), 10) || 0;
+    if ($('#mv-on').checked && mvNow < 10000) { setSt('#s-save-st', 'Type your salary now to turn on Only move for more money.'); return; }
+    await store.patch('profile', { moveForMore: { on: $('#mv-on').checked, current: mvNow || '', uplift: Number($('#mv-up').value), monthly: Number($('#mv-month').value), employer: $('#mv-emp').value.trim() } });
     await store.patch('profile', {
       searchTerms: lines('#s-terms').slice(0, 40), excludeKeywords: lines('#s-exclude').slice(0, 80),
       searchLocation: $('#s-where').value.trim() || 'United Kingdom', matchLevel: $('#s-level').value, minScore: null,
@@ -1196,7 +1214,15 @@ VIEWS.search = async function renderSearch() {
     await store.patch('settings', { extraSites, dailyCap: Number($('#s-cap').value), reviewBeforeApply: $('#s-review').checked,
       schedule: { enabled: $('#s-sched').checked, start: Number($('#s-from').value), end: Number($('#s-to').value), days: $$('.s-day:checked').map((c) => c.value) } });
     await loadConfig();
-    setSt('#s-save-st', '✓ Saved.');
+    // Jobs already found or tailored before the mode went on must pass it too.
+    let held = 0;
+    if (cfg.MOVE.on) for (const j of await store.jobs()) {
+      if (!['pending', 'cv_ready', 'awaiting_review'].includes(j.status)) continue;
+      const why = cfg.moveCheck(j);
+      if (why) { await store.updateJob(j.jobId, { status: 'skipped', reason: why }); held++; }
+    }
+    setSt('#s-save-st', held ? `✓ Saved. ${held} waiting job${held === 1 ? '' : 's'} didn't pay enough, so they were skipped.` : '✓ Saved.');
+    VIEWS.search();
   });
 };
 
@@ -1844,7 +1870,7 @@ async function remoteRun(c) {
   if (!keys.length) return { ok: false, message: 'That agent is not in this browser.' };
   if (c.cmd === 'stop' || c.cmd === 'stop_all') { keys.forEach((k) => agents[k].stop()); setTimeout(renderDashboard, 300); return { ok: true }; }
   if (!(await recheckLicence())) return { ok: false, message: 'Your Job-AI access has ended. Subscribe to keep applying.' };
-  if ((await store.appliedToday()) >= cfg.MAX_APPLICATIONS_PER_DAY) return { ok: false, message: `Today's limit of ${cfg.MAX_APPLICATIONS_PER_DAY} applications is already reached.` };
+  if ((await store.capUsed()) >= cfg.MAX_APPLICATIONS_PER_DAY) return { ok: false, message: cfg.MOVE.on && (await store.monthLeft()) <= 0 ? "This month's limit for Only move for more money is reached." : `Today's limit of ${cfg.MAX_APPLICATIONS_PER_DAY} applications is already reached.` };
   const g = await remoteGate();
   const todo = keys.filter((k) => !agents[k].running && g.canRun[k] && (c.cmd === 'start' || g.enabled(k)));
   if (!todo.length) return keys.some((k) => agents[k].running) ? { ok: true } : { ok: false, message: 'Finish setting up that agent in Chrome first.' };

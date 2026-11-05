@@ -21,6 +21,8 @@ const titleMatch = require('../../../bot/modules/title_match');
 
 // Part-time / fixed-term jobs the user didn't ask for (same rule as the app's Scorer).
 function preFilter(job) {
+  const move = cfg.moveCheck(job);
+  if (move) return move;
   const want = cfg.APPLICANT.employmentType || ['full_time'];
   const txt = (job.title + ' ' + String(job.description || '').slice(0, 500)).toLowerCase();
   const permanent = /\bpermanent\b/.test(txt);
@@ -221,7 +223,7 @@ export class TracAgent {
     const s = await this.settings();
     for (const job of await store.byStatus('cv_ready', SOURCE)) {
       if (!this.running) return;
-      if ((await store.appliedToday()) >= cfg.MAX_APPLICATIONS_PER_DAY) { this.log('Daily limit reached.'); return; }
+      if ((await store.capUsed()) >= cfg.MAX_APPLICATIONS_PER_DAY) { this.log(cfg.MOVE.on && (await store.monthLeft()) <= 0 ? "This month's limit is reached." : 'Daily limit reached.'); return; }
       this.log(`Filling: ${job.title} @ ${job.company}`);
       await store.updateJob(job.jobId, { status: 'applying' });
       const finished = (await store.byStatus('ready_to_submit', SOURCE)).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).map((j) => j.title);

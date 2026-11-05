@@ -24,6 +24,8 @@ function boostCVText(cvText, keywords) {
 }
 
 function preFilter(job) {
+  const move = cfg.moveCheck(job);
+  if (move) return move;
   const { experienceLevel, employmentType = [], salaryExpectation, country } = cfg.APPLICANT;
   const title = (job.title || '').toLowerCase();
   const desc = String(job.description || '').slice(0, 1500);
