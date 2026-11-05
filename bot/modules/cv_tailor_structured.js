@@ -25,11 +25,11 @@
 const { llmAvailable, llmChat } = require('../../src/services/llm');
 const { focusJD } = require('./jd_focus');
 
-// Bullets per role by recency: latest job 6, the one before 5, the next 4, older jobs 3.
-// The bullets kept are the ones that best match the advert, a bullet with a result
-// (a number) is always kept, and every role keeps at least 2, so no job disappears.
-const BULLETS_BY_ROLE = [6, 5, 4];
-const bulletCap = (roleIndex) => BULLETS_BY_ROLE[roleIndex] || 3;
+// Bullets per role by recency, so the CV stays easy to skim: latest job 5, the one before 4,
+// the next 3, older jobs 2. The bullets kept are the ones that best match the advert, a bullet
+// with a result (a number) is always kept, and every role keeps at least 2, so no job disappears.
+const BULLETS_BY_ROLE = [5, 4, 3];
+const bulletCap = (roleIndex) => BULLETS_BY_ROLE[roleIndex] || 2;
 const hasResult = (b) => /\d/.test(String(b).replace(/\b(19|20)\d{2}\b/g, ''));
 const numbersIn = (t) => (String(t).match(/\d[\d,]*\.?\d*%?/g) || []).map((n) => n.replace(/,/g, ''));
 const REFUSAL_RE = /\b(cannot|can't|i'm sorry|i am sorry|unable to|not able to|as an ai)\b/i;
