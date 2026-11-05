@@ -1214,6 +1214,13 @@ async function renderLicense() {
       <div id="license-current">${renderLicenseStatus(license, usage)}</div>
     </div>
 
+    ${hasLicense && license?.status !== 'active' ? `
+    <div class="card">
+      <h3>Subscribe</h3>
+      <p style="font-size:14px;color:#64748b;margin-bottom:16px">${license?.status === 'trial' ? 'No need to wait for your trial to end. Pick a plan and your key, settings and CV stay the same. First month half price.' : 'Your access has ended. Pick a plan and your Agents start again with the same key, settings and CV. First month half price.'}</p>
+      <button class="primary" id="license-subscribe">Subscribe now</button>
+    </div>` : ''}
+
     ${license?.status === 'active' ? `
     <div class="card">
       <h3>Manage Subscription</h3>
@@ -1341,6 +1348,7 @@ async function renderLicense() {
     const r = await window.api.license.sendSetupCode(em);
     showStatus(st, r.ok ? 'If that email has Job-AI, a code is on its way. Type it above.' : r.http === 429 ? 'Too many tries. Wait a few minutes.' : 'Could not send. Check your connection and try again.', r.ok ? 'success' : 'error');
   });
+  document.getElementById('license-subscribe')?.addEventListener('click', () => openSubscribe());
   document.getElementById('phone_claim').addEventListener('click', async () => {
     const btn = document.getElementById('phone_claim');
     btn.disabled = true;
@@ -3376,7 +3384,7 @@ async function refreshExpiryBanner() {
   banner.className = `expiry-banner ${urgency}`;
   banner.innerHTML = `
     <span>${msg}</span>
-    <button id="renew-btn">${isTrial ? 'Subscribe to continue ->' : 'Renew Subscription'}</button>
+    <button id="renew-btn">${isTrial ? 'Subscribe now →' : 'Renew Subscription'}</button>
   `;
   document.getElementById('renew-btn').addEventListener('click', async () => {
     if (isTrial) {
