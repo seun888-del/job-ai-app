@@ -180,6 +180,51 @@ function applyExtraSites(settings) {
 // extra job sites the user turned on.
 const inRegion = (k, us, nhs = true) => !RETIRED.has(k) && !(k === 'trac' && (us || !nhs));
 const anyRunning = () => Object.values(agents).some((a) => a.running);
+
+// ── "Nothing sent yet" card ──────────────────────────────────────────────────
+// When the user's own filters are skipping lots of jobs and nothing has gone out, name the
+// filter and offer a one-tap fix. Widening puts those skipped jobs back in the queue.
+const FILTER_FIXES = [
+  { key: 'contract', test: /contract role|fixed-term/i, label: 'contract or fixed-term', button: 'Allow contract roles' },
+  { key: 'part_time', test: /^part-time role/i, label: 'part-time', button: 'Allow part-time' },
+  { key: 'worktype', test: /^work type \(/i, label: 'not remote', button: 'Allow hybrid and on-site' },
+  { key: 'salary', test: /^below your salary expectation/i, label: 'below your minimum salary', button: 'Change my minimum salary' },
+];
+function filterHint(all, profile, settings) {
+  const since = Date.now() - 2 * 864e5;
+  if (all.some((j) => j.status === 'applied' && Date.parse(j.appliedAt || j.updatedAt || 0) >= since)) return null;
+  if (Date.parse(settings.filterHintHiddenAt || 0) > Date.now() - 3 * 864e5) return null;
+  const want = profile.employmentType && profile.employmentType.length ? profile.employmentType : ['full_time'];
+  const wt = profile.workTypePriority && profile.workTypePriority.length ? profile.workTypePriority : ['remote', 'hybrid', 'onsite'];
+  const open = (f) => !(f.key === 'contract' && want.includes('contract')) && !(f.key === 'part_time' && want.includes('part_time')) && !(f.key === 'worktype' && wt.length >= 3);
+  const rows = FILTER_FIXES.filter(open).map((f) => ({ ...f, n: all.filter((j) => j.status === 'skipped' && f.test.test(j.reason || '')).length })).filter((f) => f.n > 0);
+  const total = rows.reduce((s, f) => s + f.n, 0);
+  return total >= 10 ? { total, rows: rows.sort((a, b) => b.n - a.n).slice(0, 3) } : null;
+}
+function filterHintHtml(fh) {
+  if (!fh) return '';
+  const list = fh.rows.map((r) => `${r.n} ${r.label}`).join(', ');
+  return `<div class="card filter-hint-card" style="border:1.5px solid var(--accent, #2563eb)">
+    <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">Your settings skipped ${fh.total} jobs</h3>
+    <p class="card-hint" style="margin:0 0 12px">Nothing has been sent yet. Skipped: ${list}. If you would take any of these, allow them and Job-AI checks those jobs again.</p>
+    <div class="ext-inline">${fh.rows.map((r) => `<button class="primary fh-fix" data-fix="${r.key}">${r.button}</button>`).join('')}<button class="secondary" id="fh-hide">Keep my settings</button></div></div>`;
+}
+async function widenFilter(key) {
+  if (key === 'salary') return navigate('personal'); // the minimum salary field is on Your details
+  const p = await store.get('profile');
+  if (key === 'contract' || key === 'part_time') {
+    const want = new Set(p.employmentType && p.employmentType.length ? p.employmentType : ['full_time']);
+    want.add(key);
+    await store.patch('profile', { employmentType: [...want] });
+  } else if (key === 'worktype') await store.patch('profile', { workTypePriority: ['remote', 'hybrid', 'onsite'] });
+  await loadConfig();
+  const f = FILTER_FIXES.find((x) => x.key === key);
+  // Only jobs whose advert was saved can be checked again; the agents re-run every filter on them.
+  const again = (await store.jobs()).filter((j) => j.status === 'skipped' && f.test.test(j.reason || '') && j.description);
+  for (const j of again) await store.updateJob(j.jobId, { status: 'pending', reason: null, retryCount: 0 });
+  store.log(`Settings widened: ${again.length} skipped job(s) will be checked again.`);
+  VIEWS.dashboard();
+}
 // ── Setup-step beacon ───────────────────────────────────────────────────────
 // Where new users stall before their first application (activated, CV added, job
 // site signed in, agents started, first application). Anonymous: this install's
@@ -501,6 +546,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     const inQueue = all.filter((j) => ['pending', 'cv_ready', 'applying'].includes(j.status));
     const tailoring = all.some((j) => j.status === 'processing');
     const reviewing = all.filter((j) => j.status === 'awaiting_review');
+    const fh = filterHint(all, profile, settings);
     const us = isUS(settings);
     const ucOn = !us && (profile.country || 'United Kingdom') === 'United Kingdom';
     const ucPending = all.filter((j) => j.status === 'applied' && !j.ucLoggedAt);
@@ -605,6 +651,7 @@ VIEWS.dashboard = async function renderDashboardView() {
 
       ${offerWider ? `<div class="no-license-banner"><span>${tooFar.length} jobs this week were skipped as not a close enough match. Try a wider match?</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="wider-yes">Try Wider</button><button class="welcome-skip-link" id="wider-no">No thanks</button></span></div>` : ''}
 
+      ${filterHintHtml(fh)}
       ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
         <p class="card-hint" style="margin:0">Press start and Job-AI tailors your CV and sends your first application, usually within a few minutes.</p></div>
@@ -737,6 +784,8 @@ VIEWS.dashboard = async function renderDashboardView() {
     }));
     $$('.open-url, .nhs-open').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.url)));
     $('#nl-setup')?.addEventListener('click', openSetup);
+    for (const b of $$('.fh-fix')) b.addEventListener('click', () => { b.disabled = true; widenFilter(b.dataset.fix); });
+    $('#fh-hide')?.addEventListener('click', async () => { await store.patch('settings', { filterHintHiddenAt: new Date().toISOString() }); VIEWS.dashboard(); });
     $('#keep-jobai')?.addEventListener('click', () => openTab(`https://tryjobai.com/pricing?lk=${encodeURIComponent(license.key)}&utm_source=extension&utm_campaign=${ended ? 'trial_ended' : 'trial_ending'}`));
     $('#wider-yes')?.addEventListener('click', async () => {
       // Wider from now on, and this week's close misses get checked again.
