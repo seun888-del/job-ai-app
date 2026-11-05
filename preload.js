@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld('api', {
     save: (site, username, password) => ipcRenderer.invoke('credentials:save', { site, username, password }),
     get: (site) => ipcRenderer.invoke('credentials:get', site),
   },
+  filters: {
+    hint: () => ipcRenderer.invoke('filters:hint'),
+    widen: (key) => ipcRenderer.invoke('filters:widen', key),
+  },
   queue: {
     summary: () => ipcRenderer.invoke('queue:summary'),
     clearRecent: () => ipcRenderer.invoke('queue:clearRecent'),

@@ -401,6 +401,45 @@ function getSkipReasons() {
   }, { skipped: 0, reasons: [] });
 }
 
+// Skips caused by the user's own filters, which one setting change would undo
+// (the dashboard's "Your settings skipped N jobs" card). Same wording the agents write.
+const FILTER_SQL = {
+  contract: "(reason LIKE 'Contract role skipped%' OR reason LIKE 'Fixed-term or contract%')",
+  part_time: "reason LIKE 'Part-time role%'",
+  worktype: "reason LIKE 'Work type (%'",
+  salary: "(reason LIKE 'Below salary expectation%' OR reason LIKE 'Below your salary%' OR (reason LIKE 'Salary %' AND reason LIKE '%below minimum%'))",
+};
+function getFilterSkips() {
+  const none = { sent48h: 0, counts: {} };
+  return withQueueDb(db => {
+    try {
+      const sent48h = all(db, "SELECT COUNT(*) AS n FROM queue WHERE status = 'applied' AND updated_at >= datetime('now', '-2 days')")[0].n;
+      const counts = {};
+      for (const [k, w] of Object.entries(FILTER_SQL)) {
+        counts[k] = all(db, `SELECT COUNT(*) AS n FROM queue WHERE status = 'skipped' AND updated_at >= datetime('now', '-7 days') AND ${w}`)[0].n;
+      }
+      return { sent48h, counts };
+    } catch (_) { return none; }
+  }, none);
+}
+// After a filter is widened, put the jobs it skipped back in the queue so the Scorer checks
+// them again with the new setting. Only jobs whose advert was saved can be re-checked.
+async function requeueFilterSkips(key) {
+  const w = FILTER_SQL[key];
+  if (!w || key === 'salary' || !dbPath || !fs.existsSync(dbPath)) return 0;
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(readDbFile(dbPath));
+  try {
+    const cols = all(db, 'PRAGMA table_info(queue)').map(c => c.name);
+    const retry = cols.includes('retry_count') ? ', retry_count = 0' : '';
+    db.run(`UPDATE queue SET status = 'pending', reason = NULL${retry}, updated_at = datetime('now')
+      WHERE status = 'skipped' AND length(COALESCE(description, '')) > 200 AND ${w}`);
+    const n = db.getRowsModified();
+    if (n) writeDbFile(dbPath, Buffer.from(db.export()));
+    return n;
+  } finally { db.close(); }
+}
+
 // NHS/Trac applications the user may want to open: ready to submit, or saved as a draft that
 // needs them. Each carries its Trac link (draft_url) when the agent has recorded it.
 function getTracApplications() {
@@ -467,4 +506,4 @@ function getReconnectNeeded() {
   }, []);
 }
 
-module.exports = { init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getSkipReasons, getReviewQueue, getReviewCount, resolveReview, requeueForReview, getAssistQueue, skipAssist };
+module.exports = { getFilterSkips, requeueFilterSkips, init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getSkipReasons, getReviewQueue, getReviewCount, resolveReview, requeueForReview, getAssistQueue, skipAssist };

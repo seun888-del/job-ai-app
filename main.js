@@ -710,6 +710,33 @@ ipcMain.handle('queue:clearRecent', () => queueReader.clearRecentActivity());
 ipcMain.handle('queue:ucPending', () => queueReader.getUcPendingCount());
 ipcMain.handle('queue:ucPendingList', () => queueReader.getUcPendingList(200));
 ipcMain.handle('queue:workSearchLog', () => queueReader.getWorkSearchLog());
+
+// Dashboard "Your settings skipped N jobs" card: what the user's own filters skipped, and a
+// one-tap widen that also re-queues those jobs (same card as the Chrome extension).
+ipcMain.handle('filters:hint', async () => {
+  const r = await queueReader.getFilterSkips();
+  const p = db.getProfile() || {};
+  let workTypes = [];
+  try { workTypes = db.getSearchPreferences().work_type_priority || []; } catch (_) {}
+  return { ...r, employment: (p.employment_type || '').split(',').filter(Boolean), workTypes };
+});
+ipcMain.handle('filters:widen', async (event, key) => {
+  if (key === 'contract' || key === 'part_time') {
+    const emp = new Set((db.getProfile()?.employment_type || '').split(',').filter(Boolean));
+    if (emp.size) { emp.add(key); db.saveProfile({ employment_type: [...emp].join(',') }); }
+  } else if (key === 'worktype') db.saveSearchPreferences({ work_type_priority: ['remote', 'hybrid', 'onsite'] });
+  else return { ok: false };
+  const requeued = await queueReader.requeueFilterSkips(key);
+  // The Scorer reads settings when it starts, so restart it if it is running.
+  if (botManager.getStatus().scorer === 'running') {
+    botManager.stop('scorer');
+    (async () => {
+      for (let i = 0; i < 20 && botManager.getStatus().scorer === 'running'; i++) await new Promise((r) => setTimeout(r, 500));
+      try { await startBotGated('scorer'); } catch (_) {}
+    })();
+  }
+  return { ok: true, requeued };
+});
 ipcMain.handle('uc:markLogged', (_e, jobIds) => queueReader.markUcLoggedManual(jobIds));
 ipcMain.handle('queue:tracApps', () => queueReader.getTracApplications());
 ipcMain.handle('queue:assistList', () => queueReader.getAssistQueue(100));

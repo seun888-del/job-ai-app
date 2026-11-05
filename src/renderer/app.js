@@ -2080,6 +2080,50 @@ function licenseIsActive(lic) {
   return true;
 }
 
+// "Your settings skipped N jobs": when nothing went out in 2 days and the user's own filters
+// skipped lots of jobs, name them and offer a one-tap fix (same card as the Chrome extension).
+const FILTER_FIXES = [
+  { key: 'contract', label: 'contract or fixed-term', button: 'Allow contract roles' },
+  { key: 'part_time', label: 'part-time', button: 'Allow part-time' },
+  { key: 'worktype', label: 'not remote', button: 'Allow hybrid and on-site' },
+  { key: 'salary', label: 'below your minimum salary', button: 'Change my minimum salary' },
+];
+async function renderFilterHint() {
+  const box = document.getElementById('filter-hint');
+  if (!box) return;
+  let hiddenAt = 0;
+  try { hiddenAt = Number(localStorage.getItem('filterHintHiddenAt')) || 0; } catch (_) {}
+  if (hiddenAt > Date.now() - 3 * 864e5) return;
+  let h;
+  try { h = await window.api.filters.hint(); } catch (_) { return; }
+  if (!h || h.sent48h > 0) return;
+  const emp = h.employment || [];
+  const open = (k) => !((k === 'contract' || k === 'part_time') && (!emp.length || emp.includes(k))) && !(k === 'worktype' && (h.workTypes || []).length >= 3);
+  const rows = FILTER_FIXES.filter((f) => open(f.key)).map((f) => ({ ...f, n: (h.counts || {})[f.key] || 0 }))
+    .filter((f) => f.n > 0).sort((a, b) => b.n - a.n).slice(0, 3);
+  const total = rows.reduce((s, f) => s + f.n, 0);
+  if (total < 10) return;
+  box.innerHTML = `<div class="card" style="border:1.5px solid #2563eb">
+    <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em">Your settings skipped ${total} jobs</h3>
+    <p class="card-hint" style="margin:0 0 12px">Nothing has been sent yet. Skipped: ${rows.map((r) => `${r.n} ${r.label}`).join(', ')}. If you would take any of these, allow them and Job-AI checks those jobs again.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${rows.map((r) => `<button class="primary fh-fix" data-fix="${r.key}">${r.button}</button>`).join('')}<button class="secondary" id="fh-hide">Keep my settings</button></div>
+    <div class="status-msg" id="fh-st"></div></div>`;
+  box.querySelectorAll('.fh-fix').forEach((b) => b.addEventListener('click', async () => {
+    if (b.dataset.fix === 'salary') return navigate('personal'); // the salary field is on Personal details
+    b.disabled = true;
+    const r = await window.api.filters.widen(b.dataset.fix).catch(() => null);
+    const st = document.getElementById('fh-st');
+    if (r && r.ok) {
+      showStatus(st, `Done. ${r.requeued} job${r.requeued === 1 ? '' : 's'} will be checked again.`, 'success');
+      setTimeout(() => { if (_currentView === 'dashboard') render('dashboard'); }, 1800);
+    } else { b.disabled = false; showStatus(st, 'Could not change the setting. Try again from Search Preferences.', 'error'); }
+  }));
+  document.getElementById('fh-hide').addEventListener('click', () => {
+    try { localStorage.setItem('filterHintHiddenAt', String(Date.now())); } catch (_) {}
+    box.innerHTML = '';
+  });
+}
+
 async function renderDashboard() {
   const [summary, recent, status, license, profile, dailyApps, cvs, reedCred, liCred, gdCred, cvlibCred, tjCred, cwCred, connectedStatus, ucPending, searchTerms] = await Promise.all([
     window.api.queue.summary(),
@@ -2213,6 +2257,8 @@ async function renderDashboard() {
 
     ${buildPreflightWarning(profile, cvs)}
 
+    <div id="filter-hint"></div>
+
     ${buildGetStartedCard(profile, cvs, anyConnected, anyAppRunning)}
 
     <div class="card setup-card">
@@ -2316,6 +2362,7 @@ ${statCardsHtml(summary)}
   renderNhsApps();
   renderSendApps();
   wireComputerCard();
+  renderFilterHint();
   const tracAutoBox = document.getElementById('trac-auto-submit');
   if (tracAutoBox) tracAutoBox.addEventListener('change', async () => {
     const on = tracAutoBox.checked;
