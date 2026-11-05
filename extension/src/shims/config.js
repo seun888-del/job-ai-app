@@ -1,5 +1,8 @@
 // Browser stand-in for the desktop app's bot/config.js. The shared agent modules read the
 // user's details from here; the dashboard fills it from storage before each run (load()).
+// Shared with the desktop app: the "Only move for more money" rules.
+const moveMode = require('../../../bot/modules/move_mode');
+
 const cfg = {
   // Paths live in the in-browser file system (shims/fs.js).
   OUTPUT_DIR: '/jobai/output',
@@ -104,22 +107,9 @@ const cfg = {
 
   // "Only move for more money" check for one job: '' when it may go ahead, else why not.
   // The advert must SHOW a salary that reaches the target; no salary shown = no proof.
-  moveCheck(job) {
-    const m = cfg.MOVE;
-    if (!m || !m.on) return '';
-    const bare = (s) => String(s || '').toLowerCase().replace(/\b(ltd|limited|plc|llc|inc|group)\b\.?/g, '').replace(/\s+/g, ' ').trim();
-    const co = bare(job.company), emp = bare(m.employer);
-    if (emp.length >= 3 && co.length >= 3 && (co.includes(emp) || emp.includes(co))) return 'Your current employer';
-    const text = String(job.title || '') + ' ' + String(job.description || '') + ' ' + String(job.salary || '');
-    const us = cfg.APPLICANT.country === 'United States';
-    const re = us ? /\$\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(k)?\b/gi : /£\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(k)?\b/gi;
-    const pays = [...text.matchAll(re)].map((x) => { const n = parseFloat(x[1].replace(/,/g, '')); return x[2] ? n * 1000 : n; })
-      .filter((n) => n >= 10000 && n <= 500000);
-    if (!pays.length) return 'No salary shown (you only move for more money)';
-    const top = Math.max(...pays);
-    if (top < m.min) return `Pays under ${us ? '$' : '£'}${m.min.toLocaleString('en-GB')} (${m.uplift}% more than you)`;
-    return '';
-  },
+  moveCheck(job) { return moveMode.check(cfg.MOVE, job, { us: cfg.APPLICANT.country === 'United States' }); },
+  // What an application pays and how much more than the user earns now, or null.
+  movePay(job) { return moveMode.payRise(cfg.MOVE, job, { us: cfg.APPLICANT.country === 'United States' }); },
 
   // Same check as the desktop app: listings that are really paid training courses.
   isTrainingCourseJD(description, title) {

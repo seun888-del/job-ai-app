@@ -737,6 +737,44 @@ ipcMain.handle('filters:widen', async (event, key) => {
   }
   return { ok: true, requeued };
 });
+// "Only move for more money" (bot/modules/move_mode.js).
+ipcMain.handle('move:status', async () => {
+  const move = require('./bot/modules/move_mode').fromSettings(db.getProfile()?.move_for_more);
+  return { move, used: await queueReader.getMonthUsed() };
+});
+// Live market pay for the Earn more tab (same check as tryjobai.com/am-i-underpaid).
+ipcMain.handle('move:market', async (event, q) => {
+  const v = q || {};
+  try {
+    const r = await fetch('https://api.tryjobai.com/am-i-underpaid/check', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30000),
+      body: JSON.stringify({ title: String(v.title || '').slice(0, 80), location: String(v.location || '').slice(0, 60), salary: String(v.salary || '').slice(0, 9), country: v.country === 'US' ? 'US' : 'GB' }),
+    });
+    const j = await r.json();
+    return r.ok ? j : { error: j.error || 'Please try again.' };
+  } catch (_) { return { error: "Couldn't reach Job-AI. Check your internet and try again." }; }
+});
+ipcMain.handle('move:found', () => {
+  const p = db.getProfile() || {};
+  return queueReader.getMoveFound(require('./bot/modules/move_mode').fromSettings(p.move_for_more), (p.country || '') === 'United States');
+});
+ipcMain.handle('move:save', async (event, settings) => {
+  const s = settings || {};
+  const stored = { on: !!s.on, current: parseInt(String(s.current || '').replace(/[^0-9]/g, ''), 10) || '', uplift: Number(s.uplift) || 15, monthly: Number(s.monthly) || 8, employer: String(s.employer || '').trim().slice(0, 120), title: String(s.title || '').trim().slice(0, 80), location: String(s.location || '').trim().slice(0, 60) };
+  db.saveProfile({ move_for_more: JSON.stringify(stored) });
+  const p = db.getProfile() || {};
+  const move = require('./bot/modules/move_mode').fromSettings(stored);
+  const skipped = await queueReader.skipFailingMove(move, (p.country || '') === 'United States');
+  // Agents read settings when they start, so restart the running ones.
+  const status = botManager.getStatus();
+  const running = Object.keys(status).filter((k) => status[k] === 'running');
+  for (const k of running) botManager.stop(k);
+  if (running.length) (async () => {
+    for (let i = 0; i < 20 && running.some((k) => botManager.getStatus()[k] === 'running'); i++) await new Promise((r) => setTimeout(r, 500));
+    for (const k of running) { try { await startBotGated(k); } catch (_) {} }
+  })();
+  return { ok: true, move, skipped };
+});
 ipcMain.handle('uc:markLogged', (_e, jobIds) => queueReader.markUcLoggedManual(jobIds));
 ipcMain.handle('queue:tracApps', () => queueReader.getTracApplications());
 ipcMain.handle('queue:assistList', () => queueReader.getAssistQueue(100));

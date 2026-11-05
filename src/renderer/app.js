@@ -316,6 +316,7 @@ async function render(view) {
     case 'tracker':    fn = renderTracker; break;
     case 'trac-details': fn = renderTracDetails; break;
     case 'analytics':  fn = renderAnalytics; break;
+    case 'earn':       fn = renderEarn; break;
     case 'help':       fn = renderHelp; break;
     default:           fn = renderPersonal;
   }
@@ -3224,6 +3225,91 @@ function buildAnalyticsGraph(daily30) {
     return `<text x="${PAD + i * barW + (barW - 1) / 2}" y="${H}" class="graph-date" text-anchor="middle">${d.label}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H + 4}" class="applications-graph" xmlns="http://www.w3.org/2000/svg">${bars.join('')}${labels.join('')}</svg>`;
+}
+
+// ── Earn more: market value + "Only move for more money" ─────────────────────
+// For people who aren't job hunting: what their job pays elsewhere (live adverts, same check
+// as tryjobai.com/am-i-underpaid), and the mode that only applies when a job pays more.
+async function renderEarn() {
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const profile = await window.api.profile.get();
+  const terms = await window.api.searchTerms.get().catch(() => []);
+  const { move, used } = await window.api.move.status();
+  const found = await window.api.move.found().catch(() => ({ sent: [], skipped: {} }));
+  const us = (profile.country || '') === 'United States';
+  const money = (n) => (us ? '$' : '£') + Number(n).toLocaleString('en-GB');
+  const mv = (() => { try { return JSON.parse(profile.move_for_more || '{}') || {}; } catch (_) { return {}; } })();
+  const title = mv.title || ((terms || [])[0] && (terms[0].term || terms[0])) || '';
+  const where = mv.location != null ? mv.location : String(profile.location || '').split(',')[0].trim();
+  const salary = String(mv.current || profile.salary_expectation || '').replace(/[^0-9]/g, '');
+  const sk = found.skipped || {};
+  const heldN = (sk.pay || 0) + (sk.nosalary || 0) + (sk.employer || 0);
+  content.innerHTML = `
+    <div class="page-header"><h2>Earn more</h2><p>See what your job pays elsewhere, and let Job-AI apply only when a job pays more.</p></div>
+    <div class="card">
+      <h3>Your market value</h3>
+      <div class="field"><label>Your job title</label><input id="em-title" placeholder="e.g. Service Desk Analyst"></div>
+      <div class="field"><label>Where you work</label><input id="em-where" placeholder="Town or city, or leave blank"></div>
+      <div class="field"><label>Your salary now (a year)</label><input id="em-salary" inputmode="numeric" placeholder="e.g. 32000"></div>
+      <button class="primary" id="em-check">Check my pay</button>
+      <div id="em-result" style="margin-top:14px"></div>
+    </div>
+    <div class="card">
+      <h3>Only move for more money</h3>
+      <p class="card-hint">Happy where you are? Job-AI then only applies to jobs whose advert shows a salary well above yours, never to your employer, and only a few a month.</p>
+      <div class="checkbox-field"><input id="mv-on" type="checkbox" ${mv.on ? 'checked' : ''}><label for="mv-on">Turn on</label></div>
+      <div class="field"><label>Only apply if it pays at least</label>
+        <select id="mv-up">${[10, 15, 20, 25, 30].map((n) => `<option value="${n}" ${Number(mv.uplift || 15) === n ? 'selected' : ''}>${n}% more</option>`).join('')}</select></div>
+      <div class="field"><label>Most applications a month</label>
+        <select id="mv-month">${[4, 8, 12, 20].map((n) => `<option value="${n}" ${Number(mv.monthly || 8) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+      <div class="field"><label>Your employer (never apply there)</label><input id="mv-emp" placeholder="e.g. Barts Health NHS Trust"></div>
+      <span class="field-hint">${move.on ? `On: only jobs paying ${money(move.min)} or more, from your salary above.` : 'Off. Uses your salary from Your market value above.'}</span>
+      <button class="primary" id="mv-save">Save</button>
+      <div class="status-msg" id="status-mv"></div>
+    </div>
+    <div class="card">
+      <h3>What it found (last 30 days)</h3>
+      ${move.on ? `<p style="margin-top:0"><strong>${Math.min(used, move.monthly)} of ${move.monthly}</strong> applications used this month.</p>` : '<p class="card-hint">Turn on Only move for more money and this shows what it applied to, and what it skipped for paying too little.</p>'}
+      ${heldN ? `<p class="card-hint">Skipped: ${sk.pay || 0} paid too little, ${sk.nosalary || 0} showed no salary, ${sk.employer || 0} at your employer.</p>` : ''}
+      ${(found.sent || []).length ? `<div style="font-weight:600;margin:10px 0 4px">Applications sent</div>${found.sent.slice(0, 6).map((j) => `<div style="padding:8px 0;border-top:1px solid var(--border, #e5e2da);font-size:14px"><strong>${esc(j.title)}</strong> <span style="color:var(--text-muted, #6b6559)">${esc(j.company || '')}, ${esc(String(j.applied_at || '').slice(0, 10))}</span>${j.pay ? ` <span style="color:#15803d;font-weight:600">${money(j.pay)}, ${j.pay_pct}% more</span>` : ''}</div>`).join('')}` : ''}
+    </div>`;
+  // Typed values set via JS so stored text can't inject HTML.
+  document.getElementById('em-title').value = title;
+  document.getElementById('em-where').value = where;
+  document.getElementById('em-salary').value = salary;
+  document.getElementById('mv-emp').value = mv.employer || '';
+
+  const read = () => ({
+    title: document.getElementById('em-title').value.trim(),
+    location: document.getElementById('em-where').value.trim(),
+    salary: document.getElementById('em-salary').value.replace(/[^0-9]/g, ''),
+  });
+  async function check() {
+    const v = read(), out = document.getElementById('em-result');
+    if (v.title.length < 3 || Number(v.salary) < 5000) { out.innerHTML = '<p class="card-hint">Type your job title and yearly salary, then press Check my pay.</p>'; return; }
+    out.innerHTML = '<p class="card-hint">Checking live adverts…</p>';
+    const j = await window.api.move.market({ ...v, country: us ? 'US' : 'GB' });
+    if (!j || j.error) { out.innerHTML = `<p class="card-hint">${esc((j && j.error) || 'Something went wrong. Please try again.')}</p>`; return; }
+    const tone = j.level === 'under' || j.level === 'below' ? '#fff7ed' : j.level === 'unknown' ? '#f8fafc' : '#f0fdf4';
+    out.innerHTML = `<div style="padding:14px 16px;border-radius:10px;background:${tone};border:1px solid var(--border, #e5e2da)">
+        <div style="font-size:18px;font-weight:700;margin-bottom:4px">${esc(j.headline)}</div><div style="font-size:14.5px;line-height:1.5">${esc(j.detail)}</div>
+        ${j.tooFew ? '' : `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">${[['Lower', j.low], ['Middle', j.mid], ['Upper', j.high]].map(([l, n]) => `<div style="flex:1;min-width:90px;text-align:center;background:#fff;border:1px solid var(--border, #e5e2da);border-radius:8px;padding:8px 4px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted, #6b6559)">${l}</div><div style="font-weight:700">${money(n)}</div></div>`).join('')}</div><div style="font-size:12.5px;margin-top:6px;color:var(--text-muted, #6b6559)">From ${j.n} live adverts with a real salary.</div>`}</div>
+      ${(j.better || []).length ? `<div style="font-weight:600;margin:14px 0 2px">Example adverts that pay more than you</div><div style="font-size:12.5px;margin-bottom:4px;color:var(--text-muted, #6b6559)">From Reed and Adzuna, to compare pay. Job-AI applies on employers' own sites and NHS Jobs, so it may not apply to these ones.</div>${j.better.map((a, i) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border, #e5e2da);font-size:14px"><span><a href="#" class="em-job" data-i="${i}">${esc(a.title)}</a> <span style="color:var(--text-muted, #6b6559)">${esc(a.company)}</span></span><strong>${money(a.pay)}</strong></div>`).join('')}` : ''}
+      ${!move.on && !j.tooFew && j.share >= 40 ? '<p style="margin:12px 0 0">Want Job-AI to apply to the ones that pay more? Turn on <strong>Only move for more money</strong> below.</p>' : ''}`;
+    out.querySelectorAll('.em-job').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const u = j.better[Number(a.dataset.i)].url; if (/^https:\/\//.test(u)) window.api.shell.openExternal(u); }));
+  }
+  document.getElementById('em-check').addEventListener('click', check);
+  if (title && Number(salary) >= 5000) check();
+
+  document.getElementById('mv-save').addEventListener('click', async () => {
+    const v = read();
+    const on = document.getElementById('mv-on').checked;
+    if (on && Number(v.salary) < 10000) { showStatus(document.getElementById('status-mv'), 'Type your salary now (above) to turn this on.', 'error'); return; }
+    const r = await window.api.move.save({ on, current: Number(v.salary) || '', uplift: Number(document.getElementById('mv-up').value), monthly: Number(document.getElementById('mv-month').value), employer: document.getElementById('mv-emp').value, title: v.title, location: v.location });
+    await renderEarn();
+    showStatus(document.getElementById('status-mv'), r && r.skipped ? `Saved. ${r.skipped} waiting job${r.skipped === 1 ? '' : 's'} didn't pay enough, so they were skipped.` : 'Saved');
+    showToast('Saved');
+  });
 }
 
 async function renderAnalytics() {

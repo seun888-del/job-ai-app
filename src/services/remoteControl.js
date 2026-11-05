@@ -48,10 +48,14 @@ async function buildStatus() {
   let hasTrac = true; try { const t = JSON.parse(db.getProfile().trac_details || '{}'); hasTrac = !!((t.employment || []).length || (t.references || []).length); } catch (_) { hasTrac = false; }
   const summary = (await queueReader.getQueueSummary()) || [];
   const m = {}; for (const r of summary) m[r.status] = r.count;
+  // "Only move for more money": each application carries what it pays, for the phone notification.
+  let move = { on: false }, us = false;
+  try { const p = db.getProfile() || {}; move = require('../../bot/modules/move_mode').fromSettings(p.move_for_more); us = (p.country || '') === 'United States'; } catch (_) {}
   const recent = ((await queueReader.getRecentApplications(12)) || []).map((j) => ({
     title: j.title || '', company: j.company || '', source: LABELS[j.source] || '',
     status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting',
     at: j.updated_at ? new Date(String(j.updated_at).replace(' ', 'T') + (/[zZ+]/.test(String(j.updated_at)) ? '' : 'Z')).toISOString() : '',
+    ...((j.status === 'applied' && require('../../bot/modules/move_mode').payRise(move, j, { us })) || {}),
   }));
   const skips = (await queueReader.getSkipReasons().catch(() => null)) || {};
   const blocked = !licensed ? (lic && lic.license_key ? 'Your Job-AI access has ended. Subscribe to keep applying.' : 'Activate Job-AI on your computer first.')

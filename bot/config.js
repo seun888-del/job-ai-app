@@ -136,6 +136,9 @@ const cfg = {
       cfg.TRAC_SECTORS = Array.isArray(cfg.TRAC_DETAILS.sectors) ? cfg.TRAC_DETAILS.sectors : [];
       cfg.TITLE_BLOCKLIST = excludes.map(e => e.keyword.toLowerCase());
       cfg.COMPANY_BLOCKLIST = blacklist.map(b => b.company.toLowerCase());
+      // "Only move for more money" (bot/modules/move_mode.js): their employer is never applied to.
+      cfg.MOVE = require('./modules/move_mode').fromSettings(profile.move_for_more);
+      if (cfg.MOVE.on && cfg.MOVE.employer.length >= 3) cfg.COMPANY_BLOCKLIST.push(cfg.MOVE.employer.toLowerCase());
 
       cfg.CVS = cvs.map(cv => ({
         id: cv.id,

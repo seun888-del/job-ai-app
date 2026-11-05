@@ -341,7 +341,7 @@ function markCapCounted(jobId) {
 function markApplied(jobId) {
   let job = null;
   withDb((db, markMutated) => {
-    const stmt = db.prepare('SELECT title, company, url, cv_score FROM queue WHERE job_id = ?');
+    const stmt = db.prepare('SELECT title, company, url, cv_score, description FROM queue WHERE job_id = ?');
     stmt.bind([jobId]);
     let title = null, company = null;
     if (stmt.step()) {
@@ -349,6 +349,12 @@ function markApplied(jobId) {
       title = row.title;
       company = row.company;
       job = { title, company, url: row.url, cv_score: row.cv_score };
+      // "Only move for more money": say in the receipt how much more this one pays.
+      try {
+        const cfg = require('../config');
+        const rise = require('./move_mode').payRise(cfg.MOVE, row, { us: (cfg.APPLICANT || {}).country === 'United States' });
+        if (rise) Object.assign(job, rise);
+      } catch (_) {}
     }
     stmt.free();
     db.run('INSERT OR IGNORE INTO applied_jobs (job_id, title, company) VALUES (?, ?, ?)', [jobId, title, company]);
@@ -379,9 +385,20 @@ function countAppliedToday() {
     const stmt = db.prepare(TODAY_CAP_SQL);
     const c = stmt.step() ? (stmt.getAsObject().c || 0) : 0;
     stmt.free();
-    return c;
+    // "Only move for more money": once the month's allowance (last 30 days) is used, report the
+    // daily cap as reached so every agent stops sending until older applications drop out.
+    const cfg = require('../config');
+    if (!cfg.MOVE || !cfg.MOVE.on) return c;
+    const m = db.prepare(MONTH_CAP_SQL);
+    const used = m.step() ? (m.getAsObject().c || 0) : 0;
+    m.free();
+    const left = cfg.MOVE.monthly - used;
+    return Math.max(c, cfg.MAX_APPLICATIONS_PER_DAY - Math.max(0, left));
   });
 }
+const MONTH_CAP_SQL = `SELECT COUNT(*) AS c FROM (
+  SELECT job_id FROM applied_jobs WHERE datetime(applied_at) >= datetime('now', '-30 day')
+  UNION SELECT job_id FROM cap_counted WHERE datetime(counted_at) >= datetime('now', '-30 day'))`;
 
 // ── Universal Credit journal logging ────────────────────────────────────────
 // Applied jobs not yet logged to the UC work-search journal, oldest first. The

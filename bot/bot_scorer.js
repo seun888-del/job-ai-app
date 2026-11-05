@@ -57,6 +57,8 @@ function boostCVText(cvText, keywords) {
 // ── Pre-filter: skip jobs mismatched on level, employment type, or salary ────
 function passesPreFilter(job) {
   const { experienceLevel, employmentType, salaryExpectation, country } = cfg.APPLICANT;
+  const move = require('./modules/move_mode').check(cfg.MOVE, job, { us: country === 'United States' });
+  if (move) return { pass: false, reason: move };
   const title     = (job.title || '').toLowerCase();
   const descStart = (job.description || '').substring(0, 1500);
 

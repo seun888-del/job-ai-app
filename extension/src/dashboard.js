@@ -1153,10 +1153,6 @@ VIEWS.cvs = async function renderCVs() {
 VIEWS.search = async function renderSearch() {
   const { profile, settings } = await loadConfig();
   const sched = settings.schedule || {};
-  const mv = profile.moveForMore || {};
-  const mvLeft = await store.monthLeft();
-  const money = (n) => (isUS(settings) ? '$' : '£') + Number(n).toLocaleString('en-GB');
-  const mvSum = cfg.MOVE.on ? `On: only jobs paying ${money(cfg.MOVE.min)} or more. ${Math.max(0, cfg.MOVE.monthly - Math.max(0, mvLeft))} of ${cfg.MOVE.monthly} used in the last 30 days.` : 'Off.';
   content.innerHTML = `
     <div class="page-header"><h2>Search Preferences</h2><p>Used by the agents to find jobs that fit.</p></div>
     <div class="card"><div class="tracd-grid">
@@ -1183,25 +1179,11 @@ VIEWS.search = async function renderSearch() {
       <div class="tracd-sectors">${extraForRegion(isUS(settings)).map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="s-extra" value="${k}" ${(settings.extraSites || {})[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
       <p class="muted" style="margin:8px 0 0;font-size:13px">Once ticked, the site gets its own agent card on the Dashboard with a Sign in button. ${extraForRegion(isUS(settings)).some(([k]) => k === 'linkedin') ? 'LinkedIn can limit accounts it thinks are automated, so use it at your own risk and keep your daily limit low.' : ''}</p>
     </div>
-    <div class="card"><h3>Only move for more money</h3>
-      <p class="muted" style="margin-top:0">Happy where you are? Job-AI then only applies to jobs whose advert shows a salary well above yours, never to your employer, and only a few a month.</p>
-      <label class="checkbox-label"><input type="checkbox" id="mv-on" ${mv.on ? 'checked' : ''}> Turn on</label>
-      <div class="tracd-grid" style="margin-top:10px">
-        <div class="field"><label>Your salary now (a year)</label><input id="mv-now" type="text" inputmode="numeric" value="${esc(String(mv.current || '').replace(/[^0-9]/g, ''))}" placeholder="e.g. 32000"></div>
-        <div class="field"><label>Only apply if it pays at least</label><select id="mv-up">${[10, 15, 20, 25, 30].map((n) => `<option value="${n}" ${Number(mv.uplift || 15) === n ? 'selected' : ''}>${n}% more</option>`).join('')}</select></div>
-        <div class="field"><label>Most applications a month</label><select id="mv-month">${[4, 8, 12, 20].map((n) => `<option value="${n}" ${Number(mv.monthly || 8) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-        <div class="field"><label>Your employer (never apply there)</label><input id="mv-emp" type="text" value="${esc(mv.employer || '')}" placeholder="e.g. Barts Health NHS Trust"></div>
-      </div>
-      <p class="muted" style="margin:2px 0 0;font-size:13px">${esc(mvSum)}</p>
-    </div>
     <div class="card"><h3>Review before applying</h3>
       <label class="checkbox-label" style="align-items:flex-start"><input type="checkbox" id="s-review" ${settings.reviewBeforeApply ? 'checked' : ''}><span>Let me review each tailored CV and cover letter before it applies<br><small class="muted">Each one waits on the Dashboard for you to approve or skip.</small></span></label>
     </div>
     ${saveBar('s-save')}`;
   $('#s-save').addEventListener('click', async () => {
-    const mvNow = parseInt($('#mv-now').value.replace(/[^0-9]/g, ''), 10) || 0;
-    if ($('#mv-on').checked && mvNow < 10000) { setSt('#s-save-st', 'Type your salary now to turn on Only move for more money.'); return; }
-    await store.patch('profile', { moveForMore: { on: $('#mv-on').checked, current: mvNow || '', uplift: Number($('#mv-up').value), monthly: Number($('#mv-month').value), employer: $('#mv-emp').value.trim() } });
     await store.patch('profile', {
       searchTerms: lines('#s-terms').slice(0, 40), excludeKeywords: lines('#s-exclude').slice(0, 80),
       searchLocation: $('#s-where').value.trim() || 'United Kingdom', matchLevel: $('#s-level').value, minScore: null,
@@ -1214,15 +1196,93 @@ VIEWS.search = async function renderSearch() {
     await store.patch('settings', { extraSites, dailyCap: Number($('#s-cap').value), reviewBeforeApply: $('#s-review').checked,
       schedule: { enabled: $('#s-sched').checked, start: Number($('#s-from').value), end: Number($('#s-to').value), days: $$('.s-day:checked').map((c) => c.value) } });
     await loadConfig();
+    setSt('#s-save-st', '✓ Saved.');
+  });
+};
+
+// ── Earn more: market value + "Only move for more money" ─────────────────────
+// For people who aren't job hunting: what their job pays elsewhere (live adverts, same check
+// as tryjobai.com/am-i-underpaid), and the mode that only applies when a job pays more.
+const PAY_CHECK_URL = 'https://api.tryjobai.com/am-i-underpaid/check';
+const MOVE_SKIP = /^(Pays under|No salary shown \(you only move|Your current employer)/;
+VIEWS.earn = async function renderEarn() {
+  const { profile, settings } = await loadConfig();
+  const us = isUS(settings);
+  const mv = profile.moveForMore || {};
+  const money = (n) => (us ? '$' : '£') + Number(n).toLocaleString('en-GB');
+  const title = mv.title || (profile.searchTerms || [])[0] || '';
+  const where = mv.location != null ? mv.location : String(profile.location || '').split(',')[0].trim();
+  const salary = String(mv.current || profile.salaryExpectation || '').replace(/[^0-9]/g, '');
+  const all = await store.jobs();
+  const since = Date.now() - 30 * 864e5;
+  const sent = all.filter((j) => j.status === 'applied' && Date.parse(j.appliedAt || 0) >= since)
+    .sort((a, b) => String(b.appliedAt).localeCompare(String(a.appliedAt)));
+  const held = all.filter((j) => j.status === 'skipped' && MOVE_SKIP.test(j.reason || '') && Date.parse(j.updatedAt || 0) >= since);
+  const count = (re) => held.filter((j) => re.test(j.reason)).length;
+  const left = await store.monthLeft();
+  const usedN = cfg.MOVE.on ? Math.max(0, cfg.MOVE.monthly - Math.max(0, left)) : 0;
+  content.innerHTML = `
+    <div class="page-header"><h2>Earn more</h2><p>See what your job pays elsewhere, and let Job-AI apply only when a job pays more.</p></div>
+    <div class="card"><h3>Your market value</h3>
+      <div class="tracd-grid">
+        <div class="field"><label>Your job title</label><input id="em-title" type="text" value="${esc(title)}" placeholder="e.g. Service Desk Analyst"></div>
+        <div class="field"><label>Where you work</label><input id="em-where" type="text" value="${esc(where)}" placeholder="Town or city, or leave blank"></div>
+        <div class="field"><label>Your salary now (a year)</label><input id="em-salary" type="text" inputmode="numeric" value="${esc(salary)}" placeholder="e.g. 32000"></div>
+      </div>
+      <button class="primary" id="em-check">Check my pay</button>
+      <div id="em-result" style="margin-top:14px"></div>
+    </div>
+    <div class="card"><h3>Only move for more money</h3>
+      <p class="muted" style="margin-top:0">Happy where you are? Job-AI then only applies to jobs whose advert shows a salary well above yours, never to your employer, and only a few a month.</p>
+      <label class="checkbox-label"><input type="checkbox" id="mv-on" ${mv.on ? 'checked' : ''}> Turn on</label>
+      <div class="tracd-grid" style="margin-top:10px">
+        <div class="field"><label>Only apply if it pays at least</label><select id="mv-up">${[10, 15, 20, 25, 30].map((n) => `<option value="${n}" ${Number(mv.uplift || 15) === n ? 'selected' : ''}>${n}% more</option>`).join('')}</select></div>
+        <div class="field"><label>Most applications a month</label><select id="mv-month">${[4, 8, 12, 20].map((n) => `<option value="${n}" ${Number(mv.monthly || 8) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+        <div class="field"><label>Your employer (never apply there)</label><input id="mv-emp" type="text" value="${esc(mv.employer || '')}" placeholder="e.g. Barts Health NHS Trust"></div>
+      </div>
+      <p class="muted" style="margin:2px 0 12px;font-size:13px">${cfg.MOVE.on ? `On: only jobs paying ${money(cfg.MOVE.min)} or more, from your salary above.` : 'Off. Uses your salary from Your market value above.'}</p>
+      <button class="primary" id="mv-save">Save</button> <span class="status-msg" id="mv-st"></span>
+    </div>
+    <div class="card"><h3>What it found (last 30 days)</h3>
+      ${cfg.MOVE.on ? `<p style="margin-top:0"><strong>${usedN} of ${cfg.MOVE.monthly}</strong> applications used this month.</p>` : '<p class="muted" style="margin-top:0">Turn on Only move for more money and this shows what it applied to, and what it skipped for paying too little.</p>'}
+      ${held.length ? `<p class="muted">Skipped: ${count(/^Pays under/)} paid too little, ${count(/^No salary shown/)} showed no salary, ${count(/^Your current employer/)} at your employer.</p>` : ''}
+      ${sent.length ? `<div style="font-weight:600;margin:10px 0 4px">Applications sent</div>${sent.slice(0, 6).map((j) => `<div style="padding:8px 0;border-top:1px solid var(--border,#e5e2da);font-size:14px"><strong>${esc(String(j.title || '').split('\n')[0])}</strong> <span class="muted">${esc(j.company || '')}, ${esc(String(j.appliedAt || '').slice(0, 10))}</span>${(() => { const r = cfg.movePay(j); return r ? ` <span style="color:#15803d;font-weight:600">${money(r.pay)}, ${r.pay_pct}% more</span>` : ''; })()}</div>`).join('')}` : ''}
+    </div>`;
+
+  const read = () => ({ title: $('#em-title').value.trim(), location: $('#em-where').value.trim(), salary: $('#em-salary').value.replace(/[^0-9]/g, '') });
+  async function check() {
+    const v = read(), out = $('#em-result');
+    if (v.title.length < 3 || Number(v.salary) < 5000) { out.innerHTML = '<p class="muted">Type your job title and yearly salary, then press Check my pay.</p>'; return; }
+    out.innerHTML = '<p class="muted">Checking live adverts…</p>';
+    try {
+      const r = await fetch(PAY_CHECK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...v, country: us ? 'US' : 'GB' }), signal: AbortSignal.timeout(30000) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Please try again.');
+      out.innerHTML = `<div style="padding:14px 16px;border-radius:10px;background:${j.level === 'under' || j.level === 'below' ? '#fff7ed' : j.level === 'unknown' ? '#f8fafc' : '#f0fdf4'};border:1px solid var(--border,#e5e2da)">
+          <div style="font-size:18px;font-weight:700;margin-bottom:4px">${esc(j.headline)}</div><div style="font-size:14.5px;line-height:1.5">${esc(j.detail)}</div>
+          ${j.tooFew ? '' : `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">${[['Lower', j.low], ['Middle', j.mid], ['Upper', j.high]].map(([l, n]) => `<div style="flex:1;min-width:90px;text-align:center;background:#fff;border:1px solid var(--border,#e5e2da);border-radius:8px;padding:8px 4px"><div class="muted" style="font-size:11px;font-weight:700;text-transform:uppercase">${l}</div><div style="font-weight:700">${money(n)}</div></div>`).join('')}</div><div class="muted" style="font-size:12.5px;margin-top:6px">From ${j.n} live adverts with a real salary.</div>`}</div>
+        ${(j.better || []).length ? `<div style="font-weight:600;margin:14px 0 2px">Example adverts that pay more than you</div><div class="muted" style="font-size:12.5px;margin-bottom:4px">From Reed and Adzuna, to compare pay. Job-AI applies on employers' own sites and NHS Jobs, so it may not apply to these ones.</div>${j.better.map((a) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border,#e5e2da);font-size:14px"><span><a href="#" class="em-job" data-url="${esc(a.url)}">${esc(a.title)}</a> <span class="muted">${esc(a.company)}</span></span><strong>${money(a.pay)}</strong></div>`).join('')}` : ''}
+        ${!cfg.MOVE.on && !j.tooFew && j.share >= 40 ? '<p style="margin:12px 0 0">Want Job-AI to apply to the ones that pay more? Turn on <strong>Only move for more money</strong> below.</p>' : ''}`;
+      $$('.em-job').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openTab(a.dataset.url); }));
+    } catch (e) { out.innerHTML = `<p class="muted">${esc(e.message || 'Something went wrong. Please try again.')}</p>`; }
+  }
+  $('#em-check').addEventListener('click', check);
+  if (title && Number(salary) >= 5000) check();
+
+  $('#mv-save').addEventListener('click', async () => {
+    const v = read();
+    if ($('#mv-on').checked && Number(v.salary) < 10000) { setSt('#mv-st', 'Type your salary now (above) to turn this on.', true); return; }
+    await store.patch('profile', { moveForMore: { on: $('#mv-on').checked, current: Number(v.salary) || '', uplift: Number($('#mv-up').value), monthly: Number($('#mv-month').value), employer: $('#mv-emp').value.trim(), title: v.title, location: v.location } });
+    await loadConfig();
     // Jobs already found or tailored before the mode went on must pass it too.
-    let held = 0;
+    let n = 0;
     if (cfg.MOVE.on) for (const j of await store.jobs()) {
       if (!['pending', 'cv_ready', 'awaiting_review'].includes(j.status)) continue;
       const why = cfg.moveCheck(j);
-      if (why) { await store.updateJob(j.jobId, { status: 'skipped', reason: why }); held++; }
+      if (why) { await store.updateJob(j.jobId, { status: 'skipped', reason: why }); n++; }
     }
-    setSt('#s-save-st', held ? `✓ Saved. ${held} waiting job${held === 1 ? '' : 's'} didn't pay enough, so they were skipped.` : '✓ Saved.');
-    VIEWS.search();
+    await VIEWS.earn();
+    setSt('#mv-st', n ? `✓ Saved. ${n} waiting job${n === 1 ? '' : 's'} didn't pay enough, so they were skipped.` : '✓ Saved.');
   });
 };
 
@@ -1778,7 +1838,7 @@ async function remoteStatus() {
   const SRC = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site' };
   const recent = all.filter((j) => ['applied', 'apply_failed', 'ready', 'ready_to_submit'].includes(j.status))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 12)
-    .map((j) => ({ title: j.title || '', company: j.company || '', source: SRC[j.source] || '', status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting', at: j.appliedAt || j.updatedAt || '', ...(j.status === 'apply_failed' && j.reason ? { reason: String(j.reason).slice(0, 140) } : {}) }));
+    .map((j) => ({ title: j.title || '', company: j.company || '', source: SRC[j.source] || '', status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting', at: j.appliedAt || j.updatedAt || '', ...(j.status === 'apply_failed' && j.reason ? { reason: String(j.reason).slice(0, 140) } : {}), ...((j.status === 'applied' && cfg.movePay(j)) || {}) }));
   const skipReasons = {}; for (const j of all) if (j.status === 'skipped' && j.reason) { const r = String(j.reason).replace(/\(\d+%\)|\d+%/g, '').trim().slice(0, 80); skipReasons[r] = (skipReasons[r] || 0) + 1; }
   const blocked = !licenceActive(g.license) ? (g.license.key ? 'Your Job-AI access has ended. Subscribe to keep applying.' : 'Activate Job-AI in Chrome first.')
     : !(g.cv && g.cv.text) ? 'Add your CV in Job-AI first.' : applied >= cap ? `Today's limit of ${cap} applications is reached. Agents carry on tomorrow.` : '';

@@ -440,6 +440,52 @@ async function requeueFilterSkips(key) {
   } finally { db.close(); }
 }
 
+// "Only move for more money": applications in the last 30 days (sent + finished drafts),
+// counted the same way as the agents' monthly limit (queue_manager.countAppliedToday).
+function getMonthUsed() {
+  return withQueueDb(db => {
+    try {
+      return all(db, `SELECT COUNT(*) AS c FROM (
+        SELECT job_id FROM applied_jobs WHERE datetime(applied_at) >= datetime('now', '-30 day')
+        UNION SELECT job_id FROM cap_counted WHERE datetime(counted_at) >= datetime('now', '-30 day'))`)[0].c || 0;
+    } catch (_) { return 0; }
+  }, 0);
+}
+
+// Earn more tab: applications in the last 30 days and what the mode skipped.
+function getMoveFound(move, us) {
+  const { payRise } = require('../../bot/modules/move_mode');
+  return withQueueDb(db => {
+    try {
+      const sent = all(db, `SELECT a.title, a.company, a.applied_at, q.description FROM applied_jobs a LEFT JOIN queue q ON q.job_id = a.job_id
+        WHERE datetime(a.applied_at) >= datetime('now', '-30 day') ORDER BY a.applied_at DESC LIMIT 10`)
+        .map(({ description, ...r }) => ({ ...r, ...(payRise(move, { description }, { us }) || {}) }));
+      const n = (like) => all(db, `SELECT COUNT(*) AS c FROM queue WHERE status = 'skipped' AND reason LIKE ? AND datetime(updated_at) >= datetime('now', '-30 day')`, [like])[0].c || 0;
+      return { sent, skipped: { pay: n('Pays under%'), nosalary: n('No salary shown (you only move%'), employer: n('Your current employer%') } };
+    } catch (_) { return { sent: [], skipped: {} }; }
+  }, { sent: [], skipped: {} });
+}
+
+// When the mode is turned on, jobs already found or tailored must pass it too.
+async function skipFailingMove(move, us) {
+  if (!move || !move.on || !dbPath || !fs.existsSync(dbPath)) return 0;
+  const { check } = require('../../bot/modules/move_mode');
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(readDbFile(dbPath));
+  try {
+    const rows = all(db, `SELECT job_id, title, company, description FROM queue WHERE status IN ('pending', 'cv_ready', 'awaiting_review')`);
+    let n = 0;
+    for (const r of rows) {
+      const why = check(move, r, { us });
+      if (!why) continue;
+      db.run(`UPDATE queue SET status = 'skipped', reason = ?, updated_at = datetime('now') WHERE job_id = ?`, [why, r.job_id]);
+      n++;
+    }
+    if (n) writeDbFile(dbPath, Buffer.from(db.export()));
+    return n;
+  } finally { db.close(); }
+}
+
 // NHS/Trac applications the user may want to open: ready to submit, or saved as a draft that
 // needs them. Each carries its Trac link (draft_url) when the agent has recorded it.
 function getTracApplications() {
@@ -506,4 +552,4 @@ function getReconnectNeeded() {
   }, []);
 }
 
-module.exports = { getFilterSkips, requeueFilterSkips, init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getSkipReasons, getReviewQueue, getReviewCount, resolveReview, requeueForReview, getAssistQueue, skipAssist };
+module.exports = { getMoveFound, getMonthUsed, skipFailingMove, getFilterSkips, requeueFilterSkips, init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getSkipReasons, getReviewQueue, getReviewCount, resolveReview, requeueForReview, getAssistQueue, skipAssist };

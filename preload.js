@@ -58,6 +58,12 @@ contextBridge.exposeInMainWorld('api', {
     save: (site, username, password) => ipcRenderer.invoke('credentials:save', { site, username, password }),
     get: (site) => ipcRenderer.invoke('credentials:get', site),
   },
+  move: {
+    status: () => ipcRenderer.invoke('move:status'),
+    save: (settings) => ipcRenderer.invoke('move:save', settings),
+    market: (q) => ipcRenderer.invoke('move:market', q),
+    found: () => ipcRenderer.invoke('move:found'),
+  },
   filters: {
     hint: () => ipcRenderer.invoke('filters:hint'),
     widen: (key) => ipcRenderer.invoke('filters:widen', key),
