@@ -37,12 +37,26 @@ function selectBestCV(jdText, cvProfiles) {
 
 // Extract plain text from a PDF file
 async function extractPdfText(filePath) {
+  // The CV is read for every job: keep its text until the file changes. pdf-parse's bundled
+  // pdf.js now and then fails on a valid PDF ("bad XRef entry", "Illegal character") under
+  // Electron's Node, mostly PDFKit-made files, so a failed read is retried before giving up.
+  const st = fs.statSync(filePath);
+  const key = `${filePath}|${st.size}|${st.mtimeMs}`;
+  if (pdfTextCache.has(key)) return pdfTextCache.get(key);
   const buffer = fs.readFileSync(filePath);
-  const data   = await pdfParse(buffer);
+  let data, lastErr;
+  for (let attempt = 0; attempt < 3 && !data; attempt++) {
+    try { data = await pdfParse(buffer); } catch (e) { lastErr = e; }
+  }
+  if (!data) { lastErr.message = `${lastErr.message} (reading ${path.basename(filePath)}, ${buffer.length} bytes)`; throw lastErr; }
   // Strip undecodable glyph garbage (e.g. dates in a subsetted font with no
   // ToUnicode map) before it can reach the tailored CV. See cv_text_sanitizer.
-  return sanitizeCVText(data.text);
+  const text = sanitizeCVText(data.text);
+  pdfTextCache.set(key, text);
+  if (pdfTextCache.size > 20) pdfTextCache.delete(pdfTextCache.keys().next().value);
+  return text;
 }
+const pdfTextCache = new Map(); // "path|size|mtime" -> text
 
 // Extract plain text from a .docx file preserving bullet structure as • markers
 async function extractDocxText(filePath) {

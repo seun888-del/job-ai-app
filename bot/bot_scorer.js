@@ -123,14 +123,14 @@ function passesPreFilter(job) {
   return { pass: true };
 }
 
-async function scoreWithBoost(cv, jdText, level = cfg.MATCH_LEVEL) {
+async function scoreWithBoost(cv, jdText, level = cfg.MATCH_LEVEL, scoreOpts = {}) {
   const raw         = await cvSelector.extractCVText(cv.path);
   const cleanedText = cleanText(raw);
 
   // Score original CV against JD keywords — no AI rewriting
   let score, missingKeywords, allKeywords;
   try {
-    ({ score, missingKeywords, allKeywords } = await cvScorer.scoreCV(cleanedText, jdText));
+    ({ score, missingKeywords, allKeywords } = await cvScorer.scoreCV(cleanedText, jdText, scoreOpts));
   } catch (err) {
     // Never guess a score: the job is retried later (see processJob).
     console.warn(`  [Scorer Agent] Scoring failed (${err.message})`);
@@ -221,7 +221,7 @@ async function processJob(job) {
   // call: the AI account has a per-minute limit shared by every user.
   let { score, fit, unscored, cvText: boostedText, rawCvText, missingKeywords, allKeywords } = job.source === 'trac'
     ? await (async () => { const t = cleanText(await cvSelector.extractCVText(bestCV.path)); return { score: 0, cvText: t, rawCvText: t, missingKeywords: [] }; })()
-    : await scoreWithBoost(bestCV, scoreJD, matchLevel);
+    : await scoreWithBoost(bestCV, scoreJD, matchLevel, { federal: job.source === 'usajobs' && scoreJD !== job.description });
   // The AI couldn't read the advert's keywords: try the job again later, then skip it.
   if (unscored) {
     if ((job.retryCount || 0) < 2) {
@@ -251,7 +251,7 @@ async function processJob(job) {
 
     for (const altCV of others) {
       console.log(`\n  [Scorer Agent] ${score}% — trying next CV: ${altCV.name}`);
-      const result = await scoreWithBoost(altCV, scoreJD, matchLevel);
+      const result = await scoreWithBoost(altCV, scoreJD, matchLevel, { federal: job.source === 'usajobs' && scoreJD !== job.description });
 
       const pass = !!(result.fit && result.fit.pass), bestPass = !!(bestFit && bestFit.pass);
       if ((pass && !bestPass) || (pass === bestPass && result.score > bestScore)) {
@@ -609,6 +609,8 @@ async function main() {
         await processJob(job);
       } catch (err) {
         console.error(`  [Scorer Agent] Error on "${job.title}": ${err.message}`);
+        // Where it broke (file paths only, no CV or job text), so a pattern can be traced.
+        console.error('  [Scorer Agent] at ' + String(err.stack || '').split('\n').slice(1, 5).map((l) => l.trim()).join(' | '));
         queue.update(job.jobId, { status: 'failed', error: err.message });
       }
       await DELAY(500); // brief pause between jobs

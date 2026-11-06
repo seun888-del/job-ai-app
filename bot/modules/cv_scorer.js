@@ -35,7 +35,23 @@ function hasTerm(cvText, term) {
 // A keyword object counts as covered if the CV contains its term OR any alt.
 function keywordCovered(cvLower, kw) {
   for (const t of [kw.term, ...(kw.alts || [])]) for (const v of termVariants(t)) if (hasTerm(cvLower, v)) return true;
+  // Federal adverts (kw.loose): their skills come from duty sentences, so match on word stems
+  // ("Human Resource policies" is met by "HR policy"). Other adverts keep the exact check.
+  if (kw.loose) for (const t of [kw.term, ...(kw.alts || [])]) if (looseCovered(cvLower, t)) return true;
   return false;
+}
+
+const LOOSE_STOP = new Set(['and', 'or', 'of', 'the', 'to', 'in', 'for', 'with', 'a', 'an', 'on', 'experience', 'knowledge', 'skills', 'skill', 'ability', 'related', 'various', 'applicable']);
+const stem = (w) => w.replace(/(ies|es|s)$/, '').slice(0, 5);
+const looseWords = (s) => String(s || '').toLowerCase().replace(/\bhuman resources?\b/g, 'hr').split(/[^a-z0-9]+/).filter((w) => w.length >= 2 && !LOOSE_STOP.has(w)).map(stem);
+let looseCv = { text: null, words: null }; // the last CV's stems (one CV is scored at a time)
+function looseCovered(cvLower, term) {
+  const words = looseWords(term);
+  if (!words.length) return false;
+  if (looseCv.text !== cvLower) looseCv = { text: cvLower, words: new Set(looseWords(cvLower)) };
+  const cv = looseCv.words;
+  const hits = words.filter((w) => cv.has(w)).length;
+  return words.length <= 2 ? hits === words.length : hits >= Math.ceil(words.length * 2 / 3);
 }
 
 // Advert wordings a CV rarely repeats word for word: "Outlook / Excel" is met by either
@@ -92,7 +108,7 @@ function normaliseKeywords(raw) {
 // Use the LLM to extract required skills from a JD, WITH acronym/synonym pairs
 // and an essential/desirable flag — all in one call (no extra latency vs before).
 // Returns an array of { term, essential, alts:[…] }.
-async function extractJDKeywords(jdText) {
+async function extractJDKeywords(jdText, opts = {}) {
   const prompt = `Extract the key required skills, tools, technologies and qualifications from this job description.
 
 For EACH requirement return an object with:
@@ -105,6 +121,7 @@ Leave out soft skills and personal qualities (communication, attention to detail
 Return ONLY a valid JSON array of such objects, 10 to 20 items, most important first. No commentary.
 Example:
 [{"term":"Active Directory","essential":true,"alts":["AD","Entra ID","Azure AD"]},{"term":"user acceptance testing","essential":false,"alts":["UAT"]},{"term":"ITIL","essential":true,"alts":["IT service management","ITSM"]}]
+${opts.federal ? `\n\nThis text is a U.S. federal "specialized experience" statement written as duties. Turn each duty into the short skill or experience it needs: 2 to 4 words, never a sentence, and give its everyday wordings as alts (e.g. "Providing technical Human Resource advice" -> term "HR advice", alts ["human resources advice", "HR guidance", "advise managers", "policy advice"]; "receiving, reviewing, documenting, or resolving IT help desk tickets" -> term "help desk tickets", alts ["service desk", "tickets", "incident tickets", "helpdesk"]). Use "HR" and "human resources" both where relevant. Mark a skill essential only if the statement requires it.` : ''}
 
 JOB DESCRIPTION:
 ${focusJD(jdText, 3000)}`;
@@ -118,7 +135,8 @@ ${focusJD(jdText, 3000)}`;
   try {
     const raw = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(raw)) return [];
-    return normaliseKeywords(raw);
+    const kws = normaliseKeywords(raw);
+    return opts.federal ? kws.map((k) => ({ ...k, loose: true })) : kws;
   } catch {
     return [];
   }
@@ -159,10 +177,11 @@ function computeScore(cvText, keywords) {
 // When the AI fails or reads no keywords (twice), this THROWS: callers retry the job
 // later. It used to fall back to 85%, which let off-target jobs through (GitLab Backend
 // Engineer roles reached Ready to send on 2026-10-20 with no keywords read).
-async function scoreCV(cvText, jdText) {
+// opts.federal: the text is a federal specialized experience statement (duties, not skills).
+async function scoreCV(cvText, jdText, opts = {}) {
   let keywords = [];
   for (let attempt = 0; attempt < 2 && !keywords.length; attempt++) {
-    keywords = await extractJDKeywords(jdText);
+    keywords = await extractJDKeywords(jdText, opts);
   }
   if (!keywords.length) throw new Error('no keywords read from the advert');
 
