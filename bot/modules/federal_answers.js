@@ -37,13 +37,22 @@ QUESTIONNAIRE:
 ${String(text).slice(0, MAX_TEXT)}
 
 Return ONLY a JSON array, one item per question in order:
-[{"n": 1, "question": "the question or task statement, word for word", "choices": ["each answer choice, word for word, in order"]}]
+[{"n": 1, "kind": "experience" | "personal" | "essay" | "certification", "question": "the question or task statement, word for word (up to 400 characters)", "choices": ["each answer choice, word for word, in order (up to 400 characters each)"]}]
 
-Rules: keep the wording exactly. Leave out headings, instructions and the certification statement. Yes/No questions get ["Yes","No"]. A question with no choices shown gets [].`;
+Kinds: "experience" = asks about the applicant's skills, education or work experience (task self-ratings, which statement describes your experience). "personal" = about the applicant themselves, not their skills: veterans' preference, eligibility, willingness or agreement to conditions (background check, travel, lifting, vaccination, probation, relocation). "essay" = asks for a written answer. "certification" = asks them to certify or verify their answers or that they wrote them themselves.
+Rules: keep the wording exactly. Leave out headings and instructions. Yes/No questions get ["Yes","No"]. A question with no choices shown gets [].`;
   let arr = parseJson(await llmChat(prompt).catch(() => ''));
   if (!Array.isArray(arr)) arr = parseJson(await llmChat(prompt).catch(() => ''));
   if (!Array.isArray(arr)) throw new Error('Could not read the questions. Copy the questionnaire text again and paste it.');
-  return arr.filter((q) => q && q.question).slice(0, 60).map((q, i) => ({ n: i + 1, question: String(q.question).trim(), choices: (Array.isArray(q.choices) ? q.choices : []).map((c) => String(c).trim()).filter(Boolean).slice(0, 8) }));
+  const KINDS = ['experience', 'personal', 'essay', 'certification'];
+  return arr.filter((q) => q && q.question).slice(0, 60).map((q, i) => {
+    const choices = (Array.isArray(q.choices) ? q.choices : []).map((c) => String(c).trim()).filter(Boolean).slice(0, 8);
+    let kind = KINDS.includes(q.kind) ? q.kind : 'experience';
+    // Belt and braces: certify/verify wording, or a written answer with no choices, is never ours.
+    if (/\b(i certify|i verify|certif(y|ication)|in my own words)\b/i.test(q.question + ' ' + choices.join(' '))) kind = 'certification';
+    else if (kind === 'experience' && !choices.length) kind = 'essay';
+    return { n: i + 1, kind, question: String(q.question).trim(), choices };
+  });
 }
 
 async function suggestBatch(questions, cvText) {
@@ -73,9 +82,12 @@ async function suggestAnswers(questionnaireText, cvText) {
   if (String(cvText || '').trim().length < 200) throw new Error('Add your CV first.');
   const qs = await readQuestions(questionnaireText);
   if (!qs.length) throw new Error('No questions found in that text.');
-  const out = [];
-  for (let i = 0; i < qs.length; i += PER_CALL) {
-    const batch = qs.slice(i, i + PER_CALL);
+  // Only experience questions get a suggestion. Personal, essay and certification questions are
+  // the applicant's alone: essays must be in their own words (agencies ask them to certify no AI).
+  const out = qs.filter((q) => q.kind !== 'experience').map((q) => ({ ...q, choice: '', evidence: '' }));
+  const exp = qs.filter((q) => q.kind === 'experience');
+  for (let b = 0; b < exp.length; b += PER_CALL) {
+    const batch = exp.slice(b, b + PER_CALL);
     const byN = new Map((await suggestBatch(batch, cvText)).map((a) => [Number(a.n), a]));
     for (const q of batch) {
       const a = byN.get(q.n) || {};
@@ -97,7 +109,7 @@ async function suggestAnswers(questionnaireText, cvText) {
       out.push({ ...q, choice, evidence });
     }
   }
-  return out;
+  return out.sort((x, y) => x.n - y.n);
 }
 
 module.exports = { suggestAnswers };

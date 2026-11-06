@@ -1969,8 +1969,11 @@ function federalHelpPanel({ title, previewUrl, openUrl, suggest }) {
     if (!r || !r.ok) { $o('#fh-st').textContent = (r && r.error) || 'Could not suggest answers.'; return; }
     $o('#fh-st').textContent = `${r.answers.length} question${r.answers.length === 1 ? '' : 's'}.`;
     $o('#fh-out').innerHTML = r.answers.map((a) => `<div style="border-top:1px solid var(--border,#e6e1d6);padding:10px 0">
-      <div style="font-size:13.5px;font-weight:600;margin-bottom:4px">${a.n}. ${e(a.question)}</div>
-      ${a.choice ? `<div style="font-size:13.5px"><span style="color:var(--text-muted,#4a453b)">Your CV supports:</span> <strong>${e(a.choice)}</strong></div><div style="font-size:12.5px;color:var(--text-muted,#4a453b);margin-top:2px">${e(a.evidence)}</div>`
+      <div style="font-size:13.5px;font-weight:600;margin-bottom:4px">${a.n}. ${e(a.question.length > 320 ? a.question.slice(0, 300) + '...' : a.question)}</div>
+      ${a.kind === 'personal' ? `<div style="font-size:13px;color:var(--text-muted,#4a453b)">This one is about you, not your CV. Answer it yourself.</div>`
+        : a.kind === 'essay' ? `<div style="font-size:13px;color:var(--text-muted,#4a453b)">Write this in your own words. Agencies ask you to certify you did not use AI, so Job-AI does not write it.</div>`
+        : a.kind === 'certification' ? `<div style="font-size:13px;color:var(--text-muted,#4a453b)">Read it and answer it yourself.</div>`
+        : a.choice ? `<div style="font-size:13.5px"><span style="color:var(--text-muted,#4a453b)">Your CV supports:</span> <strong>${e(a.choice.length > 320 ? a.choice.slice(0, 300) + '...' : a.choice)}</strong></div><div style="font-size:12.5px;color:var(--text-muted,#4a453b);margin-top:2px">${e(a.evidence)}</div>`
         : `<div style="font-size:13px;color:var(--danger,#a8432f)">No evidence in your CV. Only choose a higher answer if it is true and you can back it up.</div>`}
     </div>`).join('');
   });
