@@ -1442,7 +1442,7 @@ function applyExtraSites(extraCsv, isUS) {
   RETIRED_AGENTS.clear(); RETIRED_AGENTS.add('indeed');
   for (const [k, , r] of EXTRA_SITES) if (!on.includes(k) || (r !== 'both' && r !== (isUS ? 'us' : 'uk'))) RETIRED_AGENTS.add(k);
 }
-const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', wellfound: 'Wellfound Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent', usajobs: 'Federal Jobs Agent (USAJOBS)' };
+const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', wellfound: 'Wellfound Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent', usajobs: 'Federal Jobs Agent' };
 
 let botLogUnsub = null;
 let botStatusUnsub = null;

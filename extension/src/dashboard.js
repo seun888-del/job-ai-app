@@ -162,7 +162,7 @@ const AGENTS = [
   ['dice', 'Dice Agent', 'https://www.dice.com/dashboard/login', 'Sign in to Dice'],
   ['wellfound', 'Wellfound Agent', 'https://wellfound.com/login', 'Sign in to Wellfound'],
   ['ats', 'Company Sites Agent', '', ''],
-  ['usajobs', 'Federal Jobs Agent (USAJOBS)', '', ''],
+  ['usajobs', 'Federal Jobs Agent', '', ''],
 ];
 // Extra job sites: off unless the user turns them on in Search Preferences, because each one
 // applies through the user's own account on that site, signed in in this Chrome.
@@ -2127,7 +2127,7 @@ async function initOnboarding() {
 // phone is the computer.
 // It also shares what needs the user, the applications list and the search settings (only when
 // they change), so the phone can submit a ready NHS form, set a stage, or change settings.
-const REMOTE_LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal (USAJOBS)' };
+const REMOTE_LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal jobs' };
 let remoteCtl = null, remoteNudgeT = null;
 function remoteNudge() { clearTimeout(remoteNudgeT); remoteNudgeT = setTimeout(() => { if (remoteCtl) remoteCtl.abort(); }, 800); }
 async function remoteGate() {
