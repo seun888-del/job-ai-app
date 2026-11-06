@@ -29,6 +29,8 @@ const { generateCoverLetter, generateSupportingStatement } = require('./modules/
 const { isRelevantRole }              = require('./modules/relevance_gate');
 const { llmAvailable, mode: llmMode } = require('../src/services/llm');
 const { isRetired }                   = require('./modules/retired_agents');
+const { writeFederalPDF }             = require('./modules/federal_resume');
+const { widerLevel }                  = require('./modules/federal_jd');
 
 const BOOST_TARGET         = 85;
 const STUCK_TIMEOUT_MS     = 10 * 60 * 1000;
@@ -121,7 +123,7 @@ function passesPreFilter(job) {
   return { pass: true };
 }
 
-async function scoreWithBoost(cv, jdText) {
+async function scoreWithBoost(cv, jdText, level = cfg.MATCH_LEVEL) {
   const raw         = await cvSelector.extractCVText(cv.path);
   const cleanedText = cleanText(raw);
 
@@ -143,7 +145,7 @@ async function scoreWithBoost(cv, jdText) {
   // 0 — is a hard skip with no addendum rescue.
   // The fit check is on must-haves (cv_scorer.matchFit): missing nice-to-haves never skip a
   // job. A CV that isn't a fit gets no addendum, so it can never be topped up into one.
-  const fit = cvScorer.matchFit(cleanedText, allKeywords, cfg.MATCH_LEVEL);
+  const fit = cvScorer.matchFit(cleanedText, allKeywords, level);
   if (!fit.pass) {
     console.log(`  [Scorer Agent] Not a fit (${fit.reason}), skipping this CV (no addendum)`);
     return { score, fit, cvText: cleanedText, rawCvText: cleanedText, missingKeywords, allKeywords };
@@ -208,14 +210,18 @@ async function processJob(job) {
 
   queue.update(job.jobId, { status: 'processing' });
 
-  const bestCV   = cvSelector.selectBestCV(job.description, cfg.CVS);
+  // Federal jobs are scored on the "specialized experience" paragraph (what federal HR checks the
+  // resume against); the resume is still tailored to the full duty list below.
+  const scoreJD  = (job.source === 'usajobs' && job.extra && job.extra.scoreText) || job.description;
+  const matchLevel = job.source === 'usajobs' ? widerLevel(cfg.MATCH_LEVEL) : cfg.MATCH_LEVEL;
+  const bestCV   = cvSelector.selectBestCV(scoreJD, cfg.CVS);
   const jobTitle = job.title.split('\n')[0].trim();
 
   // NHS jobs are judged on essential-criteria evidence (below), so skip the keyword score's AI
   // call: the AI account has a per-minute limit shared by every user.
   let { score, fit, unscored, cvText: boostedText, rawCvText, missingKeywords, allKeywords } = job.source === 'trac'
     ? await (async () => { const t = cleanText(await cvSelector.extractCVText(bestCV.path)); return { score: 0, cvText: t, rawCvText: t, missingKeywords: [] }; })()
-    : await scoreWithBoost(bestCV, job.description);
+    : await scoreWithBoost(bestCV, scoreJD, matchLevel);
   // The AI couldn't read the advert's keywords: try the job again later, then skip it.
   if (unscored) {
     if ((job.retryCount || 0) < 2) {
@@ -239,13 +245,13 @@ async function processJob(job) {
   if (score < BOOST_TARGET && job.source !== 'trac') {
     const others = cfg.CVS
       .filter(c => c.id !== bestCV.id)
-      .map(c => ({ cv: c, kwScore: cvSelector.scoreCV(c, job.description) }))
+      .map(c => ({ cv: c, kwScore: cvSelector.scoreCV(c, scoreJD) }))
       .sort((a, b) => b.kwScore - a.kwScore)
       .map(x => x.cv);
 
     for (const altCV of others) {
       console.log(`\n  [Scorer Agent] ${score}% — trying next CV: ${altCV.name}`);
-      const result = await scoreWithBoost(altCV, job.description);
+      const result = await scoreWithBoost(altCV, scoreJD, matchLevel);
 
       const pass = !!(result.fit && result.fit.pass), bestPass = !!(bestFit && bestFit.pass);
       if ((pass && !bestPass) || (pass === bestPass && result.score > bestScore)) {
@@ -330,7 +336,7 @@ async function processJob(job) {
     // Parse the extracted CV text into a structured object, tailor it to the JD
     // (subtitle / bullet selection / skills), then render through the strict
     // deterministic template so every output looks identical with no bleeding.
-    let rendered = false, rescored = false;
+    let rendered = false, rescored = false, federal = null;
     try {
       const baseStruct     = parseCV(bestRawCvText, pdfOpts);
       // A CV with no parsed work experience renders as a near-blank shell (just
@@ -373,9 +379,17 @@ async function processJob(job) {
         tailoredStruct.profile = _p;
       }
 
+      if (job.source === 'usajobs') {
+        // Federal resume: Letter size, 2 pages at most, hours per week, citizenship.
+        const fed = cfg.FEDERAL || {};
+        const r = await writeFederalPDF(tailoredStruct, paths.saved, writeStructuredPDF, { hoursPerWeek: fed.hoursPerWeek, usCitizen: fed.usCitizen, pdfOptions: pdfOpts });
+        federal = { pages: r.pages, missingMonths: r.missingMonths };
+        console.log(`  [Scorer Agent] ✓ Federal resume rendered (${r.pages} page(s)): ${paths.saved}`);
+      } else {
       await writeStructuredPDF(tailoredStruct, paths.saved, pdfOpts);
       await writeStructuredPDF(tailoredStruct, paths.upload, pdfOpts);
       console.log(`  [Scorer Agent] ✓ Tailored CV rendered (reference layout): ${paths.saved}`);
+      }
       rendered = true;
       // The match shown to the user is the CV that is actually sent, not the scoring addendum.
       if (bestAllKeywords.length) {
@@ -423,8 +437,9 @@ async function processJob(job) {
     }
 
     // Too weak even after tailoring: skip it rather than spend an application on it.
-    const floor = cvScorer.sentFloor(cfg.MATCH_LEVEL);
-    if (rescored && bestScore < floor) {
+    const floor = cvScorer.sentFloor(matchLevel);
+    // Federal jobs skip this: nothing is sent, the user sees the match % and decides on USAJOBS.
+    if (rescored && bestScore < floor && job.source !== 'usajobs') {
       queue.update(job.jobId, { status: 'skipped', cvScore: bestScore, reason: `Not a close enough match (tailored CV matches ${bestScore}%, needs ${floor}%)` });
       console.log(`  [Scorer Agent] ✗ Tailored CV only matches ${bestScore}% (needs ${floor}%): ${job.title}`);
       return;
@@ -432,6 +447,14 @@ async function processJob(job) {
 
     const flag = bestScore >= BOOST_TARGET ? '✓' : '~';
     console.log(`  [Scorer Agent] ${flag} ${bestCvName} → ${bestScore}% | PDF: ${paths.saved}`);
+
+    // Federal jobs: the user applies on USAJOBS with this resume, so no cover letter and no
+    // review step. The Federal agent moves it to the "ready" list.
+    if (job.source === 'usajobs') {
+      queue.update(job.jobId, { status: 'cv_ready', cvPath: paths.saved, cvScore: bestScore, cvName: bestCvName, extra: { ...(job.extra || {}), federal: federal || { fullText: true } } });
+      console.log(`  [Scorer Agent] ✓ Federal resume ready: ${job.title}`);
+      return;
+    }
 
     if (REVIEW_MODE) {
       // Review before applying: generate the cover letter FIRST (best-effort) so

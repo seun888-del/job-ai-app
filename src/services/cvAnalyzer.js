@@ -42,4 +42,4 @@ async function analyzeCV(filePath) {
   }
 }
 
-module.exports = { analyzeCV, extractPdfText };
+module.exports = { analyzeCV, extractPdfText, extractCVText };

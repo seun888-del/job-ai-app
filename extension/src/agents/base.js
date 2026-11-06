@@ -95,7 +95,8 @@ export class SiteAgent {
         this._offMsg = '';
         const roundEnd = Date.now() + ROUND_MS;
         const ok = await this.signIn().catch((e) => { this.log('Sign-in check failed: ' + e.message); return false; });
-        if (!ok) { this.log(`Not signed in. Sign in to ${this.label} in Chrome, then it carries on.`); await this.wait(Date.now() + 2 * 60 * 1000); continue; }
+        if (globalThis.__jobaiSiteAuth) globalThis.__jobaiSiteAuth(this.source, !!ok);
+        if (!ok) { this.log(`Not signed in. Press "Sign in again" on the ${this.label} card, then it carries on.`); await this.wait(Date.now() + 2 * 60 * 1000); continue; }
         if (globalThis.__jobaiStep) globalThis.__jobaiStep('site_connected');
         // First win: until the very first application has gone out, find a few jobs, tailor
         // until one is ready and send it straight away, so a new user sees it working in

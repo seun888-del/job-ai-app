@@ -16,6 +16,7 @@ const cfg = {
   JOB_SEARCHES: [],
   TRAC_SECTORS: [],
   TRAC_DETAILS: {},
+  FEDERAL: {},       // USAJOBS: { usCitizen: 'yes'|'no', hoursPerWeek }
   CVS: [],
   TITLE_BLOCKLIST: [],
   COMPANY_BLOCKLIST: [],
@@ -66,6 +67,7 @@ const cfg = {
       eeoVeteran: profile.eeoVeteran || '',
     };
     cfg.TRAC_DETAILS = trac || {};
+    cfg.FEDERAL = (settings && settings.federal) || {};
     cfg.TRAC_SECTORS = Array.isArray(trac.sectors) ? trac.sectors : [];
     cfg.JOB_SEARCHES = Array.isArray(profile.searchTerms) ? profile.searchTerms : [];
     cfg.TITLE_BLOCKLIST = (profile.excludeKeywords || []).map((k) => String(k).toLowerCase());

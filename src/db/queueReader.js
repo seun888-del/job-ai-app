@@ -141,6 +141,38 @@ function getAssistQueue(limit = 100) {
     } catch (_) { return []; }
   }, []);
 }
+// Federal (USAJOBS) jobs with their federal resume, waiting for the user to apply on USAJOBS.
+// Soonest closing first.
+function getFederalQueue(limit = 100) {
+  return withQueueDb(db => {
+    try {
+      return all(db, `SELECT job_id, title, company, url, reason, cv_path, cv_name, cv_score, extra, updated_at FROM queue
+        WHERE source = 'usajobs' AND status = 'ready_to_submit' ORDER BY updated_at DESC LIMIT ?`, [limit])
+        .map((r) => { let x = {}; try { x = JSON.parse(r.extra || '{}') || {}; } catch (_) {} return { ...r, extra: x }; })
+        .sort((a, b) => String(a.extra.closes || '9').localeCompare(String(b.extra.closes || '9')));
+    } catch (_) { return []; }
+  }, []);
+}
+// The user applied on USAJOBS themselves (applied = true) or skipped it. No receipt email:
+// Job-AI never says it applied to a federal job.
+async function resolveFederal(jobId, applied) {
+  if (!dbPath || !fs.existsSync(dbPath) || !jobId) return false;
+  const SQL = await initSqlJs();
+  const db = new SQL.Database(readDbFile(dbPath));
+  try {
+    const id = String(jobId);
+    if (applied) {
+      db.run("UPDATE queue SET status = 'applied', reason = 'You applied on USAJOBS', updated_at = datetime('now') WHERE job_id = ? AND source = 'usajobs' AND status = 'ready_to_submit'", [id]);
+      db.run("INSERT OR IGNORE INTO applied_jobs (job_id, title, company) SELECT job_id, title, company FROM queue WHERE job_id = ? AND source = 'usajobs'", [id]);
+    } else {
+      db.run("UPDATE queue SET status = 'skipped', reason = 'Not applied (your choice)', updated_at = datetime('now') WHERE job_id = ? AND source = 'usajobs' AND status = 'ready_to_submit'", [id]);
+    }
+    writeDbFile(dbPath, Buffer.from(db.export()));
+    return true;
+  } finally {
+    db.close();
+  }
+}
 // The user chose not to send it.
 async function skipAssist(jobId) {
   if (!dbPath || !fs.existsSync(dbPath) || !jobId) return false;
@@ -552,4 +584,4 @@ function getReconnectNeeded() {
   }, []);
 }
 
-module.exports = { getMoveFound, getMonthUsed, skipFailingMove, getFilterSkips, requeueFilterSkips, init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getSkipReasons, getReviewQueue, getReviewCount, resolveReview, requeueForReview, getAssistQueue, skipAssist };
+module.exports = { getMoveFound, getMonthUsed, skipFailingMove, getFilterSkips, requeueFilterSkips, init, getSignInStates, getQueueSummary, getTracApplications, getTracApproved, approveTracSubmit, getReconnectNeeded, clearRecentActivity, getUcPendingCount, getUcPendingList, markUcLoggedManual, getWorkSearchLog, getRecentApplications, getTodayAppliedCount, getDailyApplications, getDailySummaryData, getAppliedJobsForSync, getAnalytics, getSkipReasons, getReviewQueue, getReviewCount, resolveReview, requeueForReview, getAssistQueue, skipAssist, getFederalQueue, resolveFederal };

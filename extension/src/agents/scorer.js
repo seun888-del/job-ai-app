@@ -12,6 +12,8 @@ const { tailorStructured, structuredText } = require('../../../bot/modules/cv_ta
 const { writePDF, writeStructuredPDF, buildPaths } = require('../../../bot/modules/cv_pdf_writer');
 const { generateCoverLetter } = require('../../../bot/modules/cover_letter');
 const { isRelevantRole } = require('../../../bot/modules/relevance_gate');
+const { writeFederalPDF } = require('../../../bot/modules/federal_resume');
+const { widerLevel } = require('../../../bot/modules/federal_jd');
 
 const BOOST_TARGET = 85;
 
@@ -68,6 +70,8 @@ export async function scoreJob(job, log) {
   if (why) { await store.updateJob(job.jobId, { status: 'skipped', reason: why }); log(`Skipped: ${String(job.title || '').split('\n')[0].trim()} (${why})`); return; }
 
   const jobTitle = String(job.title || '').split('\n')[0].trim();
+  // Federal jobs: one match level wider than the user's setting (see federal_jd.js).
+  const level = job.source === 'usajobs' ? widerLevel(cfg.MATCH_LEVEL) : cfg.MATCH_LEVEL;
   try {
     const rel = await isRelevantRole({ jobTitle, jdText: job.description, targetRoles: cfg.JOB_SEARCHES });
     if (!rel.relevant) { await store.updateJob(job.jobId, { status: 'skipped', reason: `Off-target role: ${rel.reason}` }); log(`Skipped: ${jobTitle} (not the kind of role you search for)`); return; }
@@ -81,14 +85,15 @@ export async function scoreJob(job, log) {
   for (const c of cvs) {
     const raw = cleanText(c.text);
     let r;
-    try { r = await cvScorer.scoreCV(raw, job.description); }
+    // Federal jobs: scored on the specialized experience paragraph, tailored to the full advert.
+    try { r = await cvScorer.scoreCV(raw, (job.source === 'usajobs' && job.scoreText) || job.description); }
     catch (e) {
       // Never guess a score: try the job again later, then skip it.
       const n = (job.retryCount || 0) + 1;
       if (n > 2) { log('Could not score ' + job.title + ', skipped.'); await store.updateJob(job.jobId, { status: 'skipped', reason: "Couldn't check how well your CV matches this job" }); return; }
       log('Scoring failed (' + e.message + '), will retry later.'); await store.updateJob(job.jobId, { status: 'pending', retryCount: n }); return;
     }
-    const fit = cvScorer.matchFit(raw, r.allKeywords, cfg.MATCH_LEVEL);
+    const fit = cvScorer.matchFit(raw, r.allKeywords, level);
     let score = r.score, text = raw;
     if (fit.pass && score < BOOST_TARGET && (r.missingKeywords || []).length) { text = boostCVText(raw, r.missingKeywords); score = cvScorer.rescoreCV(text, r.allKeywords).score; }
     if (!best || (fit.pass && !best.fit.pass) || (fit.pass === best.fit.pass && score > best.score)) best = { cv: c, raw, cvText: text, score, fit, missing: r.missingKeywords || [], all: r.allKeywords || [] };
@@ -104,7 +109,7 @@ export async function scoreJob(job, log) {
   const full = `${cfg.APPLICANT.firstName} ${cfg.APPLICANT.lastName}`.trim();
   const paths = buildPaths('/jobai/output/saved_cvs', '/jobai/output', cfg.RESUME_FILENAME, jobTitle, job.company, score, full);
   const pdfOpts = full ? { overrideName: full } : {};
-  let rendered = false, rescored = false;
+  let rendered = false, rescored = false, federal = null;
   try {
     const base = parseCV(raw, pdfOpts);
     const bullets = (base.experience || []).reduce((n, r) => n + (r.bullets ? r.bullets.length : 0), 0);
@@ -118,7 +123,12 @@ export async function scoreJob(job, log) {
     const sub = String(t.subtitle || '').trim();
     if (!sub || /[™®]|[^\x00-\x7F]/.test(sub) || /\bsummary\b|work experience|\bprofile\b|\beducation\b|\bskills\b/i.test(sub)) t.subtitle = jobTitle;
     if (t.profile) t.profile = String(t.profile).replace(/\bsummary\b[\s™®]*\bwork experience\b/gi, ' ').replace(/[™®]/g, '').replace(/\s{2,}/g, ' ').trim();
-    await writeStructuredPDF(t, paths.saved, pdfOpts);
+    if (job.source === 'usajobs') {
+      // Federal resume: Letter size, 2 pages at most, hours per week, citizenship.
+      const fed = cfg.FEDERAL || {};
+      const r = await writeFederalPDF(t, paths.saved, writeStructuredPDF, { hoursPerWeek: fed.hoursPerWeek, usCitizen: fed.usCitizen, pdfOptions: pdfOpts });
+      federal = { pages: r.pages, missingMonths: r.missingMonths };
+    } else await writeStructuredPDF(t, paths.saved, pdfOpts);
     rendered = true;
     // Show the match of the CV that is actually sent, not the scoring addendum.
     if (best.all.length) { score = cvScorer.rescoreCV(structuredText(t), best.all).score; rescored = true; }
@@ -129,12 +139,19 @@ export async function scoreJob(job, log) {
   }
 
   // Too weak even after tailoring: skip it rather than spend an application on it.
-  const floor = cvScorer.sentFloor(cfg.MATCH_LEVEL);
-  if (rescored && score < floor) {
+  const floor = cvScorer.sentFloor(level);
+  // Federal jobs skip this: nothing is sent, the user sees the match % and decides on USAJOBS.
+  if (rescored && score < floor && job.source !== 'usajobs') {
     await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `Not a close enough match (tailored CV matches ${score}%, needs ${floor}%)` });
     log(`Skipped: ${jobTitle} (tailored CV only matches ${score}%, needs ${floor}%)`); return;
   }
 
+  // Federal jobs: the user applies on USAJOBS with the resume, so no cover letter, no review step.
+  if (job.source === 'usajobs') {
+    await store.updateJob(job.jobId, { status: 'cv_ready', cvPath: paths.saved, cvScore: score, cvName: cv.label || cv.name, cvText: cvText.slice(0, 8000), federal: federal || { fullText: true } });
+    log(`✓ Federal resume ready (${score}%): ${jobTitle}`);
+    return;
+  }
   let coverLetter = null;
   try { coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, raw); } catch (_) {}
   // "Review before applying" (Search preferences): hold it for the user, as the app does.

@@ -55,6 +55,18 @@ async function fetchReedStubs({ country = 'GB', limit = 200 } = {}) {
   }
 }
 
+// Federal (USAJOBS) jobs for the user's titles, from the backend's official-API search.
+// Throws on a problem so the Federal agent can say why it found nothing.
+async function fetchFederalJobs({ terms = [], location = '', remoteOnly = false } = {}) {
+  if (!licenseKey()) throw new Error('no licence key');
+  const q = new URLSearchParams({ terms: terms.slice(0, 10).join(','), location: location || '' });
+  if (remoteOnly) q.set('remote', '1');
+  const res = await fetch(`${backendUrl()}/v1/jobs/federal?${q}`, { headers: { Authorization: `Bearer ${licenseKey()}` }, signal: AbortSignal.timeout(60000) });
+  if (res.status === 503) throw new Error('federal jobs are not available right now');
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return ((await res.json()) || {}).jobs || [];
+}
+
 // Auto-appliable ATS jobs (Greenhouse today) from the same candidate feed. These
 // carry auto_apply:true and an apply_url on the ATS's public hosted form, which
 // the shared ats_filler can complete end-to-end. Shaped for the Greenhouse agent:
@@ -122,4 +134,4 @@ function reportApplied({ title, company, url, cv_score, pay, pay_pct, currency }
   }).catch(() => {});
 }
 
-module.exports = { enabled, fetchReedStubs, fetchAtsJobs, reportOutcome, reportApplied };
+module.exports = { enabled, fetchReedStubs, fetchAtsJobs, fetchFederalJobs, reportOutcome, reportApplied };

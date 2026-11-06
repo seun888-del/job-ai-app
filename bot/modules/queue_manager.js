@@ -95,6 +95,9 @@ async function init(userDataPath) {
   if (!cols.includes('retry_count'))  db.run('ALTER TABLE queue ADD COLUMN retry_count INTEGER DEFAULT 0');
   // NHS/Trac: the application's own Trac link, so the user can open a draft from the app.
   if (!cols.includes('draft_url'))    db.run('ALTER TABLE queue ADD COLUMN draft_url TEXT');
+  // Per-job details a source keeps beyond the common columns, as JSON (federal jobs: agency,
+  // location, grade, pay, closing date, resume notes).
+  if (!cols.includes('extra'))        db.run('ALTER TABLE queue ADD COLUMN extra TEXT');
 
   // Track which applied jobs have been logged to the user's Universal Credit
   // work-search journal, so the UC agent never double-logs one.
@@ -213,6 +216,7 @@ function rowToJob(row) {
     error: row.error,
     retryCount: row.retry_count || 0,
     draftUrl: row.draft_url || '',
+    extra: (() => { try { return row.extra ? JSON.parse(row.extra) : {}; } catch (_) { return {}; } })(),
     addedAt: row.added_at,
     updatedAt: row.updated_at,
   };
@@ -237,8 +241,8 @@ function add(job) {
     if (exists) return;
 
     db.run(`INSERT INTO queue
-      (job_id, title, company, url, source, description, status, reason, work_type, cv_name, cv_score, cv_path, cover_letter, error)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+      (job_id, title, company, url, source, description, status, reason, work_type, cv_name, cv_score, cv_path, cover_letter, error, extra)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
       job.jobId,
       job.title ?? null,
       job.company ?? null,
@@ -253,6 +257,7 @@ function add(job) {
       job.cvPath ?? null,
       job.coverLetter ?? null,
       job.error ?? null,
+      job.extra ? JSON.stringify(job.extra) : null,
     ]);
     markMutated();
   });
@@ -265,6 +270,7 @@ const FIELD_MAP = {
   cvPath: 'cv_path', coverLetter: 'cover_letter', error: 'error',
   retryCount: 'retry_count',
   draftUrl: 'draft_url',
+  extra: 'extra',
 };
 
 // Update fields on a job entry
@@ -276,7 +282,7 @@ function update(jobId, fields) {
       const col = FIELD_MAP[key];
       if (!col) continue;
       sets.push(`${col} = ?`);
-      vals.push(val ?? null);
+      vals.push(key === 'extra' && val && typeof val === 'object' ? JSON.stringify(val) : (val ?? null));
     }
     if (!sets.length) return;
     sets.push("updated_at = datetime('now')");

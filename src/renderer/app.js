@@ -167,7 +167,53 @@ document.addEventListener('click', async (e) => {
   await setRegion(btn.dataset.region);
   // Both views show the switch; Search Preferences also shows the location it swaps.
   if (_currentView === 'dashboard' || _currentView === 'search') render(_currentView);
+  regionSitesPrompt(btn.dataset.region === 'United States');
 });
+
+// Switched UK <-> USA: the job sites there that need the user's own account are off by default,
+// so offer them once per region instead of leaving them hidden in Search Preferences.
+async function regionSitesPrompt(us) {
+  const key = 'region_sites_prompt_' + (us ? 'us' : 'uk');
+  try { if (localStorage.getItem(key) || document.getElementById('region-prompt')) return; } catch (_) { return; }
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const [prefs, profile] = await Promise.all([window.api.searchPrefs.get().catch(() => ({})), window.api.profile.get().catch(() => ({}))]);
+  const on = String(prefs.extra_sites || '').split(',').map((s) => s.trim());
+  let F = {}; try { F = JSON.parse(profile.federal_details || '{}') || {}; } catch (_) {}
+  const rows = [
+    ...extraForRegion(us).map(([k, l]) => [k, l, `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, on.includes(k)]),
+    ...(us ? [['federal', 'Federal government jobs', 'Needs a USAJOBS account (you sign in with Login.gov). Job-AI writes the resume, you apply there yourself.', !!F.wants]] : []),
+  ];
+  const o = document.createElement('div'); o.id = 'region-prompt';
+  o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
+  o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:520px;width:100%;max-height:86vh;overflow:auto;border-radius:12px;padding:22px 24px">
+    <h3 style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">More job sites in the ${us ? 'USA' : 'UK'}</h3>
+    <p style="margin:0 0 14px;color:var(--text-muted,#4a453b);font-size:14px">Job-AI applies on employers' own websites for you. It can also use these if you have an account there. Tick any you want.</p>
+    ${rows.map(([k, l, note, c]) => `<label style="display:flex;gap:10px;align-items:flex-start;margin:0 0 12px;cursor:pointer"><input type="checkbox" class="rp-site" value="${k}" ${c ? 'checked' : ''} style="flex:0 0 16px;width:16px;height:16px;min-width:16px;max-width:16px;margin:3px 0 0;padding:0;accent-color:var(--primary,#3b82f6)"><span><strong>${e(l)}</strong><br><small style="color:var(--text-muted,#4a453b)">${e(note)}</small></span></label>`).join('')}
+    <div id="rp-fed" style="display:none;grid-template-columns:1fr 1fr;gap:0 10px;margin:-4px 0 10px 26px">
+      <div class="field" style="margin-bottom:8px"><label for="rp-cit">Are you a U.S. citizen?</label><select id="rp-cit"><option value="">Choose</option><option value="yes" ${F.usCitizen === 'yes' ? 'selected' : ''}>Yes</option><option value="no" ${F.usCitizen === 'no' ? 'selected' : ''}>No</option></select></div>
+      <div class="field" style="margin-bottom:8px"><label for="rp-hrs">Hours per week in your jobs</label><input id="rp-hrs" type="number" min="1" max="80" value="${Number(F.hoursPerWeek) || 40}"></div></div>
+    <div class="status-msg" id="rp-st" style="margin:0 0 8px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center"><button class="secondary" id="rp-no" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Not now</button><button class="primary" id="rp-yes" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Turn on</button></div></div>`;
+  document.body.appendChild(o);
+  const $o = (s) => o.querySelector(s);
+  const fedBox = $o('.rp-site[value="federal"]');
+  const fedQ = () => { $o('#rp-fed').style.display = fedBox && fedBox.checked ? 'grid' : 'none'; };
+  if (fedBox) { fedBox.addEventListener('change', fedQ); fedQ(); }
+  const seen = () => { try { localStorage.setItem(key, '1'); } catch (_) {} };
+  $o('#rp-no').addEventListener('click', () => { seen(); o.remove(); });
+  $o('#rp-yes').addEventListener('click', async () => {
+    const picked = new Set([...o.querySelectorAll('.rp-site:checked')].map((c) => c.value));
+    if (picked.has('federal') && !$o('#rp-cit').value) { showStatus($o('#rp-st'), 'Please say if you are a U.S. citizen. Most federal jobs need it.', 'error'); return; }
+    try {
+      const cur = new Set(String((await window.api.searchPrefs.get()).extra_sites || '').split(',').map((s) => s.trim()).filter(Boolean));
+      for (const [k] of extraForRegion(us)) { if (picked.has(k)) cur.add(k); else cur.delete(k); }
+      await window.api.searchPrefs.save({ extra_sites: [...cur].join(',') });
+      if (us) await window.api.profile.save({ federal_details: JSON.stringify({ ...F, wants: picked.has('federal'), ...(picked.has('federal') ? { usCitizen: $o('#rp-cit').value, hoursPerWeek: Math.min(80, Math.max(1, parseInt($o('#rp-hrs').value, 10) || 40)) } : {}) }) });
+    } catch (err) { showStatus($o('#rp-st'), 'Could not save: ' + err.message, 'error'); return; }
+    seen(); o.remove();
+    if (_currentView === 'dashboard' || _currentView === 'search') render(_currentView);
+  });
+}
 
 // US users read "resume" instead of "CV". Rewrites visible text and placeholders
 // as views render, skipping file names (My CV.pdf) and anything the user typed.
@@ -315,6 +361,7 @@ async function render(view) {
     case 'dashboard':  fn = renderDashboard; break;
     case 'tracker':    fn = renderTracker; break;
     case 'trac-details': fn = renderTracDetails; break;
+    case 'federal-details': fn = renderFederalDetails; break;
     case 'analytics':  fn = renderAnalytics; break;
     case 'earn':       fn = renderEarn; break;
     case 'help':       fn = renderHelp; break;
@@ -1395,7 +1442,7 @@ function applyExtraSites(extraCsv, isUS) {
   RETIRED_AGENTS.clear(); RETIRED_AGENTS.add('indeed');
   for (const [k, , r] of EXTRA_SITES) if (!on.includes(k) || (r !== 'both' && r !== (isUS ? 'us' : 'uk'))) RETIRED_AGENTS.add(k);
 }
-const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', wellfound: 'Wellfound Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent' };
+const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', wellfound: 'Wellfound Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent', usajobs: 'Federal Jobs Agent (USAJOBS)' };
 
 let botLogUnsub = null;
 let botStatusUnsub = null;
@@ -1890,6 +1937,95 @@ async function renderSendApps() {
   }));
 }
 
+// "Help me answer" panel for a federal job's questionnaire (shared look with the extension).
+function federalHelpPanel({ title, previewUrl, openUrl, suggest }) {
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  document.getElementById('fed-help')?.remove();
+  const o = document.createElement('div'); o.id = 'fed-help';
+  o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
+  o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:760px;width:100%;max-height:88vh;display:flex;flex-direction:column;border-radius:12px;overflow:hidden">
+    <div style="padding:18px 22px;border-bottom:1px solid var(--border,#e6e1d6);display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+      <div><h3 style="margin:0 0 4px;font-size:19px;text-transform:none;letter-spacing:-0.01em">Help me answer</h3><div style="font-size:13px;color:var(--text-muted,#4a453b)">${e(title)}</div></div>
+      <button class="secondary" id="fh-x" style="margin:0">Close</button></div>
+    <div style="padding:16px 22px;overflow:auto" id="fh-body">
+      <ol style="margin:0 0 12px 18px;padding:0;font-size:14px;line-height:1.6">
+        <li>${previewUrl ? '<a href="#" id="fh-preview">Open the questionnaire preview</a>' : 'Open the job on USAJOBS (<a href="#" id="fh-job">open it</a>) and find "preview the questionnaire" under How you will be evaluated'}, then copy all its questions.</li>
+        <li>Paste them below and press Suggest answers.</li></ol>
+      <textarea id="fh-text" rows="7" placeholder="Paste the questionnaire questions here" style="width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:10px 12px;border:1px solid var(--border-strong,#d8d2c4);border-radius:8px;resize:vertical"></textarea>
+      <div style="display:flex;gap:10px;align-items:center;margin:10px 0 4px"><button class="primary" id="fh-go" style="margin:0">Suggest answers</button><span id="fh-st" style="font-size:13px;color:var(--text-muted,#4a453b)"></span></div>
+      <div id="fh-out"></div>
+      <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:14px 0 0">These are suggestions from your CV, not answers. You certify your answers to a federal agency, so only choose what is true. Job-AI never fills in or submits the questionnaire.</p>
+    </div></div>`;
+  document.body.appendChild(o);
+  const $o = (s) => o.querySelector(s);
+  $o('#fh-x').addEventListener('click', () => o.remove());
+  o.addEventListener('click', (ev) => { if (ev.target === o) o.remove(); });
+  $o('#fh-preview')?.addEventListener('click', (ev) => { ev.preventDefault(); openUrl(previewUrl); });
+  $o('#fh-job')?.addEventListener('click', (ev) => { ev.preventDefault(); openUrl(null); });
+  $o('#fh-go').addEventListener('click', async () => {
+    const b = $o('#fh-go'); b.disabled = true; $o('#fh-st').textContent = 'Reading the questions and your CV. This takes up to a minute...';
+    let r; try { r = await suggest($o('#fh-text').value); } catch (err) { r = { ok: false, error: err.message }; }
+    b.disabled = false;
+    if (!r || !r.ok) { $o('#fh-st').textContent = (r && r.error) || 'Could not suggest answers.'; return; }
+    $o('#fh-st').textContent = `${r.answers.length} question${r.answers.length === 1 ? '' : 's'}.`;
+    $o('#fh-out').innerHTML = r.answers.map((a) => `<div style="border-top:1px solid var(--border,#e6e1d6);padding:10px 0">
+      <div style="font-size:13.5px;font-weight:600;margin-bottom:4px">${a.n}. ${e(a.question)}</div>
+      ${a.choice ? `<div style="font-size:13.5px"><span style="color:var(--text-muted,#4a453b)">Your CV supports:</span> <strong>${e(a.choice)}</strong></div><div style="font-size:12.5px;color:var(--text-muted,#4a453b);margin-top:2px">${e(a.evidence)}</div>`
+        : `<div style="font-size:13px;color:var(--danger,#a8432f)">No evidence in your CV. Only choose a higher answer if it is true and you can back it up.</div>`}
+    </div>`).join('');
+  });
+  $o('#fh-text').focus();
+}
+
+// Federal jobs with a federal resume made for them. The user applies on USAJOBS: Job-AI
+// never applies or submits here.
+function federalAppsHtml(apps) {
+  if (!apps || !apps.length) return '';
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const rows = apps.map((a) => { const x = a.extra || {}; return `<div class="nhs-app">
+      <div class="nhs-app-main">
+        <div class="nhs-app-title">${e(cleanTitle(a.title))}</div>
+        <div class="nhs-app-meta">${e([a.company, x.location, x.grade, x.pay, x.closes ? 'closes ' + new Date(x.closes + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''].filter(Boolean).join(' · '))}</div>
+        ${/^Before you upload|clearance/.test(a.reason || '') ? `<div class="nhs-app-missing">${e(String(a.reason).replace(/^Federal resume ready\. Apply on USAJOBS\.\s*/, ''))}</div>` : ''}
+      </div>
+      <span class="badge ${(a.cv_score || 0) >= 60 ? 'badge-success' : 'badge-muted'}">${(a.cv_score || 0) >= 60 ? 'Strong match' : 'Worth a look'}</span>
+      <div class="nhs-app-actions">
+        <button class="secondary fed-help" data-id="${e(a.job_id)}">Help me answer</button>
+        <button class="secondary fed-resume" data-id="${e(a.job_id)}">Show resume file</button>
+        <button class="primary fed-open" data-url="${e(a.url)}">Apply on USAJOBS</button>
+        <button class="secondary fed-done" data-id="${e(a.job_id)}">I applied</button>
+        <button class="secondary fed-skip" data-id="${e(a.job_id)}">Skip</button>
+      </div>
+    </div>`; }).join('');
+  return `<div class="card card-wide nhs-apps-card">
+    <h3 style="margin:0 0 4px">Federal jobs ready (${apps.length})</h3>
+    <p class="nhs-apps-hint">Each has a federal resume made for it. Press Apply on USAJOBS, sign in with Login.gov, upload the resume and answer the questions. Job-AI never applies for you here.</p>
+    ${rows}
+  </div>`;
+}
+async function renderFederalApps() {
+  const box = document.getElementById('federal-apps-section');
+  if (!box || !window.api.queue.federalList) return;
+  let apps = [];
+  try { apps = (await window.api.queue.federalList()) || []; } catch (_) { return; }
+  // Strong matches first, then the soonest closing date.
+  apps.sort((a, b) => (((b.cv_score || 0) >= 60) - ((a.cv_score || 0) >= 60)) || String((a.extra || {}).closes || '9').localeCompare(String((b.extra || {}).closes || '9')));
+  const html = federalAppsHtml(apps);
+  if (box._lastHtml === html) return;
+  box._lastHtml = html;
+  box.innerHTML = html;
+  box.querySelectorAll('.fed-open').forEach((b) => b.addEventListener('click', () => { if (/^https:\/\/www\.usajobs\.gov\//.test(b.dataset.url)) window.api.shell.openExternal(b.dataset.url); }));
+  box.querySelectorAll('.fed-help').forEach((b) => b.addEventListener('click', () => {
+    const a = apps.find((x) => x.job_id === b.dataset.id); if (!a) return;
+    federalHelpPanel({ title: [cleanTitle(a.title), a.company].filter(Boolean).join(' at '), previewUrl: (a.extra || {}).questionnaireUrl || '',
+      openUrl: (u) => window.api.shell.openExternal(u || a.url), suggest: (text) => window.api.queue.federalAnswerHelp(a.job_id, text) });
+  }));
+  box.querySelectorAll('.fed-resume').forEach((b) => b.addEventListener('click', async () => { if (!(await window.api.queue.federalShowResume(b.dataset.id).catch(() => false))) showToast('That resume file is no longer on this computer.', 'error'); }));
+  const resolve = (applied) => async (ev) => { await window.api.queue.federalResolve(ev.currentTarget.dataset.id, applied).catch(() => {}); box._lastHtml = ''; renderFederalApps(); };
+  box.querySelectorAll('.fed-done').forEach((b) => b.addEventListener('click', resolve(true)));
+  box.querySelectorAll('.fed-skip').forEach((b) => b.addEventListener('click', resolve(false)));
+}
+
 function recentRowsHtml(recent) {
   (recent || []).forEach(r => {
     if (r.cover_letter && r.job_id) {
@@ -2191,7 +2327,13 @@ async function renderDashboard() {
   };
   const anyConnected = Object.values(connectedStatus || {}).some(Boolean);
   const isUS = (profile?.country || 'United Kingdom') === 'United States';
-  try { applyExtraSites((await window.api.searchPrefs.get()).extra_sites, isUS); } catch (_) {}
+  let extraCsv = '';
+  try { extraCsv = String((await window.api.searchPrefs.get()).extra_sites || ''); applyExtraSites(extraCsv, isUS); } catch (_) {}
+  // One-time card for people who used Job-AI before extra job sites existed. New installs skip
+  // it: the welcome screen marks it seen, since they meet the option during setup.
+  const showExtraNotice = !localStorage.getItem('extra_sites_notice') && !extraCsv;
+  const extraNames = extraForRegion(isUS).map(([, l]) => l);
+  const extraList = extraNames.length > 1 ? extraNames.slice(0, -1).join(', ') + ' and ' + extraNames[extraNames.length - 1] : extraNames[0];
   _isUKUser = !isUS;  // gates the UK-only Universal Credit tour step
   // A currently-valid license (not just any key) is required to start the agents.
   dashboardHasLicense = licenseIsActive(license);
@@ -2200,7 +2342,10 @@ async function renderDashboard() {
   // Application agents shown on the dashboard (the Scorer is hidden — it auto-runs
   // alongside these and is surfaced only as the "AI tailoring" pill).
   // Company Sites in both regions, plus NHS (Trac) in the UK. Sign-in agents are retired (above).
-  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !RETIRED_AGENTS.has(k) && !(isUS && k === 'trac'));
+  // Federal jobs (USAJOBS) in the USA only.
+  let fedDetails = {}; try { fedDetails = JSON.parse(profile.federal_details || '{}') || {}; } catch (_) {}
+  const wantsFederal = isUS && !!fedDetails.wants;
+  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !RETIRED_AGENTS.has(k) && !(isUS && k === 'trac') && !(k === 'usajobs' && !wantsFederal));
   // Tell phone control (tryjobai.com/app) which agents this dashboard shows and which are ticked.
   const shareAgentPrefs = () => { try { window.api.remote.setPrefs({ keys: appAgentKeys, enabled: appAgentKeys.filter(k => localStorage.getItem('agent_enabled_' + k) !== '0') }); } catch (_) {} };
   shareAgentPrefs();
@@ -2226,6 +2371,10 @@ async function renderDashboard() {
     if (st === 'ok') return `<div class="agent-signin ok">✓ Signed in to ${CRED_SITE_NAMES[key]}</div>`;
     if (st === 'dead') return `<div class="agent-signin needed">Sign in needed. Press Start applying and sign in when ${CRED_SITE_NAMES[key]} opens.</div>`;
     return `<div class="agent-signin">You'll sign in to ${CRED_SITE_NAMES[key]} when you press Start applying.</div>`;
+  }
+
+  function federalSettingsHtml() {
+    return `<div class="agent-submit-toggle" style="display:block"><small>Writes a 2-page federal resume for each job. You apply on USAJOBS with your own account.${fedDetails.usCitizen ? '' : ' Answer the questions on Federal jobs details first.'}</small></div>`;
   }
 
   function buildBotCard(key, label) {
@@ -2259,6 +2408,7 @@ async function renderDashboard() {
         </div>
         <div class="agent-run-state ${isEnabled ? 'on' : 'off'}" id="run-state-${key}">${isEnabled ? '✓ Included, runs when you press Start applying' : '○ Unticked, this site will be skipped'}</div>
         ${key === 'trac' ? tracSubmitToggleHtml() : ''}
+        ${key === 'usajobs' ? federalSettingsHtml() : ''}
         ${signInLine(key)}
         <div class="bot-card-actions">
           ${needsCreds ? `<button class="btn-connect" data-bot="${key}" data-action="connect">Connect account</button>` : ''}
@@ -2293,6 +2443,12 @@ async function renderDashboard() {
       <button class="no-license-cta" data-view="license">Activate license →</button>
     </div>` : ''}
 
+    ${showExtraNotice ? `
+    <div class="no-license-banner" id="extra-notice">
+      <span><strong>New:</strong> Job-AI can now also apply on ${extraList} if you have an account there. It still applies on employers' own websites as well.</span>
+      <span style="display:flex;gap:8px"><button class="no-license-cta" id="extra-yes">Turn on</button><button class="welcome-skip-link" id="extra-no">No thanks</button></span>
+    </div>` : ''}
+
     ${buildPreflightWarning(profile, cvs)}
 
     <div id="submit-offer"></div>
@@ -2308,6 +2464,7 @@ async function renderDashboard() {
         <button class="preflight-link${setupDone.search ? ' is-done' : ''}" data-view="search">${setupDone.search ? '✓' : '⚙️'} Search preferences</button>
         <button class="preflight-link${setupDone.cvs ? ' is-done' : ''}" data-view="cvs">${setupDone.cvs ? '✓' : '📄'} CVs</button>
         ${!isUS ? `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>` : ''}
+        ${isUS ? `<button class="preflight-link${wantsFederal && fedDetails.usCitizen ? ' is-done' : ''}" data-view="federal-details">${wantsFederal && fedDetails.usCitizen ? '✓' : '🏛️'} Federal jobs details</button>` : ''}
       </div>
     </div>
 
@@ -2317,6 +2474,7 @@ ${statCardsHtml(summary)}
 
     <div id="review-section"></div>
     <div id="send-apps-section"></div>
+    <div id="federal-apps-section"></div>
     <div id="nhs-apps-section"></div>
 
     <div class="dash-cols">
@@ -2400,7 +2558,9 @@ ${statCardsHtml(summary)}
 
   renderNhsApps();
   renderSendApps();
+  renderFederalApps();
   wireComputerCard();
+
   renderFilterHint();
   renderSubmitOffer();
   const tracAutoBox = document.getElementById('trac-auto-submit');
@@ -2416,8 +2576,18 @@ ${statCardsHtml(summary)}
       if (note) note.textContent = on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.';
     } catch (_) { tracAutoBox.checked = !on; }
   });
-  const noLicenseCta = content.querySelector('.no-license-cta');
+  const noLicenseCta = content.querySelector('.no-license-banner:not(#extra-notice) .no-license-cta');
   if (noLicenseCta) noLicenseCta.addEventListener('click', () => navigate('license'));
+  // "New: extra job sites" card: Turn on opens Search Preferences at that section.
+  document.getElementById('extra-yes')?.addEventListener('click', async () => {
+    localStorage.setItem('extra_sites_notice', 'done');
+    await navigate('search');
+    setTimeout(() => {
+      const h = [...document.querySelectorAll('h3')].find((e) => e.textContent.trim() === 'Extra job sites');
+      if (h) { const c = h.closest('.card'); c.scrollIntoView({ behavior: 'smooth', block: 'center' }); c.style.outline = '2px solid var(--accent, #2563eb)'; }
+    }, 400);
+  });
+  document.getElementById('extra-no')?.addEventListener('click', () => { localStorage.setItem('extra_sites_notice', 'done'); document.getElementById('extra-notice')?.remove(); });
 
   // Every "Complete profile →" / "Add a CV →" button (in the checklist AND the
   // preflight warnings) must jump to its page. querySelector wired only the
@@ -2735,6 +2905,7 @@ ${statCardsHtml(summary)}
       updateStatCards(summary);
       renderNhsApps();
       renderSendApps();
+      renderFederalApps();
       // Refresh Recent Activity only when it actually changed (avoids clobbering
       // the table — and its scroll — on every tick)
       const body = document.getElementById('recent-activity-body');
@@ -2795,6 +2966,37 @@ function tracRefereeProblems(refs) {
 // Extra data the long NHS Trac form needs beyond the basic profile: title, NI
 // number, employment history, references, education. Stored as JSON in
 // profile.trac_details so the Trac agent can fill the form.
+// Federal jobs (USA), the counterpart of the NHS / Trac page: whether to apply for them and the
+// two answers every federal resume needs.
+async function renderFederalDetails() {
+  const profile = (await window.api.profile.get()) || {};
+  let f = {}; try { f = JSON.parse(profile.federal_details || '{}') || {}; } catch (_) {}
+  const sel = (v) => (f.usCitizen === v ? 'selected' : '');
+  content.innerHTML = `
+    <div class="page-header"><h2>Federal jobs details</h2>
+      <p>Federal government jobs are on USAJOBS. Job-AI finds the ones that fit you and writes a 2-page federal resume for each.</p></div>
+    <div class="card"><h3>Your USAJOBS account</h3>
+      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">You need a USAJOBS account to apply. It is free and you sign in with Login.gov. You press Submit on USAJOBS yourself: Job-AI never applies for you there.</p>
+      <label class="checkbox-label" style="margin:0 0 10px"><input type="checkbox" id="fd-on" ${f.wants ? 'checked' : ''}><span>Apply for federal government jobs</span></label>
+      <button class="secondary" id="fd-acct">Create a USAJOBS account</button></div>
+    <div class="card"><h3>Questions for your federal resume</h3>
+      <div class="field"><label for="fd-cit">Are you a U.S. citizen? Most federal jobs need it.</label><select id="fd-cit"><option value="">Choose</option><option value="yes" ${sel('yes')}>Yes</option><option value="no" ${sel('no')}>No</option></select></div>
+      <div class="field"><label for="fd-hrs">Hours per week in your jobs</label><input id="fd-hrs" type="number" min="1" max="80" value="${Number(f.hoursPerWeek) || 40}" style="max-width:120px"></div>
+      <button class="primary" id="fd-save">Save</button> <span class="status-msg" id="fd-st"></span></div>`;
+  document.getElementById('fd-acct').addEventListener('click', () => window.api.shell.openExternal('https://www.usajobs.gov/'));
+  document.getElementById('fd-save').addEventListener('click', async () => {
+    const st = document.getElementById('fd-st');
+    const on = document.getElementById('fd-on').checked, cit = document.getElementById('fd-cit').value;
+    if (on && !cit) { showStatus(st, 'Please say if you are a U.S. citizen.', 'error'); return; }
+    const next = { ...f, wants: on, usCitizen: cit, hoursPerWeek: Math.min(80, Math.max(1, parseInt(document.getElementById('fd-hrs').value, 10) || 40)) };
+    try {
+      await window.api.profile.save({ federal_details: JSON.stringify(next) });
+      if (!on) window.api.bot.stop('usajobs').catch(() => {});
+      f = next; showStatus(st, 'Saved.', 'success');
+    } catch (err) { showStatus(st, 'Could not save: ' + err.message, 'error'); }
+  });
+}
+
 async function renderTracDetails() {
   let profile = {}; try { profile = (await window.api.profile.get()) || {}; } catch (_) {}
   let d = {};
@@ -3703,7 +3905,7 @@ const USE_TOUR = (nhs) => [
   ...(nhs ? [{ view: 'trac-details', title: 'NHS jobs', tip: 'NHS applications go through Trac. We filled in your jobs and qualifications from your CV. Trac forms also ask for your address, referees and a few declarations.', action: 'Check this page, add anything missing and click Save. When you press Start applying, sign in to Trac in the window that opens. Finished forms wait as "Ready to submit" unless you turn on Submit for me.' }] : []),
   { view: 'dashboard', title: 'Control it from your phone', tip: 'Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.', action: 'On iPhone, add it to your Home Screen to get notifications. Keep this computer on while the agents work: "Keep awake while agents run" is on the Dashboard.' },
 ];
-function startTour(useSteps) {
+function startTour(useSteps, onEnd = null) {
   let step = 0;
   // UK-only steps (the Universal Credit journal) are dropped for US users.
   const steps = useSteps || TOUR_STEPS.filter(s => !s.ukOnly || _isUKUser);
@@ -3754,6 +3956,7 @@ function startTour(useSteps) {
     if (setupMenu) setupMenu.classList.remove('open');
     if (setupLabel) setupLabel.classList.remove('nav-tour-active');
     localStorage.setItem('tour_complete', '1');
+    if (onEnd) onEnd();
   }
 
   async function goToStep() {
@@ -3792,6 +3995,8 @@ async function claimPhoneSetup(raw, st) {
 
 function initOnboarding() {
   if (localStorage.getItem('welcome_seen')) return;
+  // A new user meets Extra job sites during setup, so the "New" card is not for them.
+  try { if (!localStorage.getItem('tour_complete')) localStorage.setItem('extra_sites_notice', 'seen'); } catch (_) {}
 
   function dismiss() {
     overlay.remove();
@@ -3803,7 +4008,12 @@ function initOnboarding() {
   const tourBtn = document.createElement('button');
   tourBtn.className = 'secondary';
   tourBtn.innerHTML = 'Take the setup tour &rarr;';
-  tourBtn.addEventListener('click', () => { dismiss(); startTour(); });
+  // After the tour (finished or skipped), anyone without an active licence comes straight back
+  // to this setup screen, so the next step is right in front of them.
+  tourBtn.addEventListener('click', () => { dismiss(); startTour(undefined, async () => {
+    let active = false; try { active = licenseIsActive(await window.api.license.get()); } catch (_) {}
+    if (!active) { try { localStorage.removeItem('welcome_seen'); } catch (_) {} initOnboarding(); }
+  }); });
 
   const skipBtn = document.createElement('button');
   skipBtn.className = 'welcome-skip-link';

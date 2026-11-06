@@ -797,6 +797,28 @@ ipcMain.handle('queue:tracApps', () => queueReader.getTracApplications());
 ipcMain.handle('queue:assistList', () => queueReader.getAssistQueue(100));
 ipcMain.handle('queue:assistOpen', (event, jobId) => botManager.assistFill(jobId, app.getPath('userData')));
 ipcMain.handle('queue:assistSkip', (event, jobId) => queueReader.skipAssist(jobId));
+ipcMain.handle('queue:federalList', () => queueReader.getFederalQueue(100));
+ipcMain.handle('queue:federalResolve', (event, jobId, applied) => queueReader.resolveFederal(jobId, !!applied));
+// Show the federal resume in its folder, ready to upload on USAJOBS. Only files the agent wrote.
+// "Help me answer": suggestions for the federal questionnaire the user pasted, from their own CV.
+// Suggest only: the user picks and submits every answer on USA Staffing themselves.
+ipcMain.handle('federal:answerHelp', async (event, jobId, text) => {
+  try {
+    const job = (await queueReader.getFederalQueue(200)).find((x) => x.job_id === String(jobId));
+    const cvs = db.getCVs(true);
+    const cv = (job && cvs.find((c) => c.name === job.cv_name)) || cvs[0];
+    if (!cv) return { ok: false, error: 'Add your CV first.' };
+    const cvText = await cvAnalyzer.extractCVText(cv.file_path);
+    const answers = await require('./bot/modules/federal_answers').suggestAnswers(String(text || ''), cvText);
+    return { ok: true, answers };
+  } catch (e) { return { ok: false, error: e.message || 'Could not suggest answers.' }; }
+});
+ipcMain.handle('queue:federalShowResume', async (event, jobId) => {
+  const r = (await queueReader.getFederalQueue(200)).find((x) => x.job_id === String(jobId));
+  if (!r || !r.cv_path || !fs.existsSync(r.cv_path)) return false;
+  shell.showItemInFolder(r.cv_path);
+  return true;
+});
 ipcMain.handle('queue:recent', (event, limit) => queueReader.getRecentApplications(limit));
 ipcMain.handle('queue:reviewList', (event, limit) => queueReader.getReviewQueue(limit || 100));
 ipcMain.handle('queue:reviewCount', () => queueReader.getReviewCount());
@@ -1153,6 +1175,14 @@ ipcMain.handle('license:claimSetup', async (event, code) => {
       eeo_disability: P.eeoDisability || '',
     };
     try { db.saveProfile(ans); got.push('answers'); } catch (e) { console.error('[Setup] answers:', e.message); }
+  }
+  // Federal jobs chosen on the phone (USA): whether to apply and the two federal resume answers.
+  if (P.wantsFederal) {
+    try {
+      let f = {}; try { f = JSON.parse(db.getProfile().federal_details || '{}') || {}; } catch (_) {}
+      const F = P.federal || {};
+      db.saveProfile({ federal_details: JSON.stringify({ ...f, wants: true, usCitizen: F.usCitizen || f.usCitizen || '', hoursPerWeek: F.hoursPerWeek || f.hoursPerWeek || 40 }) });
+    } catch (e) { console.error('[Setup] federal:', e.message); }
   }
   // NHS: jobs and qualifications read from the CV, referees typed on the phone. Only fills blanks.
   if (P.wantsNhs || setup.trac) {

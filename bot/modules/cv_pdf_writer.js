@@ -354,12 +354,15 @@ function writeStructuredPDF(cv, outputPath, options = {}) {
   cv = stripMarkdown(cv);
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
-      size:    'A4',
+      size:    options.size || 'A4',
       margins: { top: 48, bottom: 45, left: 55, right: 55 },
     });
+    // Page count for callers with a page limit (federal resumes: 2 pages).
+    let pages = 1;
+    doc.on('pageAdded', () => { pages++; });
     const stream = fs.createWriteStream(outputPath);
     stream.on('error', reject);
-    stream.on('finish', () => resolve(outputPath));
+    stream.on('finish', () => { if (options.stats) options.stats.pages = pages; resolve(outputPath); });
     doc.pipe(stream);
 
     const L = doc.page.margins.left;

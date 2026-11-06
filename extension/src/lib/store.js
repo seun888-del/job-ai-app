@@ -46,7 +46,8 @@ export async function updateJob(jobId, fields) {
   const r = await withJobs((all) => {
     const j = all.find((x) => x.jobId === jobId);
     if (!j) return { value: null };
-    if (fields.status === 'applied' && j.status !== 'applied') applied = { title: j.title, company: j.company, url: j.url, cv_score: j.cvScore, tailor: TAILOR_VERSION, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(cfg.movePay(j) || {}) };
+    // Not for federal jobs: the user applied on USAJOBS themselves, so no "Job-AI applied" receipt.
+    if (fields.status === 'applied' && j.status !== 'applied' && j.source !== 'usajobs') applied = { title: j.title, company: j.company, url: j.url, cv_score: j.cvScore, tailor: TAILOR_VERSION, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(cfg.movePay(j) || {}) };
     Object.assign(j, fields, { updatedAt: new Date().toISOString() });
     return { save: true, value: j };
   });

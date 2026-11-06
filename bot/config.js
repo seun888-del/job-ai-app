@@ -134,6 +134,9 @@ const cfg = {
       try { cfg.TRAC_DETAILS = profile.trac_details ? JSON.parse(profile.trac_details) : {}; }
       catch (_) { cfg.TRAC_DETAILS = {}; }
       cfg.TRAC_SECTORS = Array.isArray(cfg.TRAC_DETAILS.sectors) ? cfg.TRAC_DETAILS.sectors : [];
+      // Federal (USAJOBS) answers: U.S. citizenship and usual hours per week.
+      try { cfg.FEDERAL = profile.federal_details ? JSON.parse(profile.federal_details) || {} : {}; }
+      catch (_) { cfg.FEDERAL = {}; }
       cfg.TITLE_BLOCKLIST = excludes.map(e => e.keyword.toLowerCase());
       cfg.COMPANY_BLOCKLIST = blacklist.map(b => b.company.toLowerCase());
       // "Only move for more money" (bot/modules/move_mode.js): their employer is never applied to.

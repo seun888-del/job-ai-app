@@ -146,6 +146,10 @@ async function init(userDataPath) {
   if (!profileCols.includes('move_for_more')) {
     db.exec('ALTER TABLE profile ADD COLUMN move_for_more TEXT');
   }
+  // Federal (USAJOBS) answers as JSON ({ usCitizen: 'yes'|'no', hoursPerWeek }).
+  if (!profileCols.includes('federal_details')) {
+    db.exec('ALTER TABLE profile ADD COLUMN federal_details TEXT');
+  }
 
   // Migration: add job_age + schedule columns to search_preferences
   const searchPrefsCols = db.prepare('PRAGMA table_info(search_preferences)').all().map(c => c.name);

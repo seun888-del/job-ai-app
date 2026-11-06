@@ -18,6 +18,12 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 chrome.runtime.onInstalled.addListener(async (d) => {
   if (d.reason === 'install') openDashboard();
+  // People who had Job-AI before extra job sites (0.5.41) see a one-time Dashboard card about them.
+  if (d.reason === 'update' && d.previousVersion) {
+    const [a, b, c] = d.previousVersion.split('.').map(Number);
+    const before = a < 0 || (a === 0 && (b < 5 || (b === 5 && c < 41)));
+    if (before && !(await chrome.storage.local.get('extraNotice')).extraNotice) await chrome.storage.local.set({ extraNotice: 'show' });
+  }
   // Back after an update the dashboard asked for: reopen it so the agents pick up again.
   if (d.reason === 'update' && (await chrome.storage.local.get('resumeAfterUpdate')).resumeAfterUpdate) openDashboard();
 });

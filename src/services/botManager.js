@@ -19,6 +19,7 @@ const BOT_SCRIPTS = {
   cwjobs:     'bot_cwjobs.js',
   greenhouse: 'bot_greenhouse.js',
   trac:       'bot_trac.js',
+  usajobs:    'bot_usajobs.js',
   uc:         'bot_uc.js',
 };
 
@@ -35,6 +36,7 @@ const bots = {
   cwjobs:     { proc: null, status: 'stopped', stopping: false },
   greenhouse: { proc: null, status: 'stopped', stopping: false },
   trac:       { proc: null, status: 'stopped', stopping: false },
+  usajobs:    { proc: null, status: 'stopped', stopping: false },
   uc:         { proc: null, status: 'stopped', stopping: false },
 };
 
@@ -63,13 +65,14 @@ function getStatus() {
     cwjobs:     bots.cwjobs.status,
     greenhouse: bots.greenhouse.status,
     trac:       bots.trac.status,
+    usajobs:    bots.usajobs.status,
     uc:         bots.uc.status,
   };
 }
 
 // Bots that produce jobs the Scorer must tailor CVs for (so the Scorer is
 // auto-started alongside them and auto-stopped when the last one exits).
-const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse', 'trac', 'indeed', 'dice', 'wellfound']);
+const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse', 'trac', 'indeed', 'dice', 'wellfound', 'usajobs']);
 
 function anyJobSiteBotRunning() {
   return [...JOB_SITE_BOTS].some(name => bots[name].proc !== null);
