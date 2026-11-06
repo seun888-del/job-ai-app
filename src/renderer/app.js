@@ -2106,8 +2106,8 @@ async function renderSubmitOffer() {
   if (on || ready < 2) return;
   box.innerHTML = `<div class="card" style="border:1.5px solid #16a34a">
     <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em">${ready} NHS applications are finished and waiting</h3>
-    <p class="card-hint" style="margin:0 0 12px">Every section is complete on Trac, but nothing reaches the employer until Submit is pressed. Turn on Submit for me and Job-AI submits finished ones for you, now and from now on. Any that ask about AI use, or still need an answer from you, are always left for you.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="primary" id="so-yes">Submit them for me</button><button class="secondary" id="so-no">I'll submit them myself</button></div>
+    <p class="card-hint" style="margin:0 0 12px">Each one is complete on Trac, but the employer only gets it once Submit is pressed. Turn on Submit for me and Job-AI will submit these for you, plus any others it finishes from now on. Applications that ask about AI use, or still need an answer from you, are always left for you.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="so-yes" style="margin:0;border:1px solid transparent;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Submit them for me</button><button class="secondary" id="so-no" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">I'll submit them myself</button></div>
     <div class="status-msg" id="so-st"></div></div>`;
   document.getElementById('so-yes').addEventListener('click', async (e) => {
     e.target.disabled = true;
@@ -2144,7 +2144,7 @@ async function renderFilterHint() {
   box.innerHTML = `<div class="card" style="border:1.5px solid #2563eb">
     <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em">Your settings skipped ${total} jobs${sent ? ' this week' : ''}</h3>
     <p class="card-hint" style="margin:0 0 12px">${sent ? 'Applications are going out, but your settings are ruling out a lot of jobs.' : 'Nothing has been sent yet.'} Skipped: ${rows.map((r) => `${r.n} ${r.label}`).join(', ')}. If you would take any of these, allow them and Job-AI checks those jobs again.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">${rows.map((r) => `<button class="primary fh-fix" data-fix="${r.key}">${r.button}</button>`).join('')}<button class="secondary" id="fh-hide">Keep my settings</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${rows.map((r) => `<button class="primary fh-fix" data-fix="${r.key}" style="margin:0;border:1px solid transparent;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">${r.button}</button>`).join('')}<button class="secondary" id="fh-hide" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Keep my settings</button></div>
     <div class="status-msg" id="fh-st"></div></div>`;
   box.querySelectorAll('.fh-fix').forEach((b) => b.addEventListener('click', async () => {
     if (b.dataset.fix === 'salary') return navigate('personal'); // the salary field is on Personal details

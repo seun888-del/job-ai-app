@@ -208,7 +208,7 @@ function filterHintHtml(fh) {
   return `<div class="card filter-hint-card" style="border:1.5px solid var(--accent, #2563eb)">
     <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">Your settings skipped ${fh.total} jobs${fh.sent ? ' this week' : ''}</h3>
     <p class="card-hint" style="margin:0 0 12px">${fh.sent ? 'Applications are going out, but your settings are ruling out a lot of jobs.' : 'Nothing has been sent yet.'} Skipped: ${list}. If you would take any of these, allow them and Job-AI checks those jobs again.</p>
-    <div class="ext-inline">${fh.rows.map((r) => `<button class="primary fh-fix" data-fix="${r.key}">${r.button}</button>`).join('')}<button class="secondary" id="fh-hide">Keep my settings</button></div></div>`;
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${fh.rows.map((r) => `<button class="primary fh-fix" data-fix="${r.key}" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">${r.button}</button>`).join('')}<button class="secondary" id="fh-hide" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Keep my settings</button></div></div>`;
 }
 async function widenFilter(key) {
   if (key === 'salary') return navigate('personal'); // the minimum salary field is on Your details
@@ -657,8 +657,8 @@ VIEWS.dashboard = async function renderDashboardView() {
 
       ${submitOffer ? `<div class="card" style="border:1.5px solid #16a34a">
         <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${ready.length} NHS applications are finished and waiting</h3>
-        <p class="card-hint" style="margin:0 0 12px">Every section is complete on Trac, but nothing reaches the employer until Submit is pressed. Turn on Submit for me and Job-AI submits finished ones for you, now and from now on. Any that ask about AI use, or still need an answer from you, are always left for you.</p>
-        <div class="ext-inline"><button class="primary" id="so-yes">Submit them for me</button><button class="secondary" id="so-no">I'll submit them myself</button></div></div>` : ''}
+        <p class="card-hint" style="margin:0 0 12px">Each one is complete on Trac, but the employer only gets it once Submit is pressed. Turn on Submit for me and Job-AI will submit these for you, plus any others it finishes from now on. Applications that ask about AI use, or still need an answer from you, are always left for you.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="so-yes" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Submit them for me</button><button class="secondary" id="so-no" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">I'll submit them myself</button></div></div>` : ''}
       ${filterHintHtml(fh)}
       ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
