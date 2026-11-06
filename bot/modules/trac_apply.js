@@ -900,6 +900,32 @@ async function findEmptyRequired(page) {
 
 // Tick boxes in a group share ONE name (e.g. preferredemployment[]), so filling by name
 // always hit the first box and later "No" answers unticked it. Target the box by id.
+// Should this tick box be ticked for answer v? Yes-like answers tick it. A status answer
+// ("British citizen") ticks the box whose own label says that status, e.g. "I am a British
+// citizen with the right to work in the UK", and leaves the other status boxes alone.
+function tickFor(v, q) {
+  const s = String(v == null ? '' : v).trim();
+  if (/^(y|yes|true|1|on|agree|i agree)\b/i.test(s)) return true;
+  if (!s || /^(n|no|false|0|off)$/i.test(s)) return false;
+  const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const own = norm(q && q.label), want = norm(s);
+  if (!own || want.length < 4) return false;
+  if (own.includes(want) || want.includes(own)) return true;
+  const a = rtwKey(own), b = rtwKey(want);
+  return !!a && a === b;
+}
+// The right-to-work status a piece of text describes, or ''.
+function rtwKey(x) {
+  const s = String(x || '').toLowerCase();
+  if (/pre.?settled/.test(s)) return 'presettled';
+  if (/settled|indefinite leave|\bilr\b/.test(s)) return 'settled';
+  if (/irish/.test(s)) return 'irish';
+  if (/british/.test(s)) return 'british';
+  if (/require.*sponsor|need.*sponsor/.test(s)) return 'sponsor';
+  if (/\bvisa\b|work permit|skilled worker|graduate route/.test(s)) return 'visa';
+  return '';
+}
+
 async function setCheckbox(page, q, on) {
   if (!q.id) return fillFieldByName(page, q.name, on ? 'Yes' : 'No');
   const sel = '[id="' + String(q.id).replace(/"/g, '\\"') + '"]';
@@ -1264,6 +1290,10 @@ async function fillPageQuestions(page, ctx, paused, pausedKeys) {
       if (want.test(q.label || '')) { const ok = await setCheckbox(page, q, true); filled++; log(`  [Trac] Ticked "${q.label}" (${ok ? 'ok' : 'DIAG not ticked, id=' + (q.id || 'none')}).`); }
       continue;
     }
+    if (q.kind === 'checkbox' && q.id && rtwKey(q.label) && /right to work|immigration|citizen|settled|visa|nationality|eligib/i.test(label + ' ' + (q.label || ''))) {
+      const st = details.rightToWork || (applicant.requiresSponsorship ? '' : 'British citizen');
+      if (st) { const on = tickFor(st, q); await setCheckbox(page, q, on); if (on) log(`  [Trac] Ticked "${String(q.label).slice(0, 80)}".`); filled++; continue; }
+    }
     const dob = /(?:dob|dateofbirth|birthdate)_?(day|month|year)$/i.exec(q.name || '');
     const rep = dob ? (() => { const p = parseDate(details.dob); return p[dob[1].toLowerCase()] ? { action: 'fill', value: p[dob[1].toLowerCase()] } : { action: 'skip' }; })()
       : repeaterAnswer(label, q.name, details, secHint);
@@ -1339,7 +1369,7 @@ async function fillPageQuestions(page, ctx, paused, pausedKeys) {
     }
     if (a.action === 'fill' && a.value != null && a.value !== '') {
       if (q.kind === 'radio') { if (await selectRadioOption(page, q, String(a.value))) filled++; else batch.push({ q, label, why: 'radio-miss' }); }
-      else if (q.kind === 'checkbox' && q.id) { await setCheckbox(page, q, /^(y|yes|true|1|on|agree|i agree)/i.test(String(a.value).trim())); filled++; }
+      else if (q.kind === 'checkbox' && q.id) { await setCheckbox(page, q, tickFor(a.value, q)); filled++; }
       else { await fillFieldByName(page, q.name, String(a.value)); if (ctx.keyboard && q.kind === 'select') await keyboardSelect(page, q.name); filled++; }
     } else { note(q, 'no-value'); }
   }
@@ -1360,7 +1390,7 @@ async function fillPageQuestions(page, ctx, paused, pausedKeys) {
       const v = answers[i];
       if (v) {
         if (q.kind === 'radio') { if (await selectRadioOption(page, q, v)) { filled++; aiAnswered++; continue; } }
-        else if (q.kind === 'checkbox') { await setCheckbox(page, q, /^(y|yes|true|agree)/i.test(v)); filled++; aiAnswered++; continue; }
+        else if (q.kind === 'checkbox') { await setCheckbox(page, q, tickFor(v, q)); filled++; aiAnswered++; continue; }
         else { await fillFieldByName(page, q.name, v); filled++; aiAnswered++; continue; }
       }
       // A person-spec criterion the user can't evidence: say so honestly (never blank, never invented).
@@ -1877,4 +1907,4 @@ async function listTracApplications(page) {
   return { drafts, submittedTitles };
 }
 
-module.exports = { resolveAnswer, repeaterAnswer, fillApplication, ensureTracLogin, listDraftApplications, listTracApplications, _test: { fillFieldByName, parseDate, fillPageQuestions, clickNext, readQuestions, openNextSection } };
+module.exports = { resolveAnswer, repeaterAnswer, fillApplication, ensureTracLogin, listDraftApplications, listTracApplications, _test: { tickFor, rtwKey, fillFieldByName, parseDate, fillPageQuestions, clickNext, readQuestions, openNextSection } };
