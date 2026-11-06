@@ -64,6 +64,9 @@ contextBridge.exposeInMainWorld('api', {
     market: (q) => ipcRenderer.invoke('move:market', q),
     found: () => ipcRenderer.invoke('move:found'),
   },
+  trac: {
+    autoSubmit: (on) => ipcRenderer.invoke('trac:autoSubmit', on),
+  },
   filters: {
     hint: () => ipcRenderer.invoke('filters:hint'),
     widen: (key) => ipcRenderer.invoke('filters:widen', key),

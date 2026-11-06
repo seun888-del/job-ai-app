@@ -2089,6 +2089,42 @@ const FILTER_FIXES = [
   { key: 'worktype', label: 'not remote', button: 'Allow hybrid and on-site' },
   { key: 'salary', label: 'below your minimum salary', button: 'Change my minimum salary' },
 ];
+// "N NHS applications are finished": Submit for me is off and finished applications pile up.
+// Offer to turn it on, for people already running Job-AI too. Hidden for 3 days on "I'll do it".
+async function renderSubmitOffer() {
+  const box = document.getElementById('submit-offer');
+  if (!box) return;
+  let hiddenAt = 0;
+  try { hiddenAt = Number(localStorage.getItem('submitOfferHiddenAt')) || 0; } catch (_) {}
+  if (hiddenAt > Date.now() - 3 * 864e5) return;
+  let ready = 0, on = false;
+  try {
+    ready = dashboardStats(await window.api.queue.summary()).ready;
+    const p = (await window.api.profile.get()) || {};
+    on = JSON.parse(p.trac_details || '{}').autoSubmit === true;
+  } catch (_) { return; }
+  if (on || ready < 2) return;
+  box.innerHTML = `<div class="card" style="border:1.5px solid #16a34a">
+    <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em">${ready} NHS applications are finished and waiting</h3>
+    <p class="card-hint" style="margin:0 0 12px">Every section is complete on Trac, but nothing reaches the employer until Submit is pressed. Turn on Submit for me and Job-AI submits finished ones for you, now and from now on. Any that ask about AI use, or still need an answer from you, are always left for you.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="primary" id="so-yes">Submit them for me</button><button class="secondary" id="so-no">I'll submit them myself</button></div>
+    <div class="status-msg" id="so-st"></div></div>`;
+  document.getElementById('so-yes').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    const r = await window.api.trac.autoSubmit(true).catch(() => null);
+    const st = document.getElementById('so-st');
+    if (r && r.ok) {
+      const cb = document.getElementById('trac-auto-submit'); if (cb) cb.checked = true;
+      const note = document.getElementById('trac-auto-submit-note'); if (note) note.textContent = 'Complete applications are submitted automatically.';
+      showStatus(st, r.restarted ? 'Done. The NHS agent restarted and is submitting them now.' : 'Done. Press Start applying and the NHS agent submits them.', 'success');
+    } else { e.target.disabled = false; showStatus(st, 'Could not change the setting. Use Submit for me on the NHS card.', 'error'); }
+  });
+  document.getElementById('so-no').addEventListener('click', () => {
+    try { localStorage.setItem('submitOfferHiddenAt', String(Date.now())); } catch (_) {}
+    box.innerHTML = '';
+  });
+}
+
 async function renderFilterHint() {
   const box = document.getElementById('filter-hint');
   if (!box) return;
@@ -2097,16 +2133,17 @@ async function renderFilterHint() {
   if (hiddenAt > Date.now() - 3 * 864e5) return;
   let h;
   try { h = await window.api.filters.hint(); } catch (_) { return; }
-  if (!h || h.sent48h > 0) return;
+  if (!h) return;
+  const sent = h.sent48h > 0; // jobs going out: still show it, with a higher bar (counts are this week's)
   const emp = h.employment || [];
   const open = (k) => !((k === 'contract' || k === 'part_time') && (!emp.length || emp.includes(k))) && !(k === 'worktype' && (h.workTypes || []).length >= 3);
   const rows = FILTER_FIXES.filter((f) => open(f.key)).map((f) => ({ ...f, n: (h.counts || {})[f.key] || 0 }))
     .filter((f) => f.n > 0).sort((a, b) => b.n - a.n).slice(0, 3);
   const total = rows.reduce((s, f) => s + f.n, 0);
-  if (total < 10) return;
+  if (total < (sent ? 25 : 10)) return;
   box.innerHTML = `<div class="card" style="border:1.5px solid #2563eb">
-    <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em">Your settings skipped ${total} jobs</h3>
-    <p class="card-hint" style="margin:0 0 12px">Nothing has been sent yet. Skipped: ${rows.map((r) => `${r.n} ${r.label}`).join(', ')}. If you would take any of these, allow them and Job-AI checks those jobs again.</p>
+    <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em">Your settings skipped ${total} jobs${sent ? ' this week' : ''}</h3>
+    <p class="card-hint" style="margin:0 0 12px">${sent ? 'Applications are going out, but your settings are ruling out a lot of jobs.' : 'Nothing has been sent yet.'} Skipped: ${rows.map((r) => `${r.n} ${r.label}`).join(', ')}. If you would take any of these, allow them and Job-AI checks those jobs again.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">${rows.map((r) => `<button class="primary fh-fix" data-fix="${r.key}">${r.button}</button>`).join('')}<button class="secondary" id="fh-hide">Keep my settings</button></div>
     <div class="status-msg" id="fh-st"></div></div>`;
   box.querySelectorAll('.fh-fix').forEach((b) => b.addEventListener('click', async () => {
@@ -2258,6 +2295,7 @@ async function renderDashboard() {
 
     ${buildPreflightWarning(profile, cvs)}
 
+    <div id="submit-offer"></div>
     <div id="filter-hint"></div>
 
     ${buildGetStartedCard(profile, cvs, anyConnected, anyAppRunning)}
@@ -2364,6 +2402,7 @@ ${statCardsHtml(summary)}
   renderSendApps();
   wireComputerCard();
   renderFilterHint();
+  renderSubmitOffer();
   const tracAutoBox = document.getElementById('trac-auto-submit');
   if (tracAutoBox) tracAutoBox.addEventListener('change', async () => {
     const on = tracAutoBox.checked;

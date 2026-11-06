@@ -775,6 +775,23 @@ ipcMain.handle('move:save', async (event, settings) => {
   })();
   return { ok: true, move, skipped };
 });
+// Dashboard "N NHS applications are finished" card: turn on Submit for me. The NHS agent
+// reads it when it starts, so a running one is restarted to pick it up straight away.
+ipcMain.handle('trac:autoSubmit', async (event, on) => {
+  const p = db.getProfile() || {};
+  let t = {}; try { t = JSON.parse(p.trac_details || '{}'); } catch (_) {}
+  t.autoSubmit = on === true;
+  db.saveProfile({ trac_details: JSON.stringify(t) });
+  const running = botManager.getStatus().trac === 'running';
+  if (running) {
+    botManager.stop('trac');
+    (async () => {
+      for (let i = 0; i < 20 && botManager.getStatus().trac === 'running'; i++) await new Promise((r) => setTimeout(r, 500));
+      try { await startBotGated('trac'); } catch (_) {}
+    })();
+  }
+  return { ok: true, restarted: running };
+});
 ipcMain.handle('uc:markLogged', (_e, jobIds) => queueReader.markUcLoggedManual(jobIds));
 ipcMain.handle('queue:tracApps', () => queueReader.getTracApplications());
 ipcMain.handle('queue:assistList', () => queueReader.getAssistQueue(100));

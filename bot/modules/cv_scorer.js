@@ -210,4 +210,10 @@ function rescoreCV(cvText, allKeywords) {
   return { score, missingKeywords: missing };
 }
 
-module.exports = { scoreCV, rescoreCV, extractJDKeywords, computeScore, hasTerm, matchFit, MATCH_LEVELS };
+// The tailored CV that is actually sent must match at least this share of the advert's keywords.
+// Below it the application rarely gets a call, so the job is skipped (and the daily cap kept for
+// better fits). Follows the user's "How close a match" setting.
+const SENT_FLOOR = { wide: 50, balanced: 60, strict: 75 };
+const sentFloor = (level) => SENT_FLOOR[level] || SENT_FLOOR.balanced;
+
+module.exports = { scoreCV, rescoreCV, extractJDKeywords, computeScore, hasTerm, matchFit, MATCH_LEVELS, SENT_FLOOR, sentFloor };

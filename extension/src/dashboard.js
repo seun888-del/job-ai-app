@@ -191,22 +191,23 @@ const FILTER_FIXES = [
   { key: 'salary', test: /^below your salary expectation/i, label: 'below your minimum salary', button: 'Change my minimum salary' },
 ];
 function filterHint(all, profile, settings) {
-  const since = Date.now() - 2 * 864e5;
-  if (all.some((j) => j.status === 'applied' && Date.parse(j.appliedAt || j.updatedAt || 0) >= since)) return null;
+  const since = Date.now() - 2 * 864e5, week = Date.now() - 7 * 864e5;
+  // Nothing sent in 2 days: any skips count. Jobs going out: only this week's, and a higher bar.
+  const sent = all.some((j) => j.status === 'applied' && Date.parse(j.appliedAt || j.updatedAt || 0) >= since);
   if (Date.parse(settings.filterHintHiddenAt || 0) > Date.now() - 3 * 864e5) return null;
   const want = profile.employmentType && profile.employmentType.length ? profile.employmentType : ['full_time'];
   const wt = profile.workTypePriority && profile.workTypePriority.length ? profile.workTypePriority : ['remote', 'hybrid', 'onsite'];
   const open = (f) => !(f.key === 'contract' && want.includes('contract')) && !(f.key === 'part_time' && want.includes('part_time')) && !(f.key === 'worktype' && wt.length >= 3);
-  const rows = FILTER_FIXES.filter(open).map((f) => ({ ...f, n: all.filter((j) => j.status === 'skipped' && f.test.test(j.reason || '')).length })).filter((f) => f.n > 0);
+  const rows = FILTER_FIXES.filter(open).map((f) => ({ ...f, n: all.filter((j) => j.status === 'skipped' && f.test.test(j.reason || '') && (!sent || Date.parse(j.updatedAt || 0) >= week)).length })).filter((f) => f.n > 0);
   const total = rows.reduce((s, f) => s + f.n, 0);
-  return total >= 10 ? { total, rows: rows.sort((a, b) => b.n - a.n).slice(0, 3) } : null;
+  return total >= (sent ? 25 : 10) ? { total, sent, rows: rows.sort((a, b) => b.n - a.n).slice(0, 3) } : null;
 }
 function filterHintHtml(fh) {
   if (!fh) return '';
   const list = fh.rows.map((r) => `${r.n} ${r.label}`).join(', ');
   return `<div class="card filter-hint-card" style="border:1.5px solid var(--accent, #2563eb)">
-    <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">Your settings skipped ${fh.total} jobs</h3>
-    <p class="card-hint" style="margin:0 0 12px">Nothing has been sent yet. Skipped: ${list}. If you would take any of these, allow them and Job-AI checks those jobs again.</p>
+    <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">Your settings skipped ${fh.total} jobs${fh.sent ? ' this week' : ''}</h3>
+    <p class="card-hint" style="margin:0 0 12px">${fh.sent ? 'Applications are going out, but your settings are ruling out a lot of jobs.' : 'Nothing has been sent yet.'} Skipped: ${list}. If you would take any of these, allow them and Job-AI checks those jobs again.</p>
     <div class="ext-inline">${fh.rows.map((r) => `<button class="primary fh-fix" data-fix="${r.key}">${r.button}</button>`).join('')}<button class="secondary" id="fh-hide">Keep my settings</button></div></div>`;
 }
 async function widenFilter(key) {
@@ -573,6 +574,9 @@ VIEWS.dashboard = async function renderDashboardView() {
     const nhsNav = $('#nav-setup [data-view="trac-details"]');
     if (nhsNav) nhsNav.style.display = us || !wantsNhs ? 'none' : '';
     const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac), ats: !(settings.autoSubmit && settings.autoSubmit.ats === false) };
+    // Finished NHS applications piling up with Submit for me off: offer to turn it on (also for
+    // people already running Job-AI, not just at setup). Hidden for 3 days on "I'll do it".
+    const submitOffer = !us && !submitOn.trac && ready.length >= 2 && Date.parse(settings.submitOfferHiddenAt || 0) < Date.now() - 3 * 864e5;
     const SUBMIT_HINT = {
       trac: (on) => on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.',
       ats: (on) => on ? 'Sends them for you. Any it can\'t send on its own, it skips and moves on to the next job.' : 'Off: each one waits under Ready to send for you to check and submit.',
@@ -651,6 +655,10 @@ VIEWS.dashboard = async function renderDashboardView() {
 
       ${offerWider ? `<div class="no-license-banner"><span>${tooFar.length} jobs this week were skipped as not a close enough match. Try a wider match?</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="wider-yes">Try Wider</button><button class="welcome-skip-link" id="wider-no">No thanks</button></span></div>` : ''}
 
+      ${submitOffer ? `<div class="card" style="border:1.5px solid #16a34a">
+        <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${ready.length} NHS applications are finished and waiting</h3>
+        <p class="card-hint" style="margin:0 0 12px">Every section is complete on Trac, but nothing reaches the employer until Submit is pressed. Turn on Submit for me and Job-AI submits finished ones for you, now and from now on. Any that ask about AI use, or still need an answer from you, are always left for you.</p>
+        <div class="ext-inline"><button class="primary" id="so-yes">Submit them for me</button><button class="secondary" id="so-no">I'll submit them myself</button></div></div>` : ''}
       ${filterHintHtml(fh)}
       ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
@@ -786,6 +794,13 @@ VIEWS.dashboard = async function renderDashboardView() {
     $('#nl-setup')?.addEventListener('click', openSetup);
     for (const b of $$('.fh-fix')) b.addEventListener('click', () => { b.disabled = true; widenFilter(b.dataset.fix); });
     $('#fh-hide')?.addEventListener('click', async () => { await store.patch('settings', { filterHintHiddenAt: new Date().toISOString() }); VIEWS.dashboard(); });
+    $('#so-yes')?.addEventListener('click', async () => {
+      const s = await store.get('settings');
+      await store.patch('settings', { autoSubmit: { ...(s.autoSubmit || {}), trac: true } });
+      store.log('Submit for me is on for NHS: finished applications are submitted on the next round.');
+      VIEWS.dashboard();
+    });
+    $('#so-no')?.addEventListener('click', async () => { await store.patch('settings', { submitOfferHiddenAt: new Date().toISOString() }); VIEWS.dashboard(); });
     $('#keep-jobai')?.addEventListener('click', () => openTab(`https://tryjobai.com/pricing?lk=${encodeURIComponent(license.key)}&utm_source=extension&utm_campaign=${ended ? 'trial_ended' : 'trial_ending'}`));
     $('#wider-yes')?.addEventListener('click', async () => {
       // Wider from now on, and this week's close misses get checked again.

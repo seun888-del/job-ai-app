@@ -104,7 +104,7 @@ export async function scoreJob(job, log) {
   const full = `${cfg.APPLICANT.firstName} ${cfg.APPLICANT.lastName}`.trim();
   const paths = buildPaths('/jobai/output/saved_cvs', '/jobai/output', cfg.RESUME_FILENAME, jobTitle, job.company, score, full);
   const pdfOpts = full ? { overrideName: full } : {};
-  let rendered = false;
+  let rendered = false, rescored = false;
   try {
     const base = parseCV(raw, pdfOpts);
     const bullets = (base.experience || []).reduce((n, r) => n + (r.bullets ? r.bullets.length : 0), 0);
@@ -121,11 +121,18 @@ export async function scoreJob(job, log) {
     await writeStructuredPDF(t, paths.saved, pdfOpts);
     rendered = true;
     // Show the match of the CV that is actually sent, not the scoring addendum.
-    if (best.all.length) score = cvScorer.rescoreCV(structuredText(t), best.all).score;
+    if (best.all.length) { score = cvScorer.rescoreCV(structuredText(t), best.all).score; rescored = true; }
   } catch (e) { log('Structured CV failed (' + e.message + '), using the full-text layout.'); }
   if (!rendered) {
     try { await writePDF(cvText, paths.saved, pdfOpts); }
     catch (e) { await store.updateJob(job.jobId, { status: 'skipped', reason: 'CV could not be created' }); return; }
+  }
+
+  // Too weak even after tailoring: skip it rather than spend an application on it.
+  const floor = cvScorer.sentFloor(cfg.MATCH_LEVEL);
+  if (rescored && score < floor) {
+    await store.updateJob(job.jobId, { status: 'skipped', cvScore: score, reason: `Not a close enough match (tailored CV matches ${score}%, needs ${floor}%)` });
+    log(`Skipped: ${jobTitle} (tailored CV only matches ${score}%, needs ${floor}%)`); return;
   }
 
   let coverLetter = null;

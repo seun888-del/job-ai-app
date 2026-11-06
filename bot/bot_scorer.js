@@ -330,7 +330,7 @@ async function processJob(job) {
     // Parse the extracted CV text into a structured object, tailor it to the JD
     // (subtitle / bullet selection / skills), then render through the strict
     // deterministic template so every output looks identical with no bleeding.
-    let rendered = false;
+    let rendered = false, rescored = false;
     try {
       const baseStruct     = parseCV(bestRawCvText, pdfOpts);
       // A CV with no parsed work experience renders as a near-blank shell (just
@@ -380,6 +380,7 @@ async function processJob(job) {
       // The match shown to the user is the CV that is actually sent, not the scoring addendum.
       if (bestAllKeywords.length) {
         bestScore = cvScorer.rescoreCV(structuredText(tailoredStruct), bestAllKeywords).score;
+        rescored = true;
         console.log(`  [Scorer Agent] Tailored CV matches ${bestScore}% of the advert's keywords`);
       }
     } catch (err) {
@@ -419,6 +420,14 @@ async function processJob(job) {
           return;
         }
       }
+    }
+
+    // Too weak even after tailoring: skip it rather than spend an application on it.
+    const floor = cvScorer.sentFloor(cfg.MATCH_LEVEL);
+    if (rescored && bestScore < floor) {
+      queue.update(job.jobId, { status: 'skipped', cvScore: bestScore, reason: `Not a close enough match (tailored CV matches ${bestScore}%, needs ${floor}%)` });
+      console.log(`  [Scorer Agent] ✗ Tailored CV only matches ${bestScore}% (needs ${floor}%): ${job.title}`);
+      return;
     }
 
     const flag = bestScore >= BOOST_TARGET ? '✓' : '~';
