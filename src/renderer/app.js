@@ -1265,7 +1265,7 @@ async function renderLicense() {
     ${hasLicense && license?.status !== 'active' ? `
     <div class="card">
       <h3>Subscribe</h3>
-      <p style="font-size:14px;color:#64748b;margin-bottom:16px">${license?.status === 'trial' ? 'No need to wait for your trial to end. Pick a plan and your key, settings and CV stay the same. First month half price.' : 'Your access has ended. Pick a plan and your Agents start again with the same key, settings and CV. First month half price.'}</p>
+      <p style="font-size:14px;color:#64748b;margin-bottom:16px">${license?.status === 'trial' ? 'No need to wait for your trial to end. Pick a plan and your key, settings and CV stay the same.' + (_isUKUser ? ' First month half price.' : '') : 'Your access has ended. Pick a plan and your Agents start again with the same key, settings and CV.' + (_isUKUser ? ' First month half price.' : '')}</p>
       <button class="primary" id="license-subscribe">Subscribe now</button>
     </div>` : ''}
 

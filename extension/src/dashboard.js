@@ -807,10 +807,10 @@ VIEWS.dashboard = async function renderDashboardView() {
         </div>
       </div>
 
-      ${hasLicence ? (trialLeft !== null && trialLeft <= 3 ? `<div class="no-license-banner"><span>Your free trial ends ${trialLeft <= 1 ? 'today' : `in ${trialLeft} days`}.${applied.length ? ` Job-AI has sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you so far.` : ''} Keep your agents applying, first month half price.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>` : '')
+      ${hasLicence ? (trialLeft !== null && trialLeft <= 3 ? `<div class="no-license-banner"><span>Your free trial ends ${trialLeft <= 1 ? 'today' : `in ${trialLeft} days`}.${applied.length ? ` Job-AI has sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you so far.` : ''} Keep your agents applying${us ? '' : ', first month half price'}.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>` : '')
         : ended ? `<div class="card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
           <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${applied.length ? `Job-AI sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you` : 'Your free trial has ended'}</h3>
-          <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan and they start again straight away, up to 25 a day. Your first month is half price.</p></div>
+          <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan and they start again straight away, up to 25 a day.${us ? '' : ' Your first month is half price.'}</p></div>
           <button class="primary" id="keep-jobai">Keep Job-AI</button></div>`
         : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 24 hours, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
@@ -1553,7 +1553,8 @@ VIEWS.earn = async function renderEarn() {
 
 // ── Setup: License ───────────────────────────────────────────────────────────
 VIEWS.license = async function renderLicense() {
-  const { license } = await loadConfig();
+  const { license, settings } = await loadConfig();
+  const half = isUS(settings) ? '' : ' First month half price.'; // no first-month discount in the US
   const active = licenceActive(license);
   // The saved key is never written back into the page; only its last 4 characters are shown.
   content.innerHTML = `
@@ -1569,10 +1570,10 @@ VIEWS.license = async function renderLicense() {
       <div class="ext-inline"><button class="secondary" id="tr-send">Send code</button><span class="status-msg" id="tr-mail-st"></span></div></div>
     </div>`}
     ${active && license.status === 'trial' ? `<div class="card"><h3 style="margin:0 0 6px">Subscribe</h3>
-      <p class="muted" style="margin:0 0 12px">No need to wait for your trial to end. Pick a plan and your key, settings and CV stay the same. First month half price.</p>
+      <p class="muted" style="margin:0 0 12px">No need to wait for your trial to end. Pick a plan and your key, settings and CV stay the same.${half}</p>
       <button class="primary" id="lic-keep">Subscribe now</button></div>`
       : !active && license.key && license.status !== 'device_trial_used' ? `<div class="card"><h3 style="margin:0 0 6px">Keep Job-AI</h3>
-      <p class="muted" style="margin:0 0 12px">Your access has ended. Pick a plan and your agents start again with the same key, settings and CV. First month half price.</p>
+      <p class="muted" style="margin:0 0 12px">Your access has ended. Pick a plan and your agents start again with the same key, settings and CV.${half}</p>
       <button class="primary" id="lic-keep">Choose a plan</button></div>` : ''}
     <div class="card">${active ? '' : '<h3 style="margin:0 0 6px">Already have a key?</h3>'}
       ${license.key ? `<div class="stat-row"><span class="stat-label">Key</span><span class="stat-value">•••• ${esc(license.key.slice(-4))}</span></div>
