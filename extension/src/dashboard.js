@@ -1067,10 +1067,12 @@ function federalHelpPanel({ title, previewUrl, openUrl, suggest, load }) {
     const muted = 'font-size:12.5px;color:var(--text-muted,#4a453b)';
     $o('#fh-out').innerHTML = r.answers.map((a, i) => {
       const val = a.answer || a.choice || '';
-      const label = a.kind === 'experience' ? (a.choice ? 'Your CV supports' : '') : a.kind === 'essay' ? 'Draft answer. Edit it so it sounds like you' : 'Suggested answer';
+      const ci = a.choice ? (a.choices || []).findIndex((c) => c.toLowerCase() === a.choice.toLowerCase()) : -1;
+      const pick = ci >= 0 ? `Tick option ${String.fromCharCode(65 + ci)}, the one that starts "${a.choice.split(/s+/).slice(0, 6).join(' ')}..."` : '';
+      const label = a.kind === 'experience' ? (a.choice ? (pick ? pick + '. Your CV supports it' : 'Your CV supports') : '') : a.kind === 'essay' ? 'Draft answer. Edit it so it sounds like you' : pick || 'Suggested answer';
       return `<div style="border-top:1px solid var(--border,#e6e1d6);padding:10px 0">
       <div style="font-size:13.5px;font-weight:600;margin-bottom:6px">${a.n}. ${e(a.question.length > 320 ? a.question.slice(0, 300) + '...' : a.question)}</div>
-      ${a.kind === 'experience' && !a.choice ? `<div style="font-size:13px;color:var(--danger,#a8432f);margin-bottom:6px">No evidence in your CV. Only choose a higher answer if it is true and you can back it up.</div>` : label ? `<div style="${muted};margin-bottom:4px">${label}</div>` : ''}
+      ${a.kind === 'experience' && !a.choice ? `<div style="font-size:13px;color:var(--danger,#a8432f);margin-bottom:6px">No evidence in your CV. Only choose a higher answer if it is true and you can back it up.</div>` : label ? `<div style="${muted};margin-bottom:4px">${e(label)}</div>` : ''}
       <textarea class="fh-ans" data-i="${i}" rows="${a.choices.length ? 2 : 8}" style="width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:8px 10px;border:1px solid var(--border-strong,#d8d2c4);border-radius:8px;resize:vertical">${e(val)}</textarea>
       <div style="display:flex;gap:10px;align-items:center;margin-top:4px"><button class="secondary fh-copy" data-i="${i}" style="margin:0;padding:4px 12px;font-size:13px">Copy</button><span style="${muted}">${e(a.note || a.evidence || '')}</span></div>
     </div>`; }).join('');
