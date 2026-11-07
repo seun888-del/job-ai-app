@@ -968,8 +968,9 @@ VIEWS.dashboard = async function renderDashboardView() {
     $$('.fed-dl').forEach((b) => b.addEventListener('click', () => downloadCv(b.dataset.id)));
     $$('.fed-help').forEach((b) => b.addEventListener('click', () => {
       const a = fedReady.find((x) => x.jobId === b.dataset.id); if (!a) return;
-      federalHelpPanel({ title: [a.title, a.company].filter(Boolean).join(' at '), previewUrl: a.questionnaireUrl || '', openUrl: (u) => openTab(u || a.url),
-        load: a.questionnaireUrl ? () => federalQuestionnaire(a.questionnaireUrl) : null,
+      const qUrl = federalQuestionnaireUrl(a.questionnaireUrl, a.announcement);
+      federalHelpPanel({ title: [a.title, a.company].filter(Boolean).join(' at '), previewUrl: qUrl, openUrl: (u) => openTab(u || a.url),
+        load: qUrl ? () => federalQuestionnaire(qUrl) : null,
         suggest: async (text) => { const cv = await store.get('cv'); try { return { ok: true, answers: await require('../../bot/modules/federal_answers').suggestAnswers(text, (cv && cv.text) || '') }; } catch (e) { return { ok: false, error: e.message }; } } });
     }));
     $$('.fed-done').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'applied', appliedAt: new Date().toISOString(), reason: 'You applied on USAJOBS' }); renderDashboard(); }));
@@ -1026,6 +1027,13 @@ function recentHtml(all, clearedAt) {
     : '<div class="empty-state">No applications yet. Each one shows here with the CV and cover letter that were sent.</div>'}</div>`;
 }
 // "Help me answer" panel for a federal job's questionnaire (same as the desktop app).
+// The questionnaire preview for a federal job: its own link, or built from the USA Staffing
+// announcement number (CBTA-13112528-27-ATG holds the questionnaire id) when the advert has none.
+function federalQuestionnaireUrl(link, announcement) {
+  if (link) return link;
+  const id = (String(announcement || '').match(/(?:^|\D)(1\d{7})(?:\D|$)/) || [])[1];
+  return id ? `https://apply.usastaffing.gov/ViewQuestionnaire/${id}` : '';
+}
 function federalHelpPanel({ title, previewUrl, openUrl, suggest, load }) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   document.getElementById('fed-help')?.remove();

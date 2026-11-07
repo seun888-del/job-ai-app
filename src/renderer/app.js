@@ -1938,6 +1938,13 @@ async function renderSendApps() {
 }
 
 // "Help me answer" panel for a federal job's questionnaire (shared look with the extension).
+// The questionnaire preview for a federal job: its own link, or built from the USA Staffing
+// announcement number (CBTA-13112528-27-ATG holds the questionnaire id) when the advert has none.
+function federalQuestionnaireUrl(link, announcement) {
+  if (link) return link;
+  const id = (String(announcement || '').match(/(?:^|\D)(1\d{7})(?:\D|$)/) || [])[1];
+  return id ? `https://apply.usastaffing.gov/ViewQuestionnaire/${id}` : '';
+}
 function federalHelpPanel({ title, previewUrl, openUrl, suggest, load }) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   document.getElementById('fed-help')?.remove();
@@ -2031,9 +2038,10 @@ async function renderFederalApps() {
   box.querySelectorAll('.fed-open').forEach((b) => b.addEventListener('click', () => { if (/^https:\/\/www\.usajobs\.gov\//.test(b.dataset.url)) window.api.shell.openExternal(b.dataset.url); }));
   box.querySelectorAll('.fed-help').forEach((b) => b.addEventListener('click', () => {
     const a = apps.find((x) => x.job_id === b.dataset.id); if (!a) return;
-    federalHelpPanel({ title: [cleanTitle(a.title), a.company].filter(Boolean).join(' at '), previewUrl: (a.extra || {}).questionnaireUrl || '',
+    const qUrl = federalQuestionnaireUrl((a.extra || {}).questionnaireUrl, (a.extra || {}).announcement);
+    federalHelpPanel({ title: [cleanTitle(a.title), a.company].filter(Boolean).join(' at '), previewUrl: qUrl,
       openUrl: (u) => window.api.shell.openExternal(u || a.url), suggest: (text) => window.api.queue.federalAnswerHelp(a.job_id, text),
-      load: (a.extra || {}).questionnaireUrl ? () => window.api.queue.federalQuestionnaire(a.job_id) : null });
+      load: qUrl ? () => window.api.queue.federalQuestionnaire(a.job_id) : null });
   }));
   box.querySelectorAll('.fed-resume').forEach((b) => b.addEventListener('click', async () => { if (!(await window.api.queue.federalShowResume(b.dataset.id).catch(() => false))) showToast('That resume file is no longer on this computer.', 'error'); }));
   const resolve = (applied) => async (ev) => { await window.api.queue.federalResolve(ev.currentTarget.dataset.id, applied).catch(() => {}); box._lastHtml = ''; renderFederalApps(); };

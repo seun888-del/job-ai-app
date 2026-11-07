@@ -816,7 +816,7 @@ ipcMain.handle('federal:answerHelp', async (event, jobId, text) => {
 ipcMain.handle('federal:questionnaire', async (event, jobId) => {
   try {
     const job = (await queueReader.getFederalQueue(200)).find((x) => x.job_id === String(jobId));
-    return { ok: true, ...(await require('./bot/modules/job_feed').fetchQuestionnaire(((job && job.extra) || {}).questionnaireUrl)) };
+    return { ok: true, ...(await require('./bot/modules/job_feed').fetchQuestionnaire((((job && job.extra) || {}).questionnaireUrl) || ((job && job.extra) || {}).announcement)) };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('queue:federalShowResume', async (event, jobId) => {
