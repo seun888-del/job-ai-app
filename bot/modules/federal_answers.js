@@ -3,9 +3,9 @@
  * The user pastes the questionnaire (from the job's public preview page). For each question the
  * AI suggests the answer the CV honestly supports and quotes the CV line that backs it.
  *
- * Suggest only, never submit: the applicant certifies these answers to a federal agency, and a
- * false statement there is a crime (18 U.S.C. 1001). So every suggestion needs a quote that is
- * really in the CV (checked below); without one it says "no evidence in your CV". Shared by the
+ * Suggest only, never submit: the user copies each answer, edits it and submits it themselves.
+ * The applicant certifies these answers to a federal agency (18 U.S.C. 1001), so experience
+ * ratings need a quote that is really in the CV (checked below), and drafts use CV facts only. Shared by the
  * desktop app (main process) and the extension. AI goes through the licensed backend.
  */
 const { llmChat } = require('../../src/services/llm');
@@ -49,8 +49,9 @@ Rules: keep the wording exactly. Leave out headings and instructions. Yes/No que
     const choices = (Array.isArray(q.choices) ? q.choices : []).map((c) => String(c).trim()).filter(Boolean).slice(0, 8);
     let kind = KINDS.includes(q.kind) ? q.kind : 'experience';
     // Belt and braces: certify/verify wording, or a written answer with no choices, is never ours.
-    if (/\b(i certify|i verify|certif(y|ication)|in my own words)\b/i.test(q.question + ' ' + choices.join(' '))) kind = 'certification';
-    else if (kind === 'experience' && !choices.length) kind = 'essay';
+    // A written answer (no choices) is an essay even when it asks them to certify it is their own.
+    if (!choices.length) { if (kind !== 'personal') kind = 'essay'; }
+    else if (/\b(i certify|i verify|certif(y|ication))\b/i.test(q.question + ' ' + choices.join(' '))) kind = 'certification';
     return { n: i + 1, kind, question: String(q.question).trim(), choices };
   });
 }
@@ -73,18 +74,52 @@ Rules: pick the choice that matches what the CV shows, not the best-sounding one
   return Array.isArray(arr) ? arr : [];
 }
 
+// Personal, essay and certification questions: a draft the user copies, checks and edits.
+// Job-AI never fills in or submits the questionnaire; the applicant decides what to send.
+async function draftOthers(questions, cvText) {
+  const prompt = `You help a job applicant answer a U.S. federal application questionnaire. They will copy your answers, check them and edit them before submitting it themselves.
+
+CV (the only facts about the applicant you may use):
+${String(cvText).slice(0, 9000)}
+
+QUESTIONS:
+${questions.map((q) => `${q.n}. [${q.kind}] ${q.question}${q.choices.length ? '\n   Choices: ' + q.choices.map((c, i) => `(${String.fromCharCode(65 + i)}) ${c}`).join(' | ') : ''}`).join('\n')}
+
+Return ONLY a JSON array:
+[{"n": 1, "choice": "for questions with choices: the exact text of the choice to suggest, otherwise empty", "answer": "for questions without choices: the written answer, otherwise empty", "note": "one short sentence on what the applicant must check, or empty"}]
+
+Rules:
+- personal (eligibility, veterans' preference, citizenship, willingness to travel or relocate, background check): pick the choice the CV supports. If the CV does not say, still pick the most likely choice (never leave it empty) and set note to what they must confirm, for example "Check this is true for you".
+- certification: suggest the choice that certifies, with note "Only choose this if all your answers are true".
+- essay: write the answer in plain first person, 120 to 250 words, using only facts from the CV, with specific examples and numbers from it. Never invent employers, dates, numbers, tools, actions or achievements. If the question asks for a specific example or detail the CV does not describe, write around what the CV does say and put a placeholder in square brackets where they must add it, like [what you changed and the result], and set note to "Fill in the parts in square brackets".`;
+  let arr = parseJson(await llmChat(prompt).catch(() => ''));
+  if (!Array.isArray(arr)) arr = parseJson(await llmChat(prompt).catch(() => ''));
+  return Array.isArray(arr) ? arr : [];
+}
+
 /**
- * Returns [{ n, question, choices, choice, evidence }]. choice '' means the CV shows nothing for it.
- * A suggestion whose quote is not really in the CV is dropped (truth gate).
+ * Returns [{ n, kind, question, choices, choice, evidence, answer, note }]. For experience
+ * questions choice '' means the CV shows nothing for it, and a suggestion whose quote is not
+ * really in the CV is dropped (truth gate). Other kinds get a draft to check and edit.
  */
 async function suggestAnswers(questionnaireText, cvText) {
   if (String(questionnaireText || '').trim().length < 40) throw new Error('Paste the questionnaire questions first.');
   if (String(cvText || '').trim().length < 200) throw new Error('Add your CV first.');
   const qs = await readQuestions(questionnaireText);
   if (!qs.length) throw new Error('No questions found in that text.');
-  // Only experience questions get a suggestion. Personal, essay and certification questions are
-  // the applicant's alone: essays must be in their own words (agencies ask them to certify no AI).
-  const out = qs.filter((q) => q.kind !== 'experience').map((q) => ({ ...q, choice: '', evidence: '' }));
+  const out = [];
+  const others = qs.filter((q) => q.kind !== 'experience');
+  for (let b = 0; b < others.length; b += PER_CALL) {
+    const batch = others.slice(b, b + PER_CALL);
+    const byN = new Map((await draftOthers(batch, cvText)).map((a) => [Number(a.n), a]));
+    for (const q of batch) {
+      const a = byN.get(q.n) || {};
+      let choice = String(a.choice || '').trim().replace(/^\(?[A-H]\)\s*/, '');
+      if (choice && q.choices.length) choice = q.choices.find((c) => c.toLowerCase() === choice.toLowerCase())
+        || q.choices.find((c) => c.toLowerCase().startsWith(choice.toLowerCase().slice(0, 25))) || '';
+      out.push({ ...q, choice, evidence: '', answer: q.choices.length ? '' : String(a.answer || '').trim(), note: String(a.note || '').trim() });
+    }
+  }
   const exp = qs.filter((q) => q.kind === 'experience');
   for (let b = 0; b < exp.length; b += PER_CALL) {
     const batch = exp.slice(b, b + PER_CALL);

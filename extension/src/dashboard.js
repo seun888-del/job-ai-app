@@ -1050,7 +1050,7 @@ function federalHelpPanel({ title, previewUrl, openUrl, suggest, load }) {
       <textarea id="fh-text" rows="7" placeholder="Paste the questionnaire questions here" style="width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:10px 12px;border:1px solid var(--border-strong,#d8d2c4);border-radius:8px;resize:vertical"></textarea>
       <div style="display:flex;gap:10px;align-items:center;margin:10px 0 4px"><button class="primary" id="fh-go" style="margin:0">Suggest answers</button><span id="fh-st" style="font-size:13px;color:var(--text-muted,#4a453b)"></span><a href="#" id="fh-show" style="display:none;font-size:13px;margin-left:auto">See the questions</a></div>
       <div id="fh-out"></div>
-      <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:14px 0 0">These are suggestions from your CV, not answers. You certify your answers to a federal agency, so only choose what is true. Job-AI never fills in or submits the questionnaire.</p>
+      <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:14px 0 0">Check and edit every answer before you paste it in. You certify your answers to a federal agency, so only send what is true. Job-AI never fills in or submits the questionnaire.</p>
     </div></div>`;
   document.body.appendChild(o);
   const $o = (s) => o.querySelector(s);
@@ -1064,14 +1064,22 @@ function federalHelpPanel({ title, previewUrl, openUrl, suggest, load }) {
     b.disabled = false;
     if (!r || !r.ok) { $o('#fh-st').textContent = (r && r.error) || 'Could not suggest answers.'; return; }
     $o('#fh-st').textContent = `${r.answers.length} question${r.answers.length === 1 ? '' : 's'}.`;
-    $o('#fh-out').innerHTML = r.answers.map((a) => `<div style="border-top:1px solid var(--border,#e6e1d6);padding:10px 0">
-      <div style="font-size:13.5px;font-weight:600;margin-bottom:4px">${a.n}. ${e(a.question.length > 320 ? a.question.slice(0, 300) + '...' : a.question)}</div>
-      ${a.kind === 'personal' ? `<div style="font-size:13px;color:var(--text-muted,#4a453b)">This one is about you, not your CV. Answer it yourself.</div>`
-        : a.kind === 'essay' ? `<div style="font-size:13px;color:var(--text-muted,#4a453b)">Write this in your own words. Agencies ask you to certify you did not use AI, so Job-AI does not write it.</div>`
-        : a.kind === 'certification' ? `<div style="font-size:13px;color:var(--text-muted,#4a453b)">Read it and answer it yourself.</div>`
-        : a.choice ? `<div style="font-size:13.5px"><span style="color:var(--text-muted,#4a453b)">Your CV supports:</span> <strong>${e(a.choice.length > 320 ? a.choice.slice(0, 300) + '...' : a.choice)}</strong></div><div style="font-size:12.5px;color:var(--text-muted,#4a453b);margin-top:2px">${e(a.evidence)}</div>`
-        : `<div style="font-size:13px;color:var(--danger,#a8432f)">No evidence in your CV. Only choose a higher answer if it is true and you can back it up.</div>`}
-    </div>`).join('');
+    const muted = 'font-size:12.5px;color:var(--text-muted,#4a453b)';
+    $o('#fh-out').innerHTML = r.answers.map((a, i) => {
+      const val = a.answer || a.choice || '';
+      const label = a.kind === 'experience' ? (a.choice ? 'Your CV supports' : '') : a.kind === 'essay' ? 'Draft answer. Edit it so it sounds like you' : 'Suggested answer';
+      return `<div style="border-top:1px solid var(--border,#e6e1d6);padding:10px 0">
+      <div style="font-size:13.5px;font-weight:600;margin-bottom:6px">${a.n}. ${e(a.question.length > 320 ? a.question.slice(0, 300) + '...' : a.question)}</div>
+      ${a.kind === 'experience' && !a.choice ? `<div style="font-size:13px;color:var(--danger,#a8432f);margin-bottom:6px">No evidence in your CV. Only choose a higher answer if it is true and you can back it up.</div>` : label ? `<div style="${muted};margin-bottom:4px">${label}</div>` : ''}
+      <textarea class="fh-ans" data-i="${i}" rows="${a.choices.length ? 2 : 8}" style="width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:8px 10px;border:1px solid var(--border-strong,#d8d2c4);border-radius:8px;resize:vertical">${e(val)}</textarea>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:4px"><button class="secondary fh-copy" data-i="${i}" style="margin:0;padding:4px 12px;font-size:13px">Copy</button><span style="${muted}">${e(a.note || a.evidence || '')}</span></div>
+    </div>`; }).join('');
+  });
+  $o('#fh-out').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('.fh-copy'); if (!b) return;
+    const t = $o(`.fh-ans[data-i="${b.dataset.i}"]`);
+    try { await navigator.clipboard.writeText(t.value); } catch (_) { t.select(); document.execCommand('copy'); }
+    b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1500);
   });
   $o('#fh-show').addEventListener('click', (ev) => { ev.preventDefault(); const t = $o('#fh-text'); t.style.display = t.style.display === 'none' ? '' : 'none'; });
   if (!load) { $o('#fh-text').focus(); return; }
