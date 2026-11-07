@@ -11,7 +11,7 @@ import { IndeedAgent } from './agents/indeed.js';
 import { DiceAgent } from './agents/dice.js';
 import { WellfoundAgent } from './agents/wellfound.js';
 import { AtsAgent, feedJobs, fetchJD, fillAndOpen, releaseHeld } from './agents/ats.js';
-import { UsajobsAgent } from './agents/usajobs.js';
+import { UsajobsAgent, federalQuestionnaire } from './agents/usajobs.js';
 import { Page } from './driver/page.js';
 import { scoreJob } from './agents/scorer.js';
 
@@ -969,6 +969,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     $$('.fed-help').forEach((b) => b.addEventListener('click', () => {
       const a = fedReady.find((x) => x.jobId === b.dataset.id); if (!a) return;
       federalHelpPanel({ title: [a.title, a.company].filter(Boolean).join(' at '), previewUrl: a.questionnaireUrl || '', openUrl: (u) => openTab(u || a.url),
+        load: a.questionnaireUrl ? () => federalQuestionnaire(a.questionnaireUrl) : null,
         suggest: async (text) => { const cv = await store.get('cv'); try { return { ok: true, answers: await require('../../bot/modules/federal_answers').suggestAnswers(text, (cv && cv.text) || '') }; } catch (e) { return { ok: false, error: e.message }; } } });
     }));
     $$('.fed-done').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'applied', appliedAt: new Date().toISOString(), reason: 'You applied on USAJOBS' }); renderDashboard(); }));
@@ -1025,7 +1026,7 @@ function recentHtml(all, clearedAt) {
     : '<div class="empty-state">No applications yet. Each one shows here with the CV and cover letter that were sent.</div>'}</div>`;
 }
 // "Help me answer" panel for a federal job's questionnaire (same as the desktop app).
-function federalHelpPanel({ title, previewUrl, openUrl, suggest }) {
+function federalHelpPanel({ title, previewUrl, openUrl, suggest, load }) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   document.getElementById('fed-help')?.remove();
   const o = document.createElement('div'); o.id = 'fed-help';
@@ -1035,11 +1036,11 @@ function federalHelpPanel({ title, previewUrl, openUrl, suggest }) {
       <div><h3 style="margin:0 0 4px;font-size:19px;text-transform:none;letter-spacing:-0.01em">Help me answer</h3><div style="font-size:13px;color:var(--text-muted,#4a453b)">${e(title)}</div></div>
       <button class="secondary" id="fh-x" style="margin:0">Close</button></div>
     <div style="padding:16px 22px;overflow:auto" id="fh-body">
-      <ol style="margin:0 0 12px 18px;padding:0;font-size:14px;line-height:1.6">
+      <ol id="fh-steps" style="margin:0 0 12px 18px;padding:0;font-size:14px;line-height:1.6">
         <li>${previewUrl ? '<a href="#" id="fh-preview">Open the questionnaire preview</a>' : 'Open the job on USAJOBS (<a href="#" id="fh-job">open it</a>) and find "preview the questionnaire" under How you will be evaluated'}, then copy all its questions.</li>
         <li>Paste them below and press Suggest answers.</li></ol>
       <textarea id="fh-text" rows="7" placeholder="Paste the questionnaire questions here" style="width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:10px 12px;border:1px solid var(--border-strong,#d8d2c4);border-radius:8px;resize:vertical"></textarea>
-      <div style="display:flex;gap:10px;align-items:center;margin:10px 0 4px"><button class="primary" id="fh-go" style="margin:0">Suggest answers</button><span id="fh-st" style="font-size:13px;color:var(--text-muted,#4a453b)"></span></div>
+      <div style="display:flex;gap:10px;align-items:center;margin:10px 0 4px"><button class="primary" id="fh-go" style="margin:0">Suggest answers</button><span id="fh-st" style="font-size:13px;color:var(--text-muted,#4a453b)"></span><a href="#" id="fh-show" style="display:none;font-size:13px;margin-left:auto">See the questions</a></div>
       <div id="fh-out"></div>
       <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:14px 0 0">These are suggestions from your CV, not answers. You certify your answers to a federal agency, so only choose what is true. Job-AI never fills in or submits the questionnaire.</p>
     </div></div>`;
@@ -1064,7 +1065,18 @@ function federalHelpPanel({ title, previewUrl, openUrl, suggest }) {
         : `<div style="font-size:13px;color:var(--danger,#a8432f)">No evidence in your CV. Only choose a higher answer if it is true and you can back it up.</div>`}
     </div>`).join('');
   });
-  $o('#fh-text').focus();
+  $o('#fh-show').addEventListener('click', (ev) => { ev.preventDefault(); const t = $o('#fh-text'); t.style.display = t.style.display === 'none' ? '' : 'none'; });
+  if (!load) { $o('#fh-text').focus(); return; }
+  // The questions come straight from the job's questionnaire preview: no copy and paste.
+  const steps = $o('#fh-steps'), ta = $o('#fh-text'), st = $o('#fh-st'), go = $o('#fh-go');
+  steps.style.display = 'none'; ta.style.display = 'none'; go.disabled = true;
+  st.textContent = 'Getting the questions from this job...';
+  const pasteInstead = () => { steps.style.display = ''; ta.style.display = ''; go.disabled = false; st.textContent = 'Could not get the questions automatically. Paste them below instead.'; ta.focus(); };
+  Promise.resolve().then(load).then((r) => {
+    if (!r || !r.ok || !r.text) return pasteInstead();
+    ta.value = r.text; go.disabled = false; $o('#fh-show').style.display = '';
+    st.textContent = `${r.count} question${r.count === 1 ? '' : 's'} ready. Press Suggest answers.`;
+  }).catch(pasteInstead);
 }
 
 // Save the tailored PDF to Downloads under its own name, ready to upload (federal resumes).

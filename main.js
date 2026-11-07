@@ -813,6 +813,12 @@ ipcMain.handle('federal:answerHelp', async (event, jobId, text) => {
     return { ok: true, answers };
   } catch (e) { return { ok: false, error: e.message || 'Could not suggest answers.' }; }
 });
+ipcMain.handle('federal:questionnaire', async (event, jobId) => {
+  try {
+    const job = (await queueReader.getFederalQueue(200)).find((x) => x.job_id === String(jobId));
+    return { ok: true, ...(await require('./bot/modules/job_feed').fetchQuestionnaire(((job && job.extra) || {}).questionnaireUrl)) };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
 ipcMain.handle('queue:federalShowResume', async (event, jobId) => {
   const r = (await queueReader.getFederalQueue(200)).find((x) => x.job_id === String(jobId));
   if (!r || !r.cv_path || !fs.existsSync(r.cv_path)) return false;

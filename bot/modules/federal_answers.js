@@ -93,6 +93,8 @@ async function suggestAnswers(questionnaireText, cvText) {
       const a = byN.get(q.n) || {};
       let choice = String(a.choice || '').trim();
       let evidence = String(a.evidence || '').trim();
+      // The prompt labels choices (A), (B)...; the model often echoes the label back.
+      choice = choice.replace(/^\(?[A-H]\)\s*/, '');
       if (choice && !quoteInSource(a.quote, cvText)) { choice = ''; evidence = ''; }
       // Only a choice that really is one of the options (when the question lists them).
       if (choice && q.choices.length && !q.choices.some((c) => c.toLowerCase() === choice.toLowerCase())) {

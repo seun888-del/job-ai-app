@@ -1938,7 +1938,7 @@ async function renderSendApps() {
 }
 
 // "Help me answer" panel for a federal job's questionnaire (shared look with the extension).
-function federalHelpPanel({ title, previewUrl, openUrl, suggest }) {
+function federalHelpPanel({ title, previewUrl, openUrl, suggest, load }) {
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   document.getElementById('fed-help')?.remove();
   const o = document.createElement('div'); o.id = 'fed-help';
@@ -1948,11 +1948,11 @@ function federalHelpPanel({ title, previewUrl, openUrl, suggest }) {
       <div><h3 style="margin:0 0 4px;font-size:19px;text-transform:none;letter-spacing:-0.01em">Help me answer</h3><div style="font-size:13px;color:var(--text-muted,#4a453b)">${e(title)}</div></div>
       <button class="secondary" id="fh-x" style="margin:0">Close</button></div>
     <div style="padding:16px 22px;overflow:auto" id="fh-body">
-      <ol style="margin:0 0 12px 18px;padding:0;font-size:14px;line-height:1.6">
+      <ol id="fh-steps" style="margin:0 0 12px 18px;padding:0;font-size:14px;line-height:1.6">
         <li>${previewUrl ? '<a href="#" id="fh-preview">Open the questionnaire preview</a>' : 'Open the job on USAJOBS (<a href="#" id="fh-job">open it</a>) and find "preview the questionnaire" under How you will be evaluated'}, then copy all its questions.</li>
         <li>Paste them below and press Suggest answers.</li></ol>
       <textarea id="fh-text" rows="7" placeholder="Paste the questionnaire questions here" style="width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:10px 12px;border:1px solid var(--border-strong,#d8d2c4);border-radius:8px;resize:vertical"></textarea>
-      <div style="display:flex;gap:10px;align-items:center;margin:10px 0 4px"><button class="primary" id="fh-go" style="margin:0">Suggest answers</button><span id="fh-st" style="font-size:13px;color:var(--text-muted,#4a453b)"></span></div>
+      <div style="display:flex;gap:10px;align-items:center;margin:10px 0 4px"><button class="primary" id="fh-go" style="margin:0">Suggest answers</button><span id="fh-st" style="font-size:13px;color:var(--text-muted,#4a453b)"></span><a href="#" id="fh-show" style="display:none;font-size:13px;margin-left:auto">See the questions</a></div>
       <div id="fh-out"></div>
       <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:14px 0 0">These are suggestions from your CV, not answers. You certify your answers to a federal agency, so only choose what is true. Job-AI never fills in or submits the questionnaire.</p>
     </div></div>`;
@@ -1977,7 +1977,18 @@ function federalHelpPanel({ title, previewUrl, openUrl, suggest }) {
         : `<div style="font-size:13px;color:var(--danger,#a8432f)">No evidence in your CV. Only choose a higher answer if it is true and you can back it up.</div>`}
     </div>`).join('');
   });
-  $o('#fh-text').focus();
+  $o('#fh-show').addEventListener('click', (ev) => { ev.preventDefault(); const t = $o('#fh-text'); t.style.display = t.style.display === 'none' ? '' : 'none'; });
+  if (!load) { $o('#fh-text').focus(); return; }
+  // The questions come straight from the job's questionnaire preview: no copy and paste.
+  const steps = $o('#fh-steps'), ta = $o('#fh-text'), st = $o('#fh-st'), go = $o('#fh-go');
+  steps.style.display = 'none'; ta.style.display = 'none'; go.disabled = true;
+  st.textContent = 'Getting the questions from this job...';
+  const pasteInstead = () => { steps.style.display = ''; ta.style.display = ''; go.disabled = false; st.textContent = 'Could not get the questions automatically. Paste them below instead.'; ta.focus(); };
+  Promise.resolve().then(load).then((r) => {
+    if (!r || !r.ok || !r.text) return pasteInstead();
+    ta.value = r.text; go.disabled = false; $o('#fh-show').style.display = '';
+    st.textContent = `${r.count} question${r.count === 1 ? '' : 's'} ready. Press Suggest answers.`;
+  }).catch(pasteInstead);
 }
 
 // Federal jobs with a federal resume made for them. The user applies on USAJOBS: Job-AI
@@ -2021,7 +2032,8 @@ async function renderFederalApps() {
   box.querySelectorAll('.fed-help').forEach((b) => b.addEventListener('click', () => {
     const a = apps.find((x) => x.job_id === b.dataset.id); if (!a) return;
     federalHelpPanel({ title: [cleanTitle(a.title), a.company].filter(Boolean).join(' at '), previewUrl: (a.extra || {}).questionnaireUrl || '',
-      openUrl: (u) => window.api.shell.openExternal(u || a.url), suggest: (text) => window.api.queue.federalAnswerHelp(a.job_id, text) });
+      openUrl: (u) => window.api.shell.openExternal(u || a.url), suggest: (text) => window.api.queue.federalAnswerHelp(a.job_id, text),
+      load: (a.extra || {}).questionnaireUrl ? () => window.api.queue.federalQuestionnaire(a.job_id) : null });
   }));
   box.querySelectorAll('.fed-resume').forEach((b) => b.addEventListener('click', async () => { if (!(await window.api.queue.federalShowResume(b.dataset.id).catch(() => false))) showToast('That resume file is no longer on this computer.', 'error'); }));
   const resolve = (applied) => async (ev) => { await window.api.queue.federalResolve(ev.currentTarget.dataset.id, applied).catch(() => {}); box._lastHtml = ''; renderFederalApps(); };

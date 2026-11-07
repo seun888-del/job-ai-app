@@ -87,6 +87,7 @@ contextBridge.exposeInMainWorld('api', {
     federalResolve: (jobId, applied) => ipcRenderer.invoke('queue:federalResolve', jobId, applied),
     federalShowResume: (jobId) => ipcRenderer.invoke('queue:federalShowResume', jobId),
     federalAnswerHelp: (jobId, text) => ipcRenderer.invoke('federal:answerHelp', jobId, text),
+    federalQuestionnaire: (jobId) => ipcRenderer.invoke('federal:questionnaire', jobId),
     dailyApplications: (days) => ipcRenderer.invoke('queue:dailyApplications', days),
     reviewList: (limit) => ipcRenderer.invoke('queue:reviewList', limit),
     reviewCount: () => ipcRenderer.invoke('queue:reviewCount'),

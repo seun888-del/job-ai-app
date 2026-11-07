@@ -134,4 +134,16 @@ function reportApplied({ title, company, url, cv_score, pay, pay_pct, currency }
   }).catch(() => {});
 }
 
-module.exports = { enabled, fetchReedStubs, fetchAtsJobs, fetchFederalJobs, reportOutcome, reportApplied };
+// A federal job's questionnaire as plain text, read by the backend from the public preview, so
+// "Help me answer" opens with the questions already in. Throws on a problem (the user can still paste).
+async function fetchQuestionnaire(previewUrl) {
+  const id = (String(previewUrl || '').match(/ViewQuestionnaire\/(\d+)/i) || [])[1];
+  if (!id) throw new Error('no questionnaire link');
+  if (!licenseKey()) throw new Error('no licence key');
+  const res = await fetch(`${backendUrl()}/v1/federal/questionnaire/${id}`, { headers: { Authorization: `Bearer ${licenseKey()}` }, signal: AbortSignal.timeout(30000) });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.ok || !j.text) throw new Error('could not load the questions');
+  return { text: j.text, count: j.count || 0 };
+}
+
+module.exports = { enabled, fetchReedStubs, fetchAtsJobs, fetchFederalJobs, fetchQuestionnaire, reportOutcome, reportApplied };

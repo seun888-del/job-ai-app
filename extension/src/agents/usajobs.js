@@ -19,6 +19,16 @@ export function federalPay(j) {
   return `${range} ${String(j.pay_period || 'per year').toLowerCase()}`;
 }
 
+export async function federalQuestionnaire(previewUrl) {
+  const id = (String(previewUrl || '').match(/ViewQuestionnaire\/(\d+)/i) || [])[1];
+  if (!id) return { ok: false, error: 'no questionnaire link' };
+  try {
+    const r = await fetch(`${llm.BACKEND}/v1/federal/questionnaire/${id}`, { headers: llm.headers(), signal: AbortSignal.timeout(30000) });
+    const j = await r.json().catch(() => ({}));
+    return r.ok && j.ok && j.text ? { ok: true, text: j.text, count: j.count || 0 } : { ok: false, error: 'could not load the questions' };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
 export async function federalJobs({ terms, location, remoteOnly }) {
   const q = new URLSearchParams({ terms: terms.slice(0, 10).join(','), location: location || '' });
   if (remoteOnly) q.set('remote', '1');
