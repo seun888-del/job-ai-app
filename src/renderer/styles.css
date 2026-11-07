@@ -402,6 +402,7 @@ button.secondary:disabled { background: var(--surface-alt); color: var(--text-fa
 /* ── Bot controls (Dashboard) ──────────────────────────────────────────────── */
 .bot-controls { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; width: 100%; }
 .bot-card { min-width: 0; margin-bottom: 0; width: 100%; }
+.bot-card.uc-card, .bot-card.wsl-card { margin-bottom: 18px; }
 .bot-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .bot-card-actions { display: flex; gap: 8px; }
 .bot-card-actions button { margin-top: 0; }

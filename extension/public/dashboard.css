@@ -52,4 +52,4 @@ main { min-width: 0; }
 }
 
 /* UC card sits above Recent activity: give it the normal card gap (.bot-card sets 0). */
-.bot-card.uc-card { margin-bottom: 18px; }
+.bot-card.uc-card, .bot-card.wsl-card { margin-bottom: 18px; }
