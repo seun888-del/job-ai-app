@@ -18,7 +18,7 @@ const cvSelector = require('./modules/cv_selector');
 const cvScorer   = require('./modules/cv_scorer');
 const queue      = require('./modules/queue_manager');
 const { cleanText }                   = require('./modules/cv_cleaner');
-const { writePDF, writeStructuredPDF, buildPaths } = require('./modules/cv_pdf_writer');
+const { writePDF, writeStructuredPDF, writeFittedPDF, buildPaths } = require('./modules/cv_pdf_writer');
 const { writeDocx }                   = require('./modules/cv_docx_writer');
 const { convertDocxToPdf }            = require('./modules/cv_converter');
 const { tailorCV, weaveKeywords }     = require('./modules/cv_tailor');
@@ -400,9 +400,12 @@ async function processJob(job) {
         federal = { pages: r.pages, missingMonths: r.missingMonths };
         console.log(`  [Scorer Agent] ✓ Federal resume rendered (${r.pages} page(s)): ${paths.saved}`);
       } else {
-      await writeStructuredPDF(tailoredStruct, paths.saved, pdfOpts);
+      // 1 page for under 5 years' experience, up to 2 otherwise, never a near-empty last page.
+      const fitStats = {};
+      const fitted = await writeFittedPDF(tailoredStruct, paths.saved, { ...pdfOpts, stats: fitStats });
+      Object.assign(tailoredStruct, fitted); // score and send exactly what was rendered
       await writeStructuredPDF(tailoredStruct, paths.upload, pdfOpts);
-      console.log(`  [Scorer Agent] ✓ Tailored CV rendered (reference layout): ${paths.saved}`);
+      console.log(`  [Scorer Agent] ✓ Tailored CV rendered (${fitStats.pages || 1} page${fitStats.pages > 1 ? 's' : ''}): ${paths.saved}`);
       }
       rendered = true;
       // The match shown to the user is the CV that is actually sent, not the scoring addendum.

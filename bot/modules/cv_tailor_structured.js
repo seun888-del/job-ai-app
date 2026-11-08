@@ -25,11 +25,36 @@
 const { llmAvailable, llmChat } = require('../../src/services/llm');
 const { focusJD } = require('./jd_focus');
 
-// Bullets per role by recency, so the CV stays easy to skim: latest job 5, the one before 4,
-// the next 3, older jobs 2. The bullets kept are the ones that best match the advert, a bullet
-// with a result (a number) is always kept, and every role keeps at least 2, so no job disappears.
+// Bullets per role by recency (UK/US recruiter guidance: 3 to 5 for recent roles, fewer for older
+// ones, little or nothing for jobs over 10 years ago): latest job 5, then 4, then 3, older jobs 2,
+// and a job that ended more than 10 years ago 1. The bullets kept are the ones that best match the
+// advert, a bullet with a result (a number) is preferred, and every role keeps at least 1.
 const BULLETS_BY_ROLE = [5, 4, 3];
 const bulletCap = (roleIndex) => BULLETS_BY_ROLE[roleIndex] || 2;
+// The year a role ended ("2016 to 2017" = 2017, "to Present" = this year), or null.
+function roleEndYear(dates) {
+  const d = String(dates || '');
+  if (/present|current|now|to date/i.test(d)) return new Date().getFullYear();
+  const ys = d.match(/\b(19|20)\d{2}\b/g);
+  return ys ? +ys[ys.length - 1] : null;
+}
+const capFor = (role, i) => { const end = roleEndYear(role && role.dates); return end && new Date().getFullYear() - end > 10 ? 1 : bulletCap(i); };
+// At most this many skills categories (the ones that match the advert best).
+const MAX_SKILL_GROUPS = 4;
+const MAX_SKILL_ITEMS = 12;
+// Split on commas that aren't inside brackets ("endpoint protection (Sophos, McAfee)" is one item).
+const trimItems = (g) => { const parts = String(g.items || '').split(/,\s*(?![^()]*\))/); return parts.length > MAX_SKILL_ITEMS ? { ...g, items: parts.slice(0, MAX_SKILL_ITEMS).join(', ') } : g; };
+// A long original summary used as it is when the rewrite fails: keep its first sentences.
+function shortProfile(p, maxWords = 90) {
+  const sentences = String(p || '').replace(/\s+/g, ' ').trim().match(/[^.!?]+[.!?]+/g) || [String(p || '')];
+  let out = '';
+  for (const x of sentences) {
+    const next = (out + ' ' + x).trim();
+    if (out && next.split(/\s+/).length > maxWords) break;
+    out = next;
+  }
+  return out || String(p || '');
+}
 const hasResult = (b) => /\d/.test(String(b).replace(/\b(19|20)\d{2}\b/g, ''));
 const numbersIn = (t) => (String(t).match(/\d[\d,]*\.?\d*%?/g) || []).map((n) => n.replace(/,/g, ''));
 const REFUSAL_RE = /\b(cannot|can't|i'm sorry|i am sorry|unable to|not able to|as an ai)\b/i;
@@ -74,7 +99,7 @@ function houseStyle(line, uk) {
 // a recruiter. Truthful: the same anti-fabrication verifier (see below) rejects
 // any summary that introduces a tool/number/cert the CV doesn't already support,
 // falling back to the original. Kept to a single paragraph for the layout.
-async function tailorProfile(profile, jobTitle, jdExcerpt, corpus, kwLine = '') {
+async function tailorProfile(profile, jobTitle, jdExcerpt, corpus, kwLine = '', employers = []) {
   if (!profile || profile.trim().length < 30) return profile;
   const prompt = `You are rewriting the professional summary at the top of a candidate's CV so it speaks directly to a specific job and reads naturally to a recruiter. Summarise ONLY what the CV already demonstrates — never inflate.
 
@@ -86,10 +111,11 @@ ${jdExcerpt}
 CURRENT SUMMARY:
 ${profile}
 ${kwLine}
-Write a NEW summary of exactly 3 sentences, 45 to 75 words in total, that a recruiter for THIS job reads in five seconds:
-1. Who they are for this role: their years of experience and their core area, in the advert's words where those words are true of them.
-2. Their single most relevant piece of proof for this job, taken from the CV below, including a real result or number if the CV gives one. Keep each result tied to what actually produced it in the CV.
-3. The two or three strengths from the CV that this advert asks for most.
+Write a NEW summary of 3 or 4 sentences, 60 to 90 words in total (about four lines on the page), that a recruiter for THIS job can take in at a glance:
+1. Who they are for this role: their job title or specialism, years of experience and core area, in the advert's words where those words are true of them.
+2. Their most relevant achievement for this job, from the CV below, with a real result or number if the CV gives one. Keep each result tied to what actually produced it in the CV.
+3. The scope of their experience that this advert values: the kind of organisations, users, systems or scale from the CV.
+4. Optionally, the strengths from the CV this advert asks for most. Not a list of every tool.
 No "I", no first person, no bullet points, no buzzwords, no list of every tool they know.
 
 ${CLICHE_BAN}
@@ -97,6 +123,9 @@ ${CLICHE_BAN}
 Absolute rules:
 - Use only facts in the CV. Do NOT invent or imply any tool, technology, sector, certification, metric, number, seniority, or years of experience the CV does not already state.
 - Every number must appear in the CV exactly as written.
+- One achievement per sentence, and do not name employers in the summary (the work history shows them).
+- Each result stays with the job and the work that produced it: never put facts from two different jobs in one sentence ("supported X at one job, cutting Y by 35% at another" is wrong).
+- Keep the CV's own verbs and seniority: supporting or administering users is not managing people. Never upgrade "supported" to "managed" or "led".
 Return ONLY the summary as a single paragraph — no label, no quotes, no commentary.
 
 THE CANDIDATE'S CV (the only source of facts):
@@ -106,12 +135,14 @@ ${String(corpus).slice(0, 6000)}`;
       const raw = (await llmChat(prompt, 30000)) || '';
       const para = raw.replace(/^\s*(summary|profile)\s*[:\-]\s*/i, '').replace(/\s*\n+\s*/g, ' ').replace(/^["']+|["']+$/g, '').trim();
       const words = para.split(/\s+/).length;
-      const why = words < 30 || words > 95 ? `${words} words` : REFUSAL_RE.test(para.slice(0, 120)) ? 'refusal' : introducesNewFacts(corpus, para) ? `new claim (${newFactsIn(corpus, para).join(', ')})` : '';
+      // A sentence naming two of their employers is mixing facts from different jobs.
+      const mixed = (para.match(/[^.!?]+[.!?]*/g) || []).find((sen) => employers.filter((c) => c && c.length > 2 && sen.toLowerCase().includes(c.toLowerCase())).length > 1);
+      const why = mixed ? 'mixes two jobs in one sentence' : words < 45 || words > 110 ? `${words} words` : REFUSAL_RE.test(para.slice(0, 120)) ? 'refusal' : introducesNewFacts(corpus, para) ? `new claim (${newFactsIn(corpus, para).join(', ')})` : '';
       if (!why) return para;
       console.log(`  [Tailor] Summary rewrite rejected: ${why}`);
     } catch (_) {}
   }
-  return profile;
+  return shortProfile(profile);
 }
 
 // ── Bullet selection (per role) ──────────────────────────────────────────────
@@ -241,10 +272,10 @@ function bulletJDScore(bullet, jdSet) {
 // candidate didn't state (the anti-fabrication verifier below enforces this).
 // No-AI path: the same recency cap, keeping the bullets that best match the advert, unchanged.
 // Most job-relevant first; a bullet with a result always makes the cut.
-function rankBullets(bullets, jdSet, roleIndex) {
+function rankBullets(bullets, jdSet, roleIndex, capOverride) {
   const ranked = (bullets || []).map((b, i) => ({ b, i, s: bulletJDScore(b, jdSet) }))
     .sort((a, z) => z.s - a.s || a.i - z.i);
-  const cap = Math.max(2, bulletCap(roleIndex));
+  const cap = Math.max(1, capOverride || bulletCap(roleIndex));
   const keep = ranked.slice(0, cap);
   for (const r of ranked.slice(cap)) {
     if (!hasResult(r.b)) continue;
@@ -281,9 +312,14 @@ function unsafeRewrite(orig, rw, matched) {
   if (!rw) return 'missing';
   const ow = orig.split(/\s+/).length, rwW = rw.split(/\s+/).length;
   if (rwW > Math.max(ow + 6, Math.round(ow * 1.3))) return 'longer';
-  if (rwW < Math.min(ow, Math.round(ow * 0.6))) return 'lost detail';
+  // Tightening a long bullet to one line is fine; cutting it to a fragment is not.
+  if (rwW < Math.min(ow, Math.round(ow * (ow > 30 ? 0.5 : 0.6)))) return 'lost detail';
   const nums = numbersIn(rw);
   if (numbersIn(orig).some((n) => !nums.includes(n))) return 'dropped a result';
+  // Every tool or name the bullet had must still be there (tightening only cuts filler).
+  const kept = significantTokens(rw);
+  const lost = [...significantTokens(orig)].filter((t) => !kept.has(t) && !new RegExp('\\b' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(rw));
+  if (lost.length) return `dropped ${lost.slice(0, 3).join(', ')}`;
   const pasted = (matched || []).flatMap((k) => [k.term, ...(k.alts || [])]).find((f) => f && f.split(/\s+/).length > 3 && hasPhrase(rw, f, 'i') && !hasPhrase(orig, f, 'i'));
   if (pasted) return `pasted advert phrase (${pasted})`;
   const added = newFactsIn(bulletCorpus(orig, matched), rw);
@@ -295,7 +331,7 @@ async function selectAndRewordBullets(role, jdExcerpt, roleIndex = 0, kw = {}) {
   if (!bullets.length) return bullets;
 
   // The candidate's own bullets, most job-relevant first. Selection never changes wording.
-  const ordered = rankBullets(bullets, jdKeywordSet(jdExcerpt), roleIndex);
+  const ordered = rankBullets(bullets, jdKeywordSet(jdExcerpt), roleIndex, capFor(role, roleIndex));
   const indexed = ordered.map((b, i) => `[${i + 1}] ${b}`).join('\n');
 
   const prompt = `You are lightly editing a candidate's CV bullet points for one specific job. These are their real words and a recruiter should still recognise them as such. Most bullets need little or no change.
@@ -310,7 +346,7 @@ ${kw.line || ''}
 For each bullet, in order, return exactly one line:
 - If the bullet already reads well for this job, return it UNCHANGED.
 - Otherwise make the smallest edit that helps: swap a word for the advert's word when it means exactly the same thing the bullet already says (e.g. "tickets" -> "incidents"), or move the part that matters most to this job to the front.
-- Keep every tool, number, result and detail the bullet has. Never shorten it into a vaguer line.
+- Keep every bullet to at most two lines, about 30 words. If it is longer, tighten it: cut filler words and repetition, but keep every tool, number and result it has. Never make it vaguer.
 - Never add a tool, system, skill, sector, number or claim the bullet itself doesn't state, even if the candidate has it elsewhere.
 - Past tense for past roles; plain, natural English; no buzzwords.
 
@@ -454,14 +490,15 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
   const style = (t) => {
     out.subtitle = headlineFromJobTitle(jobTitle, cv.subtitle);
     out.profile = out.profile ? houseStyle(out.profile, uk) + '.' : out.profile;
-    out.strengths = rankBullets(out.strengths, jdKeywordSet(focusJD(jdText, 3000)), 0).map((s) => houseStyle(s, uk));
+    // Core strengths: the 4 that fit the advert best.
+    out.strengths = rankBullets(out.strengths, jdKeywordSet(focusJD(jdText, 3000)), 0).slice(0, 4).map((s) => houseStyle(s, uk));
     for (const role of out.experience) role.bullets = role.bullets.map((b) => houseStyle(b, uk));
     return t;
   };
 
   if (!await llmAvailable()) {
     console.log('  [Tailor] AI unavailable: keeping the CV as written, no JD tailoring');
-    out.experience.forEach((role, i) => { role.bullets = pickBullets(role.bullets, jdText, i); });
+    out.experience.forEach((role, i) => { role.bullets = rankBullets(role.bullets, jdKeywordSet((jdText || '').substring(0, 3000)), i, capFor(role, i)); });
     return style(out);
   }
 
@@ -485,7 +522,7 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
     cv.subtitle || '',
     kw.corpus || '',
   ].join('  ');
-  out.profile = await tailorProfile(cv.profile, jobTitle, jd, corpus, kw.line || '');
+  out.profile = await tailorProfile(cv.profile, jobTitle, jd, corpus, kw.line || '', out.experience.map((j) => String(j.company || '').split(/[,(|]/)[0].trim()));
   console.log(`  [Tailor] Summary ${out.profile === cv.profile ? 'kept original' : 'rewritten to JD'}`);
 
   // 2. Bullets — select most relevant per role AND lightly reword to the JD,
@@ -497,7 +534,7 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
 
   // 3. Skills — reorder then weave missing keywords
   out.skills = await reorderSkills(out.skills, jd);
-  out.skills = weaveKeywordsIntoSkills(out.skills, missingKeywords, cvFullText || cv.profile + ' ' + JSON.stringify(cv));
+  out.skills = weaveKeywordsIntoSkills(out.skills, missingKeywords, cvFullText || cv.profile + ' ' + JSON.stringify(cv)).slice(0, MAX_SKILL_GROUPS).map(trimItems);
   console.log('  [Tailor] Skills reordered + keywords woven');
 
   style(out);

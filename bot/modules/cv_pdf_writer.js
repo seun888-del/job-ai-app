@@ -355,25 +355,27 @@ function writeStructuredPDF(cv, outputPath, options = {}) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size:    options.size || 'A4',
-      margins: { top: 48, bottom: 45, left: 55, right: 55 },
+      margins: { top: 42, bottom: 40, left: 55, right: 55 },
     });
     // Page count for callers with a page limit (federal resumes: 2 pages).
     let pages = 1;
     doc.on('pageAdded', () => { pages++; });
     const stream = fs.createWriteStream(outputPath);
     stream.on('error', reject);
-    stream.on('finish', () => { if (options.stats) options.stats.pages = pages; resolve(outputPath); });
+    // lastFill: how much of the last page is used (0 to 1), to spot a page with only a few lines on it.
+    let lastFill = 0;
+    stream.on('finish', () => { if (options.stats) { options.stats.pages = pages; options.stats.lastFill = lastFill; } resolve(outputPath); });
     doc.pipe(stream);
 
     const L = doc.page.margins.left;
     const W = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
     const sectionHeading = (label) => {
-      doc.moveDown(0.6);
+      doc.moveDown(0.5);
       doc.font(FONT_BOLD).fontSize(10.5).fillColor(BLUE).text(label);
       doc.moveDown(0.08);
       drawRule(doc, L, L + W);
-      doc.moveDown(0.4);
+      doc.moveDown(0.3);
     };
 
     // Start a new page if the next block of height `h` won't fit
@@ -470,7 +472,7 @@ function writeStructuredPDF(cv, outputPath, options = {}) {
       sectionHeading('EDUCATION AND CERTIFICATIONS');
       cv.education.forEach((e, idx) => {
         if (!e || !e.title) return;
-        ensureSpace(34);
+        ensureSpace(e.detail ? 27 : 14); // just this entry (title + one detail line)
         if (idx > 0) doc.moveDown(0.25);
         doc.font(FONT_BOLD).fontSize(9.5).fillColor(BLACK).text(e.title.trim());
         if (e.detail) {
@@ -488,8 +490,53 @@ function writeStructuredPDF(cv, outputPath, options = {}) {
       });
     }
 
+    lastFill = Math.min(1, Math.max(0, (doc.y - doc.page.margins.top) / (doc.page.height - doc.page.margins.top - doc.page.margins.bottom)));
     doc.end();
   });
+}
+
+// Tailored CVs aim for ONE page: render, and while it spills onto page 2, drop the least
+// important content one step at a time and render again. Order: a bullet from the oldest roles
+// (each keeps at least one), then Core Strengths down to 2, then skills down to 2 groups, then the
+// third and older roles' bullets. Long careers that still don't fit keep their second page.
+// Years since the earliest role started (for the page target).
+function careerYears(cv) {
+  const ys = (cv.experience || []).flatMap((r) => String(r.dates || '').match(/\b(19|20)\d{2}\b/g) || []).map(Number);
+  return ys.length ? new Date().getFullYear() - Math.min(...ys) : 0;
+}
+
+// The tailored CV: up to 2 pages for experienced people (the UK standard), 1 page for under 5
+// years. Never a last page with only a few lines on it: then it trims to one page less.
+async function writeFittedPDF(cv, outputPath, options = {}) {
+  const maxPages = careerYears(cv) < 5 ? 1 : 2;
+  const stats = {};
+  await writeStructuredPDF(cv, outputPath, { ...options, stats });
+  const tooLong = stats.pages > maxPages;
+  const nearlyEmptyLast = stats.pages > 1 && stats.lastFill < 0.3;
+  if (!tooLong && !nearlyEmptyLast) { if (options.stats) Object.assign(options.stats, stats); return cv; }
+  return writeOnePagePDF(cv, outputPath, { ...options, targetPages: tooLong ? maxPages : stats.pages - 1 });
+}
+
+async function writeOnePagePDF(cv, outputPath, options = {}) {
+  const target = options.targetPages || 1;
+  const work = JSON.parse(JSON.stringify(cv));
+  const steps = [];
+  const roles = work.experience || [];
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = roles.length - 1; i >= 1; i--) steps.push(() => { if ((roles[i].bullets || []).length > 1) { roles[i].bullets.pop(); return true; } return false; });
+  }
+  steps.push(() => { if ((work.strengths || []).length > 2) { work.strengths = work.strengths.slice(0, 2); return true; } return false; });
+  steps.push(() => { if ((work.skills || []).length > 2) { work.skills = work.skills.slice(0, 2); return true; } return false; });
+  for (let i = roles.length - 1; i >= 2; i--) steps.push(() => { if ((roles[i].bullets || []).length) { roles[i].bullets = []; return true; } return false; });
+  const stats = {};
+  await writeStructuredPDF(work, outputPath, { ...options, stats });
+  for (const step of steps) {
+    if ((stats.pages || 1) <= target) break;
+    if (!step()) continue;
+    await writeStructuredPDF(work, outputPath, { ...options, stats });
+  }
+  if (options.stats) options.stats.pages = stats.pages;
+  return work;
 }
 
 const { cvFileName } = require('./cv_filename');
@@ -506,4 +553,4 @@ function buildPaths(savedDir, uploadDir, uploadFilename, jobTitle, company, scor
   return { saved, upload };
 }
 
-module.exports = { writePDF, writeStructuredPDF, buildPaths, cvFileName };
+module.exports = { writePDF, writeStructuredPDF, writeOnePagePDF, writeFittedPDF, careerYears, buildPaths, cvFileName };
