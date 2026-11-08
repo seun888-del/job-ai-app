@@ -9,7 +9,7 @@ const cvScorer = require('../../../bot/modules/cv_scorer');
 const { cleanText } = require('../../../bot/modules/cv_cleaner');
 const { parseCV } = require('../../../bot/modules/cv_parser');
 const { tailorStructured, structuredText } = require('../../../bot/modules/cv_tailor_structured');
-const { writePDF, writeStructuredPDF, buildPaths } = require('../../../bot/modules/cv_pdf_writer');
+const { writePDF, writeStructuredPDF, writeFittedPDF, buildPaths } = require('../../../bot/modules/cv_pdf_writer');
 const { generateCoverLetter } = require('../../../bot/modules/cover_letter');
 const { isRelevantRole } = require('../../../bot/modules/relevance_gate');
 const { writeFederalPDF } = require('../../../bot/modules/federal_resume');
@@ -128,7 +128,7 @@ export async function scoreJob(job, log) {
       const fed = cfg.FEDERAL || {};
       const r = await writeFederalPDF(t, paths.saved, writeStructuredPDF, { hoursPerWeek: fed.hoursPerWeek, usCitizen: fed.usCitizen, pdfOptions: pdfOpts });
       federal = { pages: r.pages, missingMonths: r.missingMonths };
-    } else await writeStructuredPDF(t, paths.saved, pdfOpts);
+    } else Object.assign(t, await writeFittedPDF(t, paths.saved, pdfOpts)); // 1 to 2 pages (see cv_pdf_writer)
     rendered = true;
     // Show the match of the CV that is actually sent, not the scoring addendum.
     if (best.all.length) { score = cvScorer.rescoreCV(structuredText(t), best.all).score; rescored = true; }
