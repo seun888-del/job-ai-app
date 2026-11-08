@@ -748,7 +748,7 @@ ipcMain.handle('move:market', async (event, q) => {
   try {
     const r = await fetch('https://api.tryjobai.com/am-i-underpaid/check', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30000),
-      body: JSON.stringify({ title: String(v.title || '').slice(0, 80), location: String(v.location || '').slice(0, 60), salary: String(v.salary || '').slice(0, 9), country: v.country === 'US' ? 'US' : 'GB' }),
+      body: JSON.stringify({ title: String(v.title || '').slice(0, 80), location: String(v.location || '').slice(0, 60), salary: String(v.salary || '').slice(0, 9), country: ['US', 'CA'].includes(v.country) ? v.country : 'GB' }),
     });
     const j = await r.json();
     return r.ok ? j : { error: j.error || 'Please try again.' };
@@ -756,7 +756,7 @@ ipcMain.handle('move:market', async (event, q) => {
 });
 ipcMain.handle('move:found', () => {
   const p = db.getProfile() || {};
-  return queueReader.getMoveFound(require('./bot/modules/move_mode').fromSettings(p.move_for_more), (p.country || '') === 'United States');
+  return queueReader.getMoveFound(require('./bot/modules/move_mode').fromSettings(p.move_for_more), ['United States', 'Canada'].includes(p.country));
 });
 ipcMain.handle('move:save', async (event, settings) => {
   const s = settings || {};
@@ -764,7 +764,7 @@ ipcMain.handle('move:save', async (event, settings) => {
   db.saveProfile({ move_for_more: JSON.stringify(stored) });
   const p = db.getProfile() || {};
   const move = require('./bot/modules/move_mode').fromSettings(stored);
-  const skipped = await queueReader.skipFailingMove(move, (p.country || '') === 'United States');
+  const skipped = await queueReader.skipFailingMove(move, ['United States', 'Canada'].includes(p.country));
   // Agents read settings when they start, so restart the running ones.
   const status = botManager.getStatus();
   const running = Object.keys(status).filter((k) => status[k] === 'running');

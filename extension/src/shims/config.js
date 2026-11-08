@@ -56,7 +56,8 @@ const cfg = {
       britishCitizen: profile.britishCitizen || '',
       ukResidence: profile.ukResidence || '',
       salaryExpectation: profile.salaryExpectation || '',
-      country: profile.country || 'United Kingdom',
+      // The "Find jobs in" switch decides the country, like the app (Canada is its own region).
+      country: ({ uk: 'United Kingdom', us: 'United States', ca: 'Canada' })[settings && settings.region] || profile.country || 'United Kingdom',
       experienceLevel: profile.experienceLevel || '',
       employmentType: Array.isArray(profile.employmentType) && profile.employmentType.length ? profile.employmentType : ['full_time'],
       availability: profile.availability || 'immediately',
@@ -73,7 +74,7 @@ const cfg = {
     cfg.TITLE_BLOCKLIST = (profile.excludeKeywords || []).map((k) => String(k).toLowerCase());
     cfg.COMPANY_BLOCKLIST = (profile.blockedCompanies || []).map((k) => String(k).toLowerCase());
     cfg.WORK_TYPE_PRIORITY = Array.isArray(profile.workTypePriority) && profile.workTypePriority.length ? profile.workTypePriority : ['remote', 'hybrid', 'onsite'];
-    cfg.LOCATION = profile.searchLocation || ((settings && settings.region) === 'us' ? 'United States' : 'United Kingdom');
+    cfg.LOCATION = profile.searchLocation || (({ us: 'United States', ca: 'Canada' })[settings && settings.region] || 'United Kingdom');
     cfg.CONTRACT_TYPE = profile.contractType || 'any';
     cfg.JOB_AGE = profile.jobAge || 'r1209600';
     cfg.SKIP_EXTERNAL_SITES = profile.skipExternalSites !== false;
@@ -109,9 +110,9 @@ const cfg = {
 
   // "Only move for more money" check for one job: '' when it may go ahead, else why not.
   // The advert must SHOW a salary that reaches the target; no salary shown = no proof.
-  moveCheck(job) { return moveMode.check(cfg.MOVE, job, { us: cfg.APPLICANT.country === 'United States' }); },
+  moveCheck(job) { return moveMode.check(cfg.MOVE, job, { us: ['United States', 'Canada'].includes(cfg.APPLICANT.country) }); },
   // What an application pays and how much more than the user earns now, or null.
-  movePay(job) { return moveMode.payRise(cfg.MOVE, job, { us: cfg.APPLICANT.country === 'United States' }); },
+  movePay(job) { return moveMode.payRise(cfg.MOVE, job, { us: ['United States', 'Canada'].includes(cfg.APPLICANT.country) }); },
 
   // Same check as the desktop app: listings that are really paid training courses.
   isTrainingCourseJD(description, title) {

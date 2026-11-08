@@ -155,9 +155,9 @@ const cfg = {
       } catch {
         cfg.WORK_TYPE_PRIORITY = ['remote', 'hybrid', 'onsite'];
       }
-      // A US user still on the UK default searches the US instead.
-      const usUser = (profile.country || '') === 'United States';
-      cfg.LOCATION = (usUser && (!prefs.location || prefs.location === 'United Kingdom')) ? 'United States'
+      // A US or Canada user still on the UK default searches their own country instead.
+      const home = profile.country === 'United States' || profile.country === 'Canada' ? profile.country : '';
+      cfg.LOCATION = (home && (!prefs.location || prefs.location === 'United Kingdom')) ? home
         : (prefs.location || 'United Kingdom');
       cfg.CONTRACT_TYPE = prefs.contract_type || 'any';
       cfg.JOB_AGE = prefs.job_age || 'r1209600';

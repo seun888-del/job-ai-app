@@ -239,7 +239,8 @@ async function phase1_sourceAndQueue(page) {
   console.log('══════════════════════════════════════════════════════');
 
   // Only the user's own region: a UK user can't take a US job and the reverse.
-  const country = (cfg.APPLICANT || {}).country === 'United States' ? 'US' : 'GB';
+  const ac = (cfg.APPLICANT || {}).country;
+  const country = ac === 'United States' ? 'US' : ac === 'Canada' ? 'CA' : 'GB';
   let jobs = [];
   try { jobs = await jobFeed.fetchAtsJobs({ country, limit: 200 }); } catch (_) {}
   // Router step 2: also fold in Reed (browser board) when enabled. Reed stubs

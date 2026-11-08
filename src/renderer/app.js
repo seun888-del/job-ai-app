@@ -124,42 +124,49 @@ async function openSubscribe() {
   window.api.shell.openExternal(qs ? `${SUBSCRIBE_URL}?${qs}` : SUBSCRIBE_URL);
 }
 
-// ── Region (UK / USA) ───────────────────────────────────────────────────────
+// ── Region (UK / USA / Canada) ──────────────────────────────────────────────
 // The region picks which agents the dashboard shows (USA hides NHS and
 // Universal Credit), the prices shown and the wording
 // ("resume" not "CV"). New installs in an America/* timezone start on USA.
-function tzLooksUS() {
-  try { return (Intl.DateTimeFormat().resolvedOptions().timeZone || '').startsWith('America/'); } catch (_) { return false; }
+// Canada is its own region (its own jobs), not part of the USA. Federal jobs, Dice and
+// Wellfound are USA only; NHS and Universal Credit are UK only.
+const REGION_COUNTRY = { uk: 'United Kingdom', us: 'United States', ca: 'Canada' };
+const regionCode = (country) => country === 'United States' ? 'us' : country === 'Canada' ? 'ca' : 'uk';
+const CA_TZ = /^America\/(Toronto|Vancouver|Montreal|Edmonton|Winnipeg|Halifax|St_Johns|Regina|Moncton|Glace_Bay|Goose_Bay|Whitehorse|Yellowknife|Iqaluit|Dawson_Creek|Fort_Nelson|Creston|Swift_Current|Rankin_Inlet|Cambridge_Bay|Inuvik|Atikokan|Blanc-Sablon|Thunder_Bay|Nipigon|Rainy_River|Pangnirtung|Resolute|Dawson)$/;
+function tzRegion() {
+  try { const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; return CA_TZ.test(tz) ? 'ca' : tz.startsWith('America/') ? 'us' : 'uk'; } catch (_) { return 'uk'; }
 }
-// The UK / USA switch, shown on the dashboard and in Search Preferences.
-function regionSwitchHtml(isUS) {
+// The UK / USA / Canada switch, shown on the dashboard and in Search Preferences.
+function regionSwitchHtml(region) {
+  const opt = (r, label) => `<button class="region-opt${region === r ? ' active' : ''}" data-region="${REGION_COUNTRY[r]}">${label}</button>`;
   return `<div class="region-row"><span class="region-label">Find jobs in:</span>
         <div class="region-switch" role="group" aria-label="Find jobs in">
-          <button class="region-opt${isUS ? '' : ' active'}" data-region="United Kingdom">UK</button>
-          <button class="region-opt${isUS ? ' active' : ''}" data-region="United States">USA</button>
+          ${opt('uk', 'UK')}${opt('us', 'USA')}${opt('ca', 'Canada')}
         </div></div>`;
 }
 async function setRegion(country) {
-  const us = country === 'United States';
+  const region = regionCode(country);
   await window.api.profile.save({ country });
   // Swap the default search location to match, but never overwrite a city the user typed.
   try {
     const prefs = await window.api.searchPrefs.get();
     const loc = (prefs.location || '').trim();
-    if (!loc || loc === 'United Kingdom' || loc === 'United States') {
-      await window.api.searchPrefs.save({ location: us ? 'United States' : 'United Kingdom' });
+    if (!loc || Object.values(REGION_COUNTRY).includes(loc)) {
+      await window.api.searchPrefs.save({ location: REGION_COUNTRY[region] });
     }
   } catch (_) {}
   try { localStorage.setItem('region_autoset', '1'); } catch (_) {}
-  applyRegionWording(us);
+  _isUKUser = region === 'uk';
+  applyRegionWording(region);
 }
 async function autoSetRegionOnce() {
   try { if (localStorage.getItem('region_autoset')) return; localStorage.setItem('region_autoset', '1'); } catch (_) { return; }
-  if (!tzLooksUS()) return;
+  const tz = tzRegion();
+  if (tz === 'uk') return;
   const p = await window.api.profile.get();
   // Only a fresh profile: someone who already set things up keeps their choice.
-  if (p.country === 'United States' || p.first_name) return;
-  await setRegion('United States');
+  if ((p.country && p.country !== 'United Kingdom') || p.first_name) return;
+  await setRegion(REGION_COUNTRY[tz]);
 }
 document.addEventListener('click', async (e) => {
   const btn = e.target.closest('.region-opt');
@@ -167,20 +174,23 @@ document.addEventListener('click', async (e) => {
   await setRegion(btn.dataset.region);
   // Both views show the switch; Search Preferences also shows the location it swaps.
   if (_currentView === 'dashboard' || _currentView === 'search') render(_currentView);
-  regionSitesPrompt(btn.dataset.region === 'United States');
+  regionSitesPrompt(regionCode(btn.dataset.region));
 });
 
-// Switched UK <-> USA: the job sites there that need the user's own account are off by default,
+// Switched region: the job sites there that need the user's own account are off by default,
 // so offer them once per region instead of leaving them hidden in Search Preferences.
-async function regionSitesPrompt(us) {
-  const key = 'region_sites_prompt_' + (us ? 'us' : 'uk');
+async function regionSitesPrompt(region) {
+  const us = region === 'us';
+  const key = 'region_sites_prompt_' + region;
+  // Canada has no extra job sites besides LinkedIn (retired by default), so nothing to offer.
+  if (region === 'ca') return;
   try { if (localStorage.getItem(key) || document.getElementById('region-prompt')) return; } catch (_) { return; }
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const [prefs, profile] = await Promise.all([window.api.searchPrefs.get().catch(() => ({})), window.api.profile.get().catch(() => ({}))]);
   const on = String(prefs.extra_sites || '').split(',').map((s) => s.trim());
   let F = {}; try { F = JSON.parse(profile.federal_details || '{}') || {}; } catch (_) {}
   const rows = [
-    ...extraForRegion(us).map(([k, l]) => [k, l, `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, on.includes(k)]),
+    ...extraForRegion(region).map(([k, l]) => [k, l, `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, on.includes(k)]),
     ...(us ? [['federal', 'Federal government jobs', 'Needs a USAJOBS account (you sign in with Login.gov). Job-AI writes the resume, you apply there yourself.', !!F.wants]] : []),
   ];
   const o = document.createElement('div'); o.id = 'region-prompt';
@@ -206,7 +216,7 @@ async function regionSitesPrompt(us) {
     if (picked.has('federal') && !$o('#rp-cit').value) { showStatus($o('#rp-st'), 'Please say if you are a U.S. citizen. Most federal jobs need it.', 'error'); return; }
     try {
       const cur = new Set(String((await window.api.searchPrefs.get()).extra_sites || '').split(',').map((s) => s.trim()).filter(Boolean));
-      for (const [k] of extraForRegion(us)) { if (picked.has(k)) cur.add(k); else cur.delete(k); }
+      for (const [k] of extraForRegion(region)) { if (picked.has(k)) cur.add(k); else cur.delete(k); }
       await window.api.searchPrefs.save({ extra_sites: [...cur].join(',') });
       if (us) await window.api.profile.save({ federal_details: JSON.stringify({ ...F, wants: picked.has('federal'), ...(picked.has('federal') ? { usCitizen: $o('#rp-cit').value, hoursPerWeek: Math.min(80, Math.max(1, parseInt($o('#rp-hrs').value, 10) || 40)) } : {}) }) });
     } catch (err) { showStatus($o('#rp-st'), 'Could not save: ' + err.message, 'error'); return; }
@@ -218,9 +228,20 @@ async function regionSitesPrompt(us) {
 // US users read "resume" instead of "CV". Rewrites visible text and placeholders
 // as views render, skipping file names (My CV.pdf) and anything the user typed.
 let _regionWordingObs = null;
+let _wordRegion = 'us';
 function usWord(t) {
   if (/\.(pdf|docx?|txt)\b/i.test(t)) return t;
-  return t
+  if (_wordRegion === 'ca') return resumeWord(t
+    .replace(/NHS \(Trac\), Reed, LinkedIn and company/g, 'LinkedIn and company')
+    .replace(/Reed, LinkedIn, NHS jobs \(through Trac\) and company/g, 'LinkedIn and company')
+    .replace(/(the )?Reed, LinkedIn and company/g, (m, a) => (a || '') + 'LinkedIn and company')
+    .replace(/Both Reed and LinkedIn are ticked/g, 'LinkedIn is ticked')
+    .replace(/Leave both ticked to run Reed and LinkedIn/g, 'Leave it ticked to run LinkedIn')
+    .replace(/Both the Reed and LinkedIn Agents/g, 'All the Agents')
+    .replace(/\b2 Job Sites\b/g, '1 Job Site')
+    .replace(/Reed and LinkedIn/g, 'LinkedIn')
+    .replace(/Reed or LinkedIn/g, 'LinkedIn'));
+  return resumeWord(t
     // UK-only sites in lists of agents/sites: US users have LinkedIn, Dice, Wellfound + company sites.
     .replace(/NHS \(Trac\), Reed, LinkedIn and company/g, 'LinkedIn, Dice, Wellfound and company')
     .replace(/Reed, LinkedIn, NHS jobs \(through Trac\) and company/g, 'LinkedIn, Dice, Wellfound and company')
@@ -230,7 +251,10 @@ function usWord(t) {
     .replace(/Both the Reed and LinkedIn Agents/g, 'All the Agents')
     .replace(/\b2 Job Sites\b/g, '3 Job Sites')
     .replace(/Reed and LinkedIn/g, 'LinkedIn, Dice and Wellfound')
-    .replace(/Reed or LinkedIn/g, 'LinkedIn, Dice or Wellfound')
+    .replace(/Reed or LinkedIn/g, 'LinkedIn, Dice or Wellfound'));
+}
+function resumeWord(t) {
+  return t
     .replace(/\bCVs\b(?= [A-Z])/g, 'Resumes').replace(/\bCV\b(?= [A-Z])/g, 'Resume')
     .replace(/\bCVs\b/g, 'resumes').replace(/\bCV\b/g, 'resume')
     .replace(/(^|[.!?]\s+)resume/g, (m, a) => a + 'Resume').replace(/^([^A-Za-z]*)resume/, '$1Resume');
@@ -247,11 +271,13 @@ function rewordTree(root) {
     for (const a of ['placeholder', 'title']) { const v = el.getAttribute(a); if (v && v.includes('CV')) el.setAttribute(a, usWord(v)); }
   });
 }
-function applyRegionWording(us) {
+function applyRegionWording(region) {
   // NHS (Trac) drafts and their "Ready to submit" count are UK-only (styles.css hides them).
-  document.body.classList.toggle('region-us', !!us);
+  // region-us means "outside the UK" (USA or Canada): both say resume, neither has NHS.
+  document.body.classList.toggle('region-us', region !== 'uk');
   if (_regionWordingObs) { _regionWordingObs.disconnect(); _regionWordingObs = null; }
-  if (!us) return;
+  if (region === 'uk') return;
+  _wordRegion = region;
   rewordTree(document.body);
   _regionWordingObs = new MutationObserver(muts => {
     for (const m of muts) for (const n of m.addedNodes) {
@@ -262,8 +288,8 @@ function applyRegionWording(us) {
   _regionWordingObs.observe(document.body, { childList: true, subtree: true });
 }
 autoSetRegionOnce().then(() => window.api.profile.get()).then(p => {
-  _isUKUser = (p.country || 'United Kingdom') !== 'United States';
-  applyRegionWording(!_isUKUser);
+  _isUKUser = regionCode(p.country) === 'uk';
+  applyRegionWording(regionCode(p.country));
 }).catch(() => {});
 
 // The "daily limit reached" dialog, shown at Start when today's cap is used up.
@@ -382,7 +408,7 @@ async function render(view) {
 // â”€â”€ 1. Personal Details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function renderPersonal() {
   const p = await window.api.profile.get();
-  // The region (UK / USA) is set with the "Find jobs in" switch on the dashboard and in
+  // The region (UK / USA / Canada) is set with the "Find jobs in" switch on the dashboard and in
   // Search Preferences, not here.
   const empTypes = (p.employment_type || '').split(',').filter(Boolean);
 
@@ -774,7 +800,7 @@ async function renderSearch() {
 
     <div class="card">
       <h3>Search Criteria</h3>
-      ${regionSwitchHtml((regionProfile && regionProfile.country) === 'United States')}
+      ${regionSwitchHtml(regionCode(regionProfile && regionProfile.country))}
       <p class="field-hint" style="margin:4px 0 14px">Picks where the agents look: company websites in the UK or USA, plus NHS jobs in the UK.</p>
       <div class="field-row">
         <div class="field">
@@ -916,7 +942,7 @@ async function renderSearch() {
     <div class="card">
       <h3>Extra job sites</h3>
       <p class="card-hint">Job-AI already applies on employers' own websites with no accounts. If you also want it to apply on these sites, tick them. Each one <strong>needs your own account on that site</strong>: its agent card on the Dashboard then has a Sign in button. Job-AI never sees your password.</p>
-      ${extraForRegion((regionProfile?.country || 'United Kingdom') === 'United States').map(([k, l]) => `<div class="checkbox-field"><input id="extra_${k}" class="extra-site" data-site="${k}" type="checkbox" ${String(prefs.extra_sites || '').split(',').includes(k) ? 'checked' : ''}><label for="extra_${k}">${l}</label></div>`).join('')}
+      ${extraForRegion(regionCode(regionProfile?.country)).map(([k, l]) => `<div class="checkbox-field"><input id="extra_${k}" class="extra-site" data-site="${k}" type="checkbox" ${String(prefs.extra_sites || '').split(',').includes(k) ? 'checked' : ''}><label for="extra_${k}">${l}</label></div>`).join('')}
       <p class="card-hint" style="margin-top:6px">LinkedIn can limit accounts it thinks are automated, so use it at your own risk and keep your daily limit low.</p>
       <div class="status-msg" id="status-extra-sites"></div>
     </div>
@@ -1435,12 +1461,12 @@ async function renderLicense() {
 // Preferences), because each needs the user's own account. UK: Reed. USA: Dice, Wellfound.
 // LinkedIn in both. Indeed stays off. Same rule as bot/modules/retired_agents.js.
 const EXTRA_SITES = [['reed', 'Reed', 'uk'], ['linkedin', 'LinkedIn', 'both'], ['dice', 'Dice', 'us'], ['wellfound', 'Wellfound', 'us']];
-const extraForRegion = (isUS) => EXTRA_SITES.filter(([, , r]) => r === 'both' || r === (isUS ? 'us' : 'uk'));
+const extraForRegion = (region) => EXTRA_SITES.filter(([, , r]) => r === 'both' || r === region);
 const RETIRED_AGENTS = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound']);
-function applyExtraSites(extraCsv, isUS) {
+function applyExtraSites(extraCsv, region) {
   const on = String(extraCsv || '').split(',').map(s => s.trim());
   RETIRED_AGENTS.clear(); RETIRED_AGENTS.add('indeed');
-  for (const [k, , r] of EXTRA_SITES) if (!on.includes(k) || (r !== 'both' && r !== (isUS ? 'us' : 'uk'))) RETIRED_AGENTS.add(k);
+  for (const [k, , r] of EXTRA_SITES) if (!on.includes(k) || (r !== 'both' && r !== region)) RETIRED_AGENTS.add(k);
 }
 const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', wellfound: 'Wellfound Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent', usajobs: 'Federal Jobs Agent' };
 
@@ -2359,15 +2385,16 @@ async function renderDashboard() {
     trac:     (() => { try { const t = JSON.parse(profile.trac_details || '{}'); return (t.employment && t.employment.length) || (t.references && t.references.length); } catch (_) { return false; } })(),
   };
   const anyConnected = Object.values(connectedStatus || {}).some(Boolean);
-  const isUS = (profile?.country || 'United Kingdom') === 'United States';
+  const region = regionCode(profile?.country);
+  const isUS = region === 'us', isUK = region === 'uk';
   let extraCsv = '';
-  try { extraCsv = String((await window.api.searchPrefs.get()).extra_sites || ''); applyExtraSites(extraCsv, isUS); } catch (_) {}
+  try { extraCsv = String((await window.api.searchPrefs.get()).extra_sites || ''); applyExtraSites(extraCsv, region); } catch (_) {}
   // One-time card for people who used Job-AI before extra job sites existed. New installs skip
   // it: the welcome screen marks it seen, since they meet the option during setup.
   const showExtraNotice = !localStorage.getItem('extra_sites_notice') && !extraCsv;
-  const extraNames = extraForRegion(isUS).map(([, l]) => l);
+  const extraNames = extraForRegion(region).map(([, l]) => l);
   const extraList = extraNames.length > 1 ? extraNames.slice(0, -1).join(', ') + ' and ' + extraNames[extraNames.length - 1] : extraNames[0];
-  _isUKUser = !isUS;  // gates the UK-only Universal Credit tour step
+  _isUKUser = isUK;  // gates the UK-only Universal Credit tour step
   // A currently-valid license (not just any key) is required to start the agents.
   dashboardHasLicense = licenseIsActive(license);
 
@@ -2378,7 +2405,7 @@ async function renderDashboard() {
   // Federal jobs (USAJOBS) in the USA only.
   let fedDetails = {}; try { fedDetails = JSON.parse(profile.federal_details || '{}') || {}; } catch (_) {}
   const wantsFederal = isUS && !!fedDetails.wants;
-  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !RETIRED_AGENTS.has(k) && !(isUS && k === 'trac') && !(k === 'usajobs' && !wantsFederal));
+  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !RETIRED_AGENTS.has(k) && !(!isUK && k === 'trac') && !(k === 'usajobs' && !wantsFederal));
   // Tell phone control (tryjobai.com/app) which agents this dashboard shows and which are ticked.
   const shareAgentPrefs = () => { try { window.api.remote.setPrefs({ keys: appAgentKeys, enabled: appAgentKeys.filter(k => localStorage.getItem('agent_enabled_' + k) !== '0') }); } catch (_) {} };
   shareAgentPrefs();
@@ -2458,7 +2485,7 @@ async function renderDashboard() {
       <div>
         <h2 class="dash-greeting">${greeting}</h2>
         <p class="dash-sub">${dashboardHasLicense ? 'Your agents are ready. Applications run automatically each day.' : 'Monitor agent activity and track your application progress.'}</p>
-        ${regionSwitchHtml(isUS)}
+        ${regionSwitchHtml(region)}
       </div>
       <div class="dash-cta">
         <span class="scorer-pill${scorerRunning ? ' scorer-pill-active' : ''}" id="scorer-pill" data-status="${status.scorer || 'stopped'}"
@@ -2496,7 +2523,7 @@ async function renderDashboard() {
         <button class="preflight-link${setupDone.personal ? ' is-done' : ''}" data-view="personal">${setupDone.personal ? '✓' : '👤'} Personal details</button>
         <button class="preflight-link${setupDone.search ? ' is-done' : ''}" data-view="search">${setupDone.search ? '✓' : '⚙️'} Search preferences</button>
         <button class="preflight-link${setupDone.cvs ? ' is-done' : ''}" data-view="cvs">${setupDone.cvs ? '✓' : '📄'} CVs</button>
-        ${!isUS ? `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>` : ''}
+        ${isUK ? `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>` : ''}
         ${isUS ? `<button class="preflight-link${wantsFederal && fedDetails.usCitizen ? ' is-done' : ''}" data-view="federal-details">${wantsFederal && fedDetails.usCitizen ? '✓' : '🏛️'} Federal jobs details</button>` : ''}
       </div>
     </div>
@@ -2528,7 +2555,7 @@ ${statCardsHtml(summary)}
       </div>
     </div>
 
-    ${!isUS ? `
+    ${isUK ? `
     <div class="card bot-card uc-card${status.uc === 'running' ? ' bot-card-running' : ''}" id="bot-card-uc">
       <div class="bot-card-header">
         <strong>📋 Universal Credit journal</strong>
@@ -3510,8 +3537,9 @@ async function renderEarn() {
   const terms = await window.api.searchTerms.get().catch(() => []);
   const { move, used } = await window.api.move.status();
   const found = await window.api.move.found().catch(() => ({ sent: [], skipped: {} }));
-  const us = (profile.country || '') === 'United States';
-  const money = (n) => (us ? '$' : '£') + Number(n).toLocaleString('en-GB');
+  const region = regionCode(profile.country);
+  const us = region !== 'uk'; // dollars (USA and Canada)
+  const money = (n) => (region === 'ca' ? 'CA$' : us ? '$' : '£') + Number(n).toLocaleString('en-GB');
   const mv = (() => { try { return JSON.parse(profile.move_for_more || '{}') || {}; } catch (_) { return {}; } })();
   const title = mv.title || ((terms || [])[0] && (terms[0].term || terms[0])) || '';
   const where = mv.location != null ? mv.location : String(profile.location || '').split(',')[0].trim();
@@ -3562,7 +3590,7 @@ async function renderEarn() {
     const v = read(), out = document.getElementById('em-result');
     if (v.title.length < 3 || Number(v.salary) < 5000) { out.innerHTML = '<p class="card-hint">Type your job title and yearly salary, then press Check my pay.</p>'; return; }
     out.innerHTML = '<p class="card-hint">Checking live adverts…</p>';
-    const j = await window.api.move.market({ ...v, country: us ? 'US' : 'GB' });
+    const j = await window.api.move.market({ ...v, country: region === 'us' ? 'US' : region === 'ca' ? 'CA' : 'GB' });
     if (!j || j.error) { out.innerHTML = `<p class="card-hint">${esc((j && j.error) || 'Something went wrong. Please try again.')}</p>`; return; }
     const tone = j.level === 'under' || j.level === 'below' ? '#fff7ed' : j.level === 'unknown' ? '#f8fafc' : '#f0fdf4';
     out.innerHTML = `<div style="padding:14px 16px;border-radius:10px;background:${tone};border:1px solid var(--border, #e5e2da)">

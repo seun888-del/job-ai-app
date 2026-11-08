@@ -50,7 +50,7 @@ async function buildStatus() {
   const m = {}; for (const r of summary) m[r.status] = r.count;
   // "Only move for more money": each application carries what it pays, for the phone notification.
   let move = { on: false }, us = false;
-  try { const p = db.getProfile() || {}; move = require('../../bot/modules/move_mode').fromSettings(p.move_for_more); us = (p.country || '') === 'United States'; } catch (_) {}
+  try { const p = db.getProfile() || {}; move = require('../../bot/modules/move_mode').fromSettings(p.move_for_more); us = ['United States', 'Canada'].includes(p.country); } catch (_) {}
   const recent = ((await queueReader.getRecentApplications(12)) || []).map((j) => ({
     title: j.title || '', company: j.company || '', source: LABELS[j.source] || '',
     status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting',

@@ -39,7 +39,7 @@ function answerRecruiteeQuestion(q, a = {}) {
   const opts = (q.open_question_options || []).map((o) => ({ id: o.id, text: String(o.body || '') }));
   const rtw = a.rightToWorkCountries || [];
   const us = a.country === 'United States';
-  const home = us ? /\bus\b|usa|united states|america/i : /\buk\b|united kingdom|britain|england|scotland|wales/i;
+  const home = us ? /\bus\b|usa|united states|america/i : a.country === 'Canada' ? /canad/i : /\buk\b|united kingdom|britain|england|scotland|wales/i;
   const hasRtW = Array.isArray(rtw) ? rtw.some((c) => home.test(c)) : home.test(String(rtw));
   const needsSponsor = typeof a.requiresSponsorship === 'boolean' ? a.requiresSponsorship : !hasRtW;
   const where = [a.address, a.location].filter(Boolean).join(', ');

@@ -39,11 +39,18 @@ async function deviceId() {
 }
 
 // Load everything the agents need from local storage.
-// ── Region (UK / USA), same as the app ───────────────────────────────────────
-// USA hides the NHS and Universal Credit cards,
-// says "resume" not "CV" and shows dollar prices. First run picks it from the timezone.
-const tzLooksUS = () => { try { return (Intl.DateTimeFormat().resolvedOptions().timeZone || '').startsWith('America/'); } catch (_) { return false; } };
-const isUS = (settings) => (settings && settings.region) === 'us';
+// ── Region (UK / USA / Canada), same as the app ──────────────────────────────
+// USA and Canada hide the NHS and Universal Credit cards, say "resume" not "CV" and show
+// dollar prices. Canada is its own region with its own jobs; federal jobs, Dice and
+// Wellfound are USA only. First run picks it from the timezone.
+const CA_TZ = /^America\/(Toronto|Vancouver|Montreal|Edmonton|Winnipeg|Halifax|St_Johns|Regina|Moncton|Glace_Bay|Goose_Bay|Whitehorse|Yellowknife|Iqaluit|Dawson_Creek|Fort_Nelson|Creston|Swift_Current|Rankin_Inlet|Cambridge_Bay|Inuvik|Atikokan|Blanc-Sablon|Thunder_Bay|Nipigon|Rainy_River|Pangnirtung|Resolute|Dawson)$/;
+const tzRegion = () => { try { const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; return CA_TZ.test(tz) ? 'ca' : tz.startsWith('America/') ? 'us' : 'uk'; } catch (_) { return 'uk'; } };
+const regionOf = (settings) => (['us', 'ca'].includes(settings && settings.region) ? settings.region : 'uk');
+const isUS = (settings) => regionOf(settings) === 'us';
+const REGION_COUNTRY = { uk: 'United Kingdom', us: 'United States', ca: 'Canada' };
+const REGION_CC = { uk: 'GB', us: 'US', ca: 'CA' };
+// Canadian postal code, like M5V 2T6.
+const PC_CA = /\b[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z] ?\d[ABCEGHJ-NPRSTV-Z]\d\b/i;
 // US states for the setup's State field.
 const US_STATE_NAMES = { AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming' };
 function usStateOf(text) {
@@ -58,8 +65,8 @@ async function setRegion(region) {
   await store.patch('settings', { region });
   const profile = await store.get('profile');
   const loc = (profile.searchLocation || '').trim();
-  if (!loc || loc === 'United Kingdom' || loc === 'United States') await store.patch('profile', { searchLocation: region === 'us' ? 'United States' : 'United Kingdom' });
-  applyRegionWording(region === 'us');
+  if (!loc || Object.values(REGION_COUNTRY).includes(loc)) await store.patch('profile', { searchLocation: REGION_COUNTRY[region] || 'United Kingdom' });
+  applyRegionWording(region);
 }
 let regionWordingObs = null;
 function usWord(t) {
@@ -86,9 +93,9 @@ function rewordTree(root) {
     for (const a of ['placeholder', 'title']) { const v = el.getAttribute(a); if (v && v.includes('CV')) el.setAttribute(a, usWord(v)); }
   });
 }
-function applyRegionWording(us) {
+function applyRegionWording(region) {
   if (regionWordingObs) { regionWordingObs.disconnect(); regionWordingObs = null; }
-  if (!us) return;
+  if (region === 'uk' || !region) return;
   rewordTree(document.body);
   regionWordingObs = new MutationObserver((muts) => {
     for (const m of muts) for (const n of m.addedNodes) {
@@ -100,9 +107,9 @@ function applyRegionWording(us) {
 }
 
 async function loadConfig() {
-  if (!(await store.get('settings')).region) await setRegion(tzLooksUS() ? 'us' : 'uk');
+  if (!(await store.get('settings')).region) await setRegion(tzRegion());
   const [license, profile, trac, settings] = await Promise.all([store.get('license'), store.get('profile'), store.get('trac'), store.get('settings')]);
-  applyRegionWording(isUS(settings));
+  applyRegionWording(regionOf(settings));
   applyExtraSites(settings);
   globalThis.__jobaiLicense = license.key || '';
   globalThis.__jobaiDevice = await deviceId();
@@ -171,18 +178,18 @@ const AGENTS = [
 const EXTRA_SITES = [['reed', 'Reed', 'uk'], ['linkedin', 'LinkedIn', 'both'], ['dice', 'Dice', 'us'], ['wellfound', 'Wellfound', 'us']];
 const ALWAYS_OFF = ['indeed'];
 const RETIRED = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound']);
-const extraForRegion = (us) => EXTRA_SITES.filter(([, , r]) => r === 'both' || r === (us ? 'us' : 'uk'));
+const extraForRegion = (region) => EXTRA_SITES.filter(([, , r]) => r === 'both' || r === region);
 function applyExtraSites(settings) {
   const on = (settings && settings.extraSites) || {};
-  const us = isUS(settings);
+  const region = regionOf(settings);
   RETIRED.clear();
   for (const k of ALWAYS_OFF) RETIRED.add(k);
-  for (const [k, , r] of EXTRA_SITES) if (!on[k] || (r !== 'both' && r !== (us ? 'us' : 'uk'))) RETIRED.add(k);
+  for (const [k, , r] of EXTRA_SITES) if (!on[k] || (r !== 'both' && r !== region)) RETIRED.add(k);
 }
 // Company sites in both regions, NHS (Trac) in the UK for those who asked for it, plus any
 // extra job sites the user turned on.
 // Federal jobs (USAJOBS): USA users who chose them at setup, the way NHS works in the UK.
-const inRegion = (k, us, nhs = true, fed = true) => !RETIRED.has(k) && !(k === 'trac' && (us || !nhs)) && !(k === 'usajobs' && (!us || !fed));
+const inRegion = (k, region, nhs = true, fed = true) => !RETIRED.has(k) && !(k === 'trac' && (region !== 'uk' || !nhs)) && !(k === 'usajobs' && (region !== 'us' || !fed));
 const anyRunning = () => Object.values(agents).some((a) => a.running);
 
 // ── "Nothing sent yet" card ──────────────────────────────────────────────────
@@ -378,15 +385,18 @@ function runAgent(key) {
   a.loop = (async () => { if (prev) await prev.catch(() => {}); return a.start(); })();
   sendStep('agents_started');
 }
-// Switched UK <-> USA: the job sites there that need the user's own account are off by default,
+// Switched region: the job sites there that need the user's own account are off by default,
 // so offer them once per region instead of leaving them hidden in Search Preferences.
-async function regionSitesPrompt(us) {
-  const key = us ? 'us' : 'uk';
+async function regionSitesPrompt(region) {
+  // Canada has no extra job sites besides LinkedIn (off by default), so nothing to offer.
+  if (region === 'ca') return;
+  const us = region === 'us';
+  const key = region;
   const settings = await store.get('settings');
   if ((settings.regionPromptSeen || {})[key] || $('#region-prompt')) return;
   const on = settings.extraSites || {}, F = settings.federal || {};
   const rows = [
-    ...extraForRegion(us).map(([k, l]) => [k, l, `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, !!on[k]]),
+    ...extraForRegion(region).map(([k, l]) => [k, l, `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, !!on[k]]),
     us ? ['federal', 'Federal government jobs', 'Needs a USAJOBS account (you sign in with Login.gov). Job-AI writes the resume, you apply there yourself.', !!settings.wantsFederal]
        : ['nhs', 'NHS jobs', 'Needs a Trac account.', !!settings.wantsNhs],
   ];
@@ -412,7 +422,7 @@ async function regionSitesPrompt(us) {
     if (picked.has('federal') && !$('#rp-cit').value) { setSt('#rp-st', 'Please say if you are a U.S. citizen. Most federal jobs need it.', true); return; }
     const cur = await store.get('settings');
     const extraSites = { ...(cur.extraSites || {}) };
-    for (const [k] of extraForRegion(us)) extraSites[k] = picked.has(k);
+    for (const [k] of extraForRegion(region)) extraSites[k] = picked.has(k);
     const patch = { extraSites };
     if (us) { patch.wantsFederal = picked.has('federal'); if (picked.has('federal')) patch.federal = { ...(cur.federal || {}), usCitizen: $('#rp-cit').value, hoursPerWeek: Math.min(80, Math.max(1, parseInt($('#rp-hrs').value, 10) || 40)) }; }
     else patch.wantsNhs = picked.has('nhs');
@@ -426,13 +436,13 @@ async function regionSitesPrompt(us) {
 
 // Live company-site jobs that fit the user's job titles, for the first-win prompt (30 min cache).
 let fwCache = null;
-async function firstWinCount(us) {
-  const key = (us ? 'US' : 'GB') + '|' + (cfg.JOB_SEARCHES || []).join(',');
+async function firstWinCount(region) {
+  const key = REGION_CC[region] + '|' + (cfg.JOB_SEARCHES || []).join(',');
   if (fwCache && fwCache.key === key && Date.now() - fwCache.at < 30 * 60 * 1000) return fwCache.n;
   try {
     const titleMatch = require('../../bot/modules/title_match');
     const m = titleMatch.compile(cfg.JOB_SEARCHES || []);
-    const n = (await feedJobs(us ? 'US' : 'GB')).filter((j) => titleMatch.titleMatches(j.title, m)).length;
+    const n = (await feedJobs(REGION_CC[region])).filter((j) => titleMatch.titleMatches(j.title, m)).length;
     fwCache = { key, n, at: Date.now() };
     return n;
   } catch (_) { return 0; }
@@ -702,8 +712,9 @@ VIEWS.dashboard = async function renderDashboardView() {
     const tailoring = all.some((j) => j.status === 'processing');
     const reviewing = all.filter((j) => j.status === 'awaiting_review');
     const fh = filterHint(all, profile, settings);
-    const us = isUS(settings);
-    const ucOn = !us && (profile.country || 'United Kingdom') === 'United Kingdom';
+    const region = regionOf(settings);
+    const us = region === 'us', uk = region === 'uk';
+    const ucOn = uk && (profile.country || 'United Kingdom') === 'United Kingdom';
     const ucPending = all.filter((j) => j.status === 'applied' && !j.ucLoggedAt);
     const hasLicence = licenceActive(license);
     // Trial days left (null when not on a trial), and a trial or plan that has run out.
@@ -716,7 +727,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       trac: !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length),
     };
     const base = hasLicence && setupDone.cvs;
-    const canRun = { trac: !us && base && setupDone.trac, reed: !us && base && setupDone.search, linkedin: base && setupDone.search, indeed: us && base && setupDone.search, dice: us && base && setupDone.search, wellfound: us && base && setupDone.search, ats: base && setupDone.search, usajobs: us && base && setupDone.search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
+    const canRun = { trac: uk && base && setupDone.trac, reed: uk && base && setupDone.search, linkedin: base && setupDone.search, indeed: us && base && setupDone.search, dice: us && base && setupDone.search, wellfound: us && base && setupDone.search, ats: base && setupDone.search, usajobs: us && base && setupDone.search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
     for (const k of RETIRED) canRun[k] = false;
     const running = anyRunning();
     const hour = new Date().getHours();
@@ -726,7 +737,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     // NHS is opt-in: asked once at setup. Anyone who already gave Trac details keeps it.
     const wantsNhs = !!settings.wantsNhs || setupDone.trac;
     const nhsNav = $('#nav-setup [data-view="trac-details"]');
-    if (nhsNav) nhsNav.style.display = us || !wantsNhs ? 'none' : '';
+    if (nhsNav) nhsNav.style.display = !uk || !wantsNhs ? 'none' : '';
     // Federal jobs: chosen at setup by USA users, like NHS in the UK.
     const wantsFederal = us && !!settings.wantsFederal;
     const fedNav = $('#nav-setup [data-view="federal-details"]');
@@ -734,7 +745,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac), ats: !(settings.autoSubmit && settings.autoSubmit.ats === false) };
     // Finished NHS applications piling up with Submit for me off: offer to turn it on (also for
     // people already running Job-AI, not just at setup). Hidden for 3 days on "I'll do it".
-    const submitOffer = !us && !submitOn.trac && ready.length >= 2 && Date.parse(settings.submitOfferHiddenAt || 0) < Date.now() - 3 * 864e5;
+    const submitOffer = uk && !submitOn.trac && ready.length >= 2 && Date.parse(settings.submitOfferHiddenAt || 0) < Date.now() - 3 * 864e5;
     const SUBMIT_HINT = {
       trac: (on) => on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.',
       ats: (on) => on ? 'Sends them for you. Any it can\'t send on its own, it skips and moves on to the next job.' : 'Off: each one waits under Ready to send for you to check and submit.',
@@ -795,8 +806,9 @@ VIEWS.dashboard = async function renderDashboardView() {
           <p class="dash-sub">${running && !applied.length ? 'Working on your first application. It usually goes out within a few minutes. Keep this tab open.' : running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Monitor agent activity and track your application progress.'}</p>
           <div class="region-row"><span class="region-label">Find jobs in:</span>
             <div class="region-switch" role="group" aria-label="Find jobs in">
-              <button class="region-opt${us ? '' : ' active'}" data-region="uk">UK</button>
+              <button class="region-opt${uk ? ' active' : ''}" data-region="uk">UK</button>
               <button class="region-opt${us ? ' active' : ''}" data-region="us">USA</button>
+              <button class="region-opt${region === 'ca' ? ' active' : ''}" data-region="ca">Canada</button>
             </div>
           </div>
         </div>
@@ -807,14 +819,14 @@ VIEWS.dashboard = async function renderDashboardView() {
         </div>
       </div>
 
-      ${hasLicence ? (trialLeft !== null && trialLeft <= 3 ? `<div class="no-license-banner"><span>Your free trial ends ${trialLeft <= 1 ? 'today' : `in ${trialLeft} days`}.${applied.length ? ` Job-AI has sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you so far.` : ''} Keep your agents applying${us ? '' : ', first month half price'}.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>` : '')
+      ${hasLicence ? (trialLeft !== null && trialLeft <= 3 ? `<div class="no-license-banner"><span>Your free trial ends ${trialLeft <= 1 ? 'today' : `in ${trialLeft} days`}.${applied.length ? ` Job-AI has sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you so far.` : ''} Keep your agents applying${uk ? ', first month half price' : ''}.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>` : '')
         : ended ? `<div class="card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
           <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${applied.length ? `Job-AI sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you` : 'Your free trial has ended'}</h3>
-          <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan and they start again straight away, up to 25 a day.${us ? '' : ' Your first month is half price.'}</p></div>
+          <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan and they start again straight away, up to 25 a day.${uk ? ' Your first month is half price.' : ''}</p></div>
           <button class="primary" id="keep-jobai">Keep Job-AI</button></div>`
         : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 24 hours, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
-      ${extraNotice ? `<div class="no-license-banner"><span><strong>New:</strong> Job-AI can now also apply on ${extraForRegion(us).map(([, l]) => l).join(us ? ', ' : ' and ').replace(/, ([^,]*)$/, ' and $1')} if you have an account there. It still applies on employers' own websites as well.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="extra-yes">Turn on</button><button class="welcome-skip-link" id="extra-no">No thanks</button></span></div>` : ''}
+      ${extraNotice ? `<div class="no-license-banner"><span><strong>New:</strong> Job-AI can now also apply on ${extraForRegion(region).map(([, l]) => l).join(us ? ', ' : ' and ').replace(/, ([^,]*)$/, ' and $1')} if you have an account there. It still applies on employers' own websites as well.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="extra-yes">Turn on</button><button class="welcome-skip-link" id="extra-no">No thanks</button></span></div>` : ''}
       ${offerWider ? `<div class="no-license-banner"><span>${tooFar.length} jobs this week were skipped as not a close enough match. Try a wider match?</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="wider-yes">Try Wider</button><button class="welcome-skip-link" id="wider-no">No thanks</button></span></div>` : ''}
 
       ${submitOffer ? `<div class="card" style="border:1.5px solid #16a34a">
@@ -845,7 +857,7 @@ VIEWS.dashboard = async function renderDashboardView() {
           <button class="preflight-link${setupDone.personal ? ' is-done' : ''}" data-view="personal">${setupDone.personal ? '✓' : '👤'} Personal details</button>
           <button class="preflight-link${setupDone.search ? ' is-done' : ''}" data-view="search">${setupDone.search ? '✓' : '⚙️'} Search preferences</button>
           <button class="preflight-link${setupDone.cvs ? ' is-done' : ''}" data-view="cvs">${setupDone.cvs ? '✓' : '📄'} CVs</button>
-          ${us || !wantsNhs ? '' : `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>`}
+          ${!uk || !wantsNhs ? '' : `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>`}
           ${wantsFederal ? `<button class="preflight-link${fed.usCitizen ? ' is-done' : ''}" data-view="federal-details">${fed.usCitizen ? '✓' : '🏛️'} Federal jobs details</button>` : ''}
           <button class="preflight-link${hasLicence ? ' is-done' : ''}" data-view="license">${hasLicence ? '✓' : '🔑'} License</button>
         </div>
@@ -880,7 +892,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         <div class="dash-col-main">
           <div class="dash-col-title">Your agents</div>
           <p class="bot-controls-hint">Tick the agents you want, then press <strong>Start applying</strong>. Or start one on its own card.</p>
-          <div class="bot-controls">${AGENTS.filter(([k]) => inRegion(k, us, wantsNhs, wantsFederal)).map(card).join('')}</div>
+          <div class="bot-controls">${AGENTS.filter(([k]) => inRegion(k, region, wantsNhs, wantsFederal)).map(card).join('')}</div>
         </div>
         <div class="dash-col-side">
           <div class="dash-col-title">Applications (last 14 days)</div>
@@ -920,13 +932,13 @@ VIEWS.dashboard = async function renderDashboardView() {
     });
     $('#stop-all').addEventListener('click', () => { Object.values(agents).forEach((a) => a.stop()); renderDashboard(); });
     $('#fw-start')?.addEventListener('click', () => $('#start-all').click());
-    if ($('#fw-count')) firstWinCount(us).then((n) => { const h = $('#fw-count'); if (h) h.textContent = n ? `${n >= 50 ? '50+' : n} live job${n === 1 ? '' : 's'} fit you right now` : 'Your agents are ready to find jobs for you'; });
+    if ($('#fw-count')) firstWinCount(region).then((n) => { const h = $('#fw-count'); if (h) h.textContent = n ? `${n >= 50 ? '50+' : n} live job${n === 1 ? '' : 's'} fit you right now` : 'Your agents are ready to find jobs for you'; });
     $$('.region-opt').forEach((b) => b.addEventListener('click', async () => {
       if (b.classList.contains('active')) return;
       // UK-only agents can't keep running once their cards are hidden.
-      for (const k of Object.keys(agents)) if (!inRegion(k, b.dataset.region === 'us')) agents[k].stop();
+      for (const k of Object.keys(agents)) if (!inRegion(k, b.dataset.region)) agents[k].stop();
       await setRegion(b.dataset.region); renderDashboard();
-      regionSitesPrompt(b.dataset.region === 'us');
+      regionSitesPrompt(b.dataset.region);
     }));
     $$('.preflight-link[data-view]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
     $$('.cv-fill-btn').forEach((b) => b.addEventListener('click', () => pickCv('#gs-cv-st', cvToPersonal)));
@@ -937,7 +949,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     }));
     // Extra sites not checked in the last 30 minutes: check quietly, redraw if anything changed.
     (async () => {
-      const due = EXTRA_SITES.filter(([k]) => SITE_AUTH[k] && inRegion(k, us, wantsNhs, wantsFederal) && !agents[k].running && (!siteAuth[k] || Date.now() - siteAuth[k].at > 30 * 60 * 1000));
+      const due = EXTRA_SITES.filter(([k]) => SITE_AUTH[k] && inRegion(k, region, wantsNhs, wantsFederal) && !agents[k].running && (!siteAuth[k] || Date.now() - siteAuth[k].at > 30 * 60 * 1000));
       let changed = false;
       for (const [k] of due) { const ok = await probeSite(k); if (ok !== null && (!siteAuth[k] || siteAuth[k].ok !== ok)) changed = true; }
       if (changed && current === 'dashboard') VIEWS.dashboard();
@@ -1454,7 +1466,7 @@ VIEWS.search = async function renderSearch() {
       <div class="field"><label>Job titles to search (one per line)</label><textarea id="s-terms" class="tracd" rows="5" placeholder="e.g. IT Support Analyst">${esc((profile.searchTerms || []).join('\n'))}</textarea></div>
       <div class="field"><label>Skip jobs with these words in the title (one per line)</label><textarea id="s-exclude" class="tracd" rows="5" placeholder="e.g. Senior">${esc((profile.excludeKeywords || []).join('\n'))}</textarea></div>
       <div class="field"><label>Blocked companies (one per line)</label><textarea id="s-block" class="tracd" rows="5" placeholder="e.g. Agency name">${esc((profile.blockedCompanies || []).join('\n'))}</textarea></div>
-      <div class="field"><label>Search location</label><input id="s-where" type="text" value="${esc(profile.searchLocation || (isUS(settings) ? 'United States' : 'United Kingdom'))}"></div>
+      <div class="field"><label>Search location</label><input id="s-where" type="text" value="${esc(profile.searchLocation || REGION_COUNTRY[regionOf(settings)])}"></div>
       <div class="field"><label>Maximum job posting age</label><select id="s-age">${[['r86400', 'Past 24 hours'], ['r604800', 'Past week'], ['r1209600', 'Past 2 weeks'], ['r2592000', 'Past month']].map(([v, l]) => `<option value="${v}" ${(profile.jobAge || 'r1209600') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label>How close a match</label><select id="s-level">${[['wide', 'Wider: apply to more jobs'], ['balanced', 'Balanced (recommended)'], ['strict', 'Strict: close matches only']].map(([v, l]) => `<option value="${v}" ${(profile.matchLevel || (Number(profile.minScore) >= 70 ? 'strict' : 'balanced')) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="s-wt" value="${v}" ${(profile.workTypePriority || ['remote', 'hybrid', 'onsite']).includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
@@ -1471,8 +1483,8 @@ VIEWS.search = async function renderSearch() {
     </div>
     <div class="card"><h3>Extra job sites</h3>
       <p class="muted" style="margin-top:0">Job-AI already applies on employers' own websites with no accounts. If you also want it to apply on these sites, tick them below. Each one <strong>needs your own account on that site</strong>, signed in in this Chrome. Job-AI never sees your password.</p>
-      <div class="tracd-sectors">${extraForRegion(isUS(settings)).map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="s-extra" value="${k}" ${(settings.extraSites || {})[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
-      <p class="muted" style="margin:8px 0 0;font-size:13px">Once ticked, the site gets its own agent card on the Dashboard with a Sign in button. ${extraForRegion(isUS(settings)).some(([k]) => k === 'linkedin') ? 'LinkedIn can limit accounts it thinks are automated, so use it at your own risk and keep your daily limit low.' : ''}</p>
+      <div class="tracd-sectors">${extraForRegion(regionOf(settings)).map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="s-extra" value="${k}" ${(settings.extraSites || {})[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      <p class="muted" style="margin:8px 0 0;font-size:13px">Once ticked, the site gets its own agent card on the Dashboard with a Sign in button. ${extraForRegion(regionOf(settings)).some(([k]) => k === 'linkedin') ? 'LinkedIn can limit accounts it thinks are automated, so use it at your own risk and keep your daily limit low.' : ''}</p>
     </div>
     <div class="card"><h3>Review before applying</h3>
       <label class="checkbox-label" style="align-items:flex-start"><input type="checkbox" id="s-review" ${settings.reviewBeforeApply ? 'checked' : ''}><span>Let me review each tailored CV and cover letter before it applies<br><small class="muted">Each one waits on the Dashboard for you to approve or skip.</small></span></label>
@@ -1502,9 +1514,10 @@ const PAY_CHECK_URL = 'https://api.tryjobai.com/am-i-underpaid/check';
 const MOVE_SKIP = /^(Pays under|No salary shown \(you only move|Your current employer)/;
 VIEWS.earn = async function renderEarn() {
   const { profile, settings } = await loadConfig();
-  const us = isUS(settings);
+  const region = regionOf(settings);
+  const us = region !== 'uk'; // dollars (USA and Canada)
   const mv = profile.moveForMore || {};
-  const money = (n) => (us ? '$' : '£') + Number(n).toLocaleString('en-GB');
+  const money = (n) => (region === 'ca' ? 'CA$' : us ? '$' : '£') + Number(n).toLocaleString('en-GB');
   const title = mv.title || (profile.searchTerms || [])[0] || '';
   const where = mv.location != null ? mv.location : String(profile.location || '').split(',')[0].trim();
   const salary = String(mv.current || profile.salaryExpectation || '').replace(/[^0-9]/g, '');
@@ -1550,7 +1563,7 @@ VIEWS.earn = async function renderEarn() {
     if (v.title.length < 3 || Number(v.salary) < 5000) { out.innerHTML = '<p class="muted">Type your job title and yearly salary, then press Check my pay.</p>'; return; }
     out.innerHTML = '<p class="muted">Checking live adverts…</p>';
     try {
-      const r = await fetch(PAY_CHECK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...v, country: us ? 'US' : 'GB' }), signal: AbortSignal.timeout(30000) });
+      const r = await fetch(PAY_CHECK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...v, country: REGION_CC[region] }), signal: AbortSignal.timeout(30000) });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Please try again.');
       out.innerHTML = `<div style="padding:14px 16px;border-radius:10px;background:${j.level === 'under' || j.level === 'below' ? '#fff7ed' : j.level === 'unknown' ? '#f8fafc' : '#f0fdf4'};border:1px solid var(--border,#e5e2da)">
@@ -1584,7 +1597,7 @@ VIEWS.earn = async function renderEarn() {
 // ── Setup: License ───────────────────────────────────────────────────────────
 VIEWS.license = async function renderLicense() {
   const { license, settings } = await loadConfig();
-  const half = isUS(settings) ? '' : ' First month half price.'; // no first-month discount in the US
+  const half = regionOf(settings) === 'uk' ? ' First month half price.' : ''; // no first-month discount outside the UK
   const active = licenceActive(license);
   // The saved key is never written back into the page; only its last 4 characters are shown.
   content.innerHTML = `
@@ -1989,7 +2002,7 @@ async function initOnboarding() {
           <div class="field" style="margin-bottom:10px"><label for="wc-first">First name</label><input id="wc-first" autocomplete="given-name"></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-last">Last name</label><input id="wc-last" autocomplete="family-name"></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-phone">Phone</label><input id="wc-phone" type="tel" autocomplete="tel"></div>
-          <div class="field" style="margin-bottom:10px"><label for="wc-region">Find jobs in</label><select id="wc-region"><option value="uk">The UK</option><option value="us">The USA</option></select></div>
+          <div class="field" style="margin-bottom:10px"><label for="wc-region">Find jobs in</label><select id="wc-region"><option value="uk">The UK</option><option value="us">The USA</option><option value="ca">Canada</option></select></div>
           <div class="field" style="margin-bottom:10px;grid-column:1 / -1"><label for="wc-street">Home address (house number and street)</label><input id="wc-street" autocomplete="address-line1"></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-town">Town or city</label><input id="wc-town" autocomplete="address-level2"></div>
           <div class="field" style="margin-bottom:10px"><label for="wc-postcode" id="wc-postcode-l">Postcode</label><input id="wc-postcode" autocomplete="postal-code"></div>
@@ -2050,7 +2063,7 @@ async function initOnboarding() {
       const [{ profile: P }, st] = await Promise.all([loadConfig(), store.get('settings')]);
       $('#wc-first').value = P.firstName || ''; $('#wc-last').value = P.lastName || ''; $('#wc-phone').value = P.phone || '';
       $('#wc-titles').value = (P.searchTerms || []).join(', ');
-      $('#wc-region').value = isUS(st) ? 'us' : 'uk';
+      $('#wc-region').value = regionOf(st);
       $('#wc-sponsor').checked = !!P.requiresSponsorship;
       const wt = (P.workTypePriority || []).length ? P.workTypePriority : ['remote', 'hybrid', 'onsite'];
       $$('.wc-wt').forEach((c) => { c.checked = wt.includes(c.value); });      $('#wc-licence').checked = !!P.drivingLicence;
@@ -2061,7 +2074,7 @@ async function initOnboarding() {
       $('#wc-fed').onchange = fedQ;
       // The stored address is one line, "street, postcode" (the form filler splits it the same way).
       const addr = String(P.address || '').trim();
-      const pc = (addr.match(PC_UK) || addr.match(ZIP_US) || [''])[0];
+      const pc = (addr.match(PC_UK) || addr.match(PC_CA) || addr.match(ZIP_US) || [''])[0];
       $('#wc-street').value = addr.replace(pc, '').replace(/[\s,]+$/, '').trim();
       $('#wc-postcode').value = pc.toUpperCase();
       $('#wc-town').value = String(P.location || '').split(',')[0].trim();
@@ -2071,14 +2084,14 @@ async function initOnboarding() {
       $('#wc-britishCitizen').value = P.britishCitizen || ''; $('#wc-ukResidence').value = P.ukResidence || '';
       attachAutofill().catch(() => {});
       const where = () => {
-        const us = $('#wc-region').value === 'us';
-        $('#wc-sponsor-l').textContent = `I need visa sponsorship to work in the ${us ? 'USA' : 'UK'}`;
-        $('#wc-postcode-l').textContent = us ? 'ZIP code' : 'Postcode';
-        $('#wc-salary-l').textContent = `Lowest salary (${us ? '$' : '£'} a year)`;
-        $('#wc-nhs-row').style.display = us ? 'none' : 'flex';
+        const r = $('#wc-region').value, us = r === 'us', ca = r === 'ca';
+        $('#wc-sponsor-l').textContent = `I need visa sponsorship to work in ${us ? 'the USA' : ca ? 'Canada' : 'the UK'}`;
+        $('#wc-postcode-l').textContent = us ? 'ZIP code' : ca ? 'Postal code' : 'Postcode';
+        $('#wc-salary-l').textContent = `Lowest salary (${us ? '$' : ca ? 'CA$' : '£'} a year)`;
+        $('#wc-nhs-row').style.display = r === 'uk' ? 'flex' : 'none';
         $('#wc-fed-row').style.display = us ? 'flex' : 'none'; fedQ();
         $('#wc-state-row').style.display = us ? '' : 'none';
-        $$('.wc-clear').forEach((e) => { e.style.display = us ? 'none' : ''; });
+        $$('.wc-clear').forEach((e) => { e.style.display = r === 'uk' ? '' : 'none'; });
       };
       $('#wc-region').onchange = where; where();
       step('ws-check');
@@ -2107,11 +2120,11 @@ async function initOnboarding() {
       if (!town) { setSt('#w-st', 'Please add your town or city.', true); return; }
       const state = region === 'us' ? $('#wc-state').value : '';
       if (region === 'us' && !state) { setSt('#w-st', 'Please choose your state. Most US application forms ask for it.', true); return; }
-      if (!(region === 'us' ? ZIP_US : PC_UK).test(postcode)) { setSt('#w-st', region === 'us' ? 'Please add a 5-digit ZIP code.' : 'Please add your postcode, like SW8 1BP.', true); return; }
+      if (!(region === 'us' ? ZIP_US : region === 'ca' ? PC_CA : PC_UK).test(postcode)) { setSt('#w-st', region === 'us' ? 'Please add a 5-digit ZIP code.' : region === 'ca' ? 'Please add your postal code, like M5V 2T6.' : 'Please add your postcode, like SW8 1BP.', true); return; }
       if (salary && (+salary < 5000 || +salary > 1000000)) { setSt('#w-st', 'Please type the salary as a yearly figure, like 30000.', true); return; }
       const fedOn = region === 'us' && $('#wc-fed').checked;
       if (fedOn && !$('#wc-fed-cit').value) { setSt('#w-st', 'Please say if you are a U.S. citizen. Most federal jobs need it.', true); return; }
-      const country = region === 'us' ? 'United States' : 'United Kingdom';
+      const country = REGION_COUNTRY[region] || 'United Kingdom';
       const { profile: P } = await loadConfig();
       const rtw = String(P.rightToWorkCountries || '').split(',').map((c) => c.trim()).filter(Boolean);
       const sponsor = $('#wc-sponsor').checked;
@@ -2167,8 +2180,8 @@ async function remoteGate() {
   const base = licenceActive(license) && !!(cv && cv.text);
   const search = !!((profile.searchTerms || []).length);
   const tracOk = !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length);
-  const us = isUS(settings);
-  const canRun = { trac: !us && base && tracOk, reed: !us && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, wellfound: us && base && search, ats: base && search, usajobs: us && base && search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
+  const us = isUS(settings), uk = regionOf(settings) === 'uk';
+  const canRun = { trac: uk && base && tracOk, reed: uk && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, wellfound: us && base && search, ats: base && search, usajobs: us && base && search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
   for (const k of RETIRED) canRun[k] = false;
   const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
   return { license, cv, canRun, enabled };

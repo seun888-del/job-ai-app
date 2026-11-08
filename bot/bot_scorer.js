@@ -59,7 +59,7 @@ function boostCVText(cvText, keywords) {
 // ── Pre-filter: skip jobs mismatched on level, employment type, or salary ────
 function passesPreFilter(job) {
   const { experienceLevel, employmentType, salaryExpectation, country } = cfg.APPLICANT;
-  const move = require('./modules/move_mode').check(cfg.MOVE, job, { us: country === 'United States' });
+  const move = require('./modules/move_mode').check(cfg.MOVE, job, { us: country === 'United States' || country === 'Canada' });
   if (move) return { pass: false, reason: move };
   const title     = (job.title || '').toLowerCase();
   const descStart = (job.description || '').substring(0, 1500);
@@ -105,7 +105,7 @@ function passesPreFilter(job) {
   if (salaryExpectation) {
     const minSalary  = parseInt(salaryExpectation.replace(/[^0-9]/g, ''), 10);
     if (minSalary >= 15000) {
-      const currencyRe = (country === 'United States') ? /\$(\d[\d,]+)/g : /£(\d[\d,]+)/g;
+      const currencyRe = (country === 'United States' || country === 'Canada') ? /\$(\d[\d,]+)/g : /£(\d[\d,]+)/g;
       const matches = [...descStart.matchAll(currencyRe)]
         .map(m => parseInt(m[1].replace(/,/g, ''), 10))
         .filter(s => s >= 15000 && s <= 500000);
@@ -113,7 +113,7 @@ function passesPreFilter(job) {
       if (matches.length > 0) {
         const maxFound = Math.max(...matches);
         if (maxFound < minSalary * 0.85) {
-          const sym = country === 'United States' ? '$' : '£';
+          const sym = country === 'United States' ? '$' : country === 'Canada' ? 'CA$' : '£';
           return { pass: false, reason: `Salary ${sym}${maxFound.toLocaleString()} below minimum — skipped` };
         }
       }
@@ -349,7 +349,7 @@ async function processJob(job) {
       const missingSet = new Set((bestMissing || []).map((k) => String(k).toLowerCase()));
       const tailoredStruct = await tailorStructured(
         baseStruct, jobTitle, job.description, bestMissing, bestRawCvText,
-        { matchedKeywords: bestAllKeywords.filter((k) => k && k.term && !missingSet.has(String(k.term).toLowerCase())), uk: !/united states|^us(a)?$/i.test(String(cfg.APPLICANT.country || '')) }
+        { matchedKeywords: bestAllKeywords.filter((k) => k && k.term && !missingSet.has(String(k.term).toLowerCase())), uk: !/united states|^us(a)?$|canada/i.test(String(cfg.APPLICANT.country || '')) }
       );
 
       // Header hardening. PDF text extraction can corrupt the header (mangled

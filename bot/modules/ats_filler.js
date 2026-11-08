@@ -981,11 +981,12 @@ function _yesNoForQuestion(question) {
   const rtw = cfg.APPLICANT.rightToWorkCountries || [];
   // The country the question asks about ("authorized to work in the United States?"),
   // else the applicant's own; right to work means that country is in their list.
-  const RTW_RE = { US: /\b(US|USA|U\.S\.A?\.?|united states|america)\b/i, UK: /\b(UK|U\.K\.|united kingdom|britain|great britain|england|scotland|wales|northern ireland|GB)\b/i };
+  const RTW_RE = { US: /\b(US|USA|U\.S\.A?\.?|united states|america)\b/i, UK: /\b(UK|U\.K\.|united kingdom|britain|great britain|england|scotland|wales|northern ireland|GB)\b/i, CA: /\bcanad(a|ian)\b/i };
   const raw = String(question || '');
-  const askedAbout = /\b(US|USA|U\.S\.)\b|united states|america/i.test(raw) && !RTW_RE.UK.test(raw) ? 'US'
+  const askedAbout = RTW_RE.CA.test(raw) ? 'CA'
+    : /\b(US|USA|U\.S\.)\b|united states|america/i.test(raw) && !RTW_RE.UK.test(raw) ? 'US'
     : RTW_RE.UK.test(raw) ? 'UK'
-    : (cfg.APPLICANT.country === 'United States' ? 'US' : 'UK');
+    : (cfg.APPLICANT.country === 'United States' ? 'US' : cfg.APPLICANT.country === 'Canada' ? 'CA' : 'UK');
   const hasRightToWork = rtw.some(c => RTW_RE[askedAbout].test(c));
   // Explicit profile flag wins; otherwise infer (has right to work ⇒ no sponsorship needed)
   const requiresSponsorship = typeof cfg.APPLICANT.requiresSponsorship === 'boolean'
@@ -1071,7 +1072,7 @@ async function _buildAnswer(question, fieldType, job) {
     // "What is your notice period and salary expectations?": both, in one answer.
     if (/salary|compensation|pay expectation|remuneration/i.test(q) && salaryExpectation) {
       const n = Number(String(salaryExpectation).replace(/[^\d.]/g, ''));
-      const pay = n ? `${cfg.APPLICANT.country === 'United States' ? '$' : '£'}${n.toLocaleString('en-GB')}` : salaryExpectation;
+      const pay = n ? `${cfg.APPLICANT.country === 'United States' ? '$' : cfg.APPLICANT.country === 'Canada' ? 'CA$' : '£'}${n.toLocaleString('en-GB')}` : salaryExpectation;
       return `${notice}, salary expectation ${pay} per year`;
     }
     return notice;
@@ -1107,8 +1108,8 @@ async function _buildAnswer(question, fieldType, job) {
   try {
     if (await llmAvailable()) {
       const avail = AVAIL_MAP[availability || 'immediately'] || 'Immediately available';
-      const home = cfg.APPLICANT.country === 'United States' ? 'US' : 'UK';
-      const homeRe = home === 'US' ? /\bus\b|usa|united states|america/i : /uk|united kingdom|britain/i;
+      const home = cfg.APPLICANT.country === 'United States' ? 'US' : cfg.APPLICANT.country === 'Canada' ? 'Canada' : 'UK';
+      const homeRe = home === 'US' ? /\bus\b|usa|united states|america/i : home === 'Canada' ? /canad/i : /uk|united kingdom|britain/i;
       // Work history and education, so "Company", "Title", "School" and their dates (the
       // work/education sections many ATS forms repeat) come from real data, newest first.
       const D = cfg.TRAC_DETAILS || {};
@@ -1327,8 +1328,8 @@ function _pickDropdownOption(question, options) {
   }
   // The applicant's own country (a phone country-code list too: "United States +1").
   if (/country|where.*based/i.test(q)) {
-    const us = cfg.APPLICANT.country === 'United States';
-    return options.find(o => (us ? /united states|\busa?\b|^us\b/i : /united kingdom|uk$/i).test(o.text))?.text || null;
+    const c = cfg.APPLICANT.country;
+    return options.find(o => (c === 'United States' ? /united states|\busa?\b|^us\b/i : c === 'Canada' ? /canada/i : /united kingdom|uk$/i).test(o.text))?.text || null;
   }
   if (/experience.*level|senior.*level|level.*experi/i.test(q)) {
     const yrs = cfg.APPLICANT.yearsExperience ?? 0;
@@ -1422,8 +1423,8 @@ async function _aiPickOptionUncached(question, optionTexts, job) {
   try {
     if (!await llmAvailable()) return null;
     const { firstName, lastName, yearsExperience, availability, rightToWorkCountries, country, location } = cfg.APPLICANT;
-    const home = country === 'United States' ? 'US' : 'UK';
-    const homeRe = home === 'US' ? /\bus\b|usa|united states|america/i : /uk|united kingdom|britain/i;
+    const home = country === 'United States' ? 'US' : country === 'Canada' ? 'Canada' : 'UK';
+    const homeRe = home === 'US' ? /\bus\b|usa|united states|america/i : home === 'Canada' ? /canad/i : /uk|united kingdom|britain/i;
     const AVAIL_MAP = { 'immediately': 'Immediately', '1week': '1 week', '2weeks': '2 weeks', '1month': '1 month', '3months': '3 months' };
     const prompt =
 `You are completing a job application for ${firstName} ${lastName} (${yearsExperience} yrs experience, lives in ${location || country || home}, availability: ${AVAIL_MAP[availability] || 'immediately'}, right to work ${home}: ${(rightToWorkCountries||[]).some(c=>homeRe.test(c))}, requires visa sponsorship: ${_yesNoForQuestion('require sponsorship') === 'yes'}).

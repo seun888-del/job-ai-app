@@ -358,7 +358,7 @@ function markApplied(jobId) {
       // "Only move for more money": say in the receipt how much more this one pays.
       try {
         const cfg = require('../config');
-        const rise = require('./move_mode').payRise(cfg.MOVE, row, { us: (cfg.APPLICANT || {}).country === 'United States' });
+        const rise = require('./move_mode').payRise(cfg.MOVE, row, { us: ['United States', 'Canada'].includes((cfg.APPLICANT || {}).country) });
         if (rise) Object.assign(job, rise);
       } catch (_) {}
     }

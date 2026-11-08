@@ -100,8 +100,8 @@ export class AtsAgent extends SiteAgent {
 
   async search() {
     if (!(cfg.JOB_SEARCHES || []).length) { this.log('Add search terms on the Setup page to find jobs.'); return; }
-    // Only the user's own region (the UK/USA switch), and only titles that fit their terms.
-    const countries = [cfg.APPLICANT.country === 'United States' ? 'US' : 'GB'];
+    // Only the user's own region (the UK/USA/Canada switch), and only titles that fit their terms.
+    const countries = [cfg.APPLICANT.country === 'United States' ? 'US' : cfg.APPLICANT.country === 'Canada' ? 'CA' : 'GB'];
     const matchers = titleMatch.compile(cfg.JOB_SEARCHES);
     let jobs = [];
     for (const c of countries) {
