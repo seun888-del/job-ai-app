@@ -321,6 +321,20 @@ async function processJob(job) {
     return;
   }
 
+  // GC Jobs (Canada): the application takes the resume as plain text and the screening answers
+  // come from the CV at apply time, so no PDF is needed. Keep the CV text for the agent.
+  if (job.source === 'gcjobs') {
+    if (bestScore >= cfg.MIN_SCORE) {
+      queue.update(job.jobId, { status: REVIEW_MODE ? 'awaiting_review' : 'cv_ready', cvScore: bestScore, cvName: bestCvName,
+        extra: { ...(job.extra || {}), resumeText: String(bestRawCvText || bestCvText || '').slice(0, 30000) } });
+      console.log(`  [Scorer Agent] ✓ GC Jobs ${bestScore}% (${bestCvName}): ${job.title}`);
+    } else {
+      queue.update(job.jobId, { status: 'skipped', cvScore: bestScore, reason: `CV match ${bestScore}% (below ${cfg.MIN_SCORE}%)` });
+      console.log(`  [Scorer Agent] ✗ GC Jobs ${bestScore}% below ${cfg.MIN_SCORE}%: ${job.title}`);
+    }
+    return;
+  }
+
   if (bestScore >= cfg.MIN_SCORE) {
     const paths    = buildPaths(path.join(cfg.OUTPUT_DIR, 'saved_cvs'), cfg.OUTPUT_DIR, cfg.RESUME_FILENAME, job.title, job.company, bestScore, `${cfg.APPLICANT.firstName || ''} ${cfg.APPLICANT.lastName || ''}`);
     const bestCVObj = cfg.CVS.find(c => c.name === bestCvName) || cfg.CVS[0];

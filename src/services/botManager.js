@@ -20,6 +20,8 @@ const BOT_SCRIPTS = {
   greenhouse: 'bot_greenhouse.js',
   trac:       'bot_trac.js',
   usajobs:    'bot_usajobs.js',
+  gcjobs:     'bot_gcjobs.js',
+  jobbank:    'bot_jobbank.js',
   uc:         'bot_uc.js',
 };
 
@@ -37,6 +39,8 @@ const bots = {
   greenhouse: { proc: null, status: 'stopped', stopping: false },
   trac:       { proc: null, status: 'stopped', stopping: false },
   usajobs:    { proc: null, status: 'stopped', stopping: false },
+  gcjobs:     { proc: null, status: 'stopped', stopping: false },
+  jobbank:    { proc: null, status: 'stopped', stopping: false },
   uc:         { proc: null, status: 'stopped', stopping: false },
 };
 
@@ -66,13 +70,15 @@ function getStatus() {
     greenhouse: bots.greenhouse.status,
     trac:       bots.trac.status,
     usajobs:    bots.usajobs.status,
+    gcjobs:     bots.gcjobs.status,
+    jobbank:    bots.jobbank.status,
     uc:         bots.uc.status,
   };
 }
 
 // Bots that produce jobs the Scorer must tailor CVs for (so the Scorer is
 // auto-started alongside them and auto-stopped when the last one exits).
-const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse', 'trac', 'indeed', 'dice', 'wellfound', 'usajobs']);
+const JOB_SITE_BOTS = new Set(['reed', 'linkedin', 'greenhouse', 'trac', 'indeed', 'dice', 'wellfound', 'usajobs', 'gcjobs', 'jobbank']);
 
 function anyJobSiteBotRunning() {
   return [...JOB_SITE_BOTS].some(name => bots[name].proc !== null);
@@ -117,6 +123,9 @@ function start(botName, userDataPath, opts = {}) {
   if (ollamaCred?.secret_enc && safeStorage.isEncryptionAvailable()) {
     try { env.OLLAMA_URL = safeStorage.decryptString(Buffer.from(ollamaCred.secret_enc, 'base64')); } catch (_) {}
   }
+
+  // Job Bank (Canada) sends applications from the user's own Gmail: only this agent gets the token.
+  if (botName === 'jobbank') { try { Object.assign(env, require('./userGmail').envForBot()); } catch (_) {} }
 
   // If Chrome is still open from "Connect account", pass the CDP port so the
   // bot can attach to that live session instead of launching a new browser.

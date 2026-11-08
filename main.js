@@ -659,6 +659,14 @@ ipcMain.handle('cvs:remove', (event, cvId) => {
   db.removeCV(cvId);
 });
 
+// ── Connect Gmail (Job Bank email applications, Canada) ───────────────────
+ipcMain.handle('gmail:status', () => require('./src/services/userGmail').status());
+ipcMain.handle('gmail:connect', async () => {
+  try { return await require('./src/services/userGmail').connect(); }
+  catch (e) { return { connected: false, error: e.message }; }
+});
+ipcMain.handle('gmail:disconnect', () => { try { botManager.stop('jobbank'); } catch (_) {} return require('./src/services/userGmail').disconnect(); });
+
 // ── Credentials (encrypted via OS-level safeStorage) ───────────────────────
 ipcMain.handle('credentials:save', (event, { site, username, password }) => {
   if (!safeStorage.isEncryptionAvailable()) {

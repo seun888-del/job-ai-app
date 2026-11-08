@@ -137,6 +137,9 @@ const cfg = {
       // Federal (USAJOBS) answers: U.S. citizenship and usual hours per week.
       try { cfg.FEDERAL = profile.federal_details ? JSON.parse(profile.federal_details) || {} : {}; }
       catch (_) { cfg.FEDERAL = {}; }
+      // Government of Canada jobs (GC Jobs): { wants, confirmed, autoSubmit, firstLang, englishLevel, frenchLevel, hasSle, relocate, cities }.
+      try { cfg.GC = profile.gc_details ? JSON.parse(profile.gc_details) || {} : {}; }
+      catch (_) { cfg.GC = {}; }
       cfg.TITLE_BLOCKLIST = excludes.map(e => e.keyword.toLowerCase());
       cfg.COMPANY_BLOCKLIST = blacklist.map(b => b.company.toLowerCase());
       // "Only move for more money" (bot/modules/move_mode.js): their employer is never applied to.

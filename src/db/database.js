@@ -150,6 +150,10 @@ async function init(userDataPath) {
   if (!profileCols.includes('federal_details')) {
     db.exec('ALTER TABLE profile ADD COLUMN federal_details TEXT');
   }
+  // Government of Canada jobs (GC Jobs) settings as JSON (see bot/config.js cfg.GC).
+  if (!profileCols.includes('gc_details')) {
+    db.exec('ALTER TABLE profile ADD COLUMN gc_details TEXT');
+  }
 
   // Migration: add job_age + schedule columns to search_preferences
   const searchPrefsCols = db.prepare('PRAGMA table_info(search_preferences)').all().map(c => c.name);
@@ -378,6 +382,10 @@ function saveCredential({ site, username, secret_enc }) {
   return db.prepare('SELECT * FROM credentials WHERE site = ?').get([site]);
 }
 
+function deleteCredential(site) {
+  db.prepare('DELETE FROM credentials WHERE site = ?').run([site]);
+}
+
 function getCredential(site) {
   return db.prepare('SELECT * FROM credentials WHERE site = ?').get([site]);
 }
@@ -483,6 +491,7 @@ module.exports = {
   deleteExcludeKeyword,
   setExcludeKeywordActive,
   getCVs,
+  deleteCredential,
   addCV,
   removeCV,
   saveCredential,

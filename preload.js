@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
   win: { action: (a) => ipcRenderer.invoke('win:action', a) },
+  gmail: { status: () => ipcRenderer.invoke('gmail:status'), connect: () => ipcRenderer.invoke('gmail:connect'), disconnect: () => ipcRenderer.invoke('gmail:disconnect') },
   remote: {
     setPrefs: (p) => ipcRenderer.send('remote:prefs', p),
     onChanged: (cb) => ipcRenderer.on('remote:changed', () => cb()),

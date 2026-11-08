@@ -388,6 +388,7 @@ async function render(view) {
     case 'tracker':    fn = renderTracker; break;
     case 'trac-details': fn = renderTracDetails; break;
     case 'federal-details': fn = renderFederalDetails; break;
+    case 'gc-details': fn = renderGcDetails; break;
     case 'analytics':  fn = renderAnalytics; break;
     case 'earn':       fn = renderEarn; break;
     case 'help':       fn = renderHelp; break;
@@ -1468,7 +1469,7 @@ function applyExtraSites(extraCsv, region) {
   RETIRED_AGENTS.clear(); RETIRED_AGENTS.add('indeed');
   for (const [k, , r] of EXTRA_SITES) if (!on.includes(k) || (r !== 'both' && r !== region)) RETIRED_AGENTS.add(k);
 }
-const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', wellfound: 'Wellfound Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent', usajobs: 'Federal Jobs Agent' };
+const BOT_LABELS = { reed: 'Reed Agent', scorer: 'Scorer Agent (AI)', linkedin: 'LinkedIn Agent', indeed: 'Indeed Agent', dice: 'Dice Agent', wellfound: 'Wellfound Agent', greenhouse: 'Company Sites Agent', trac: 'Trac (NHS) Agent', usajobs: 'Federal Jobs Agent', gcjobs: 'Canada Government Jobs Agent', jobbank: 'Job Bank Agent (Canada)' };
 
 let botLogUnsub = null;
 let botStatusUnsub = null;
@@ -2405,7 +2406,10 @@ async function renderDashboard() {
   // Federal jobs (USAJOBS) in the USA only.
   let fedDetails = {}; try { fedDetails = JSON.parse(profile.federal_details || '{}') || {}; } catch (_) {}
   const wantsFederal = isUS && !!fedDetails.wants;
-  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !RETIRED_AGENTS.has(k) && !(!isUK && k === 'trac') && !(k === 'usajobs' && !wantsFederal));
+  // Government of Canada jobs (GC Jobs) in Canada only, for those who turned them on.
+  let gcDetails = {}; try { gcDetails = JSON.parse(profile.gc_details || '{}') || {}; } catch (_) {}
+  const wantsGc = region === 'ca' && !!gcDetails.wants;
+  const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !RETIRED_AGENTS.has(k) && !(!isUK && k === 'trac') && !(k === 'usajobs' && !wantsFederal) && !(k === 'gcjobs' && !wantsGc) && !(k === 'jobbank' && region !== 'ca'));
   // Tell phone control (tryjobai.com/app) which agents this dashboard shows and which are ticked.
   const shareAgentPrefs = () => { try { window.api.remote.setPrefs({ keys: appAgentKeys, enabled: appAgentKeys.filter(k => localStorage.getItem('agent_enabled_' + k) !== '0') }); } catch (_) {} };
   shareAgentPrefs();
@@ -2435,6 +2439,17 @@ async function renderDashboard() {
 
   function federalSettingsHtml() {
     return `<div class="agent-submit-toggle" style="display:block"><small>Writes a 2-page federal resume for each job. You apply on USAJOBS with your own account.${fedDetails.usCitizen ? '' : ' Answer the questions on Federal jobs details first.'}</small></div>`;
+  }
+
+  function gcSettingsHtml() {
+    const sends = gcDetails.autoSubmit !== false && gcDetails.confirmed;
+    return `<div class="agent-submit-toggle" style="display:block"><small>${sends ? 'Fills in and submits each application on GC Jobs.' : 'Fills in each application on GC Jobs. You press Submit there.'} Sign in to GC Jobs in the window it opens.${gcDetails.confirmed ? '' : ' Confirm the GC Jobs notice on Government of Canada jobs first.'}</small></div>`;
+  }
+
+  // Job Bank (Canada) applies by email from the user's own Gmail: show the connection on its card.
+  function jobbankSettingsHtml() {
+    setTimeout(refreshJobBankGmail, 0);
+    return `<div class="agent-submit-toggle" style="display:block" id="jb-gmail"><small>Checking your Gmail connection…</small></div>`;
   }
 
   function buildBotCard(key, label) {
@@ -2469,6 +2484,8 @@ async function renderDashboard() {
         <div class="agent-run-state ${isEnabled ? 'on' : 'off'}" id="run-state-${key}">${isEnabled ? '✓ Included, runs when you press Start applying' : '○ Unticked, this site will be skipped'}</div>
         ${key === 'trac' ? tracSubmitToggleHtml() : ''}
         ${key === 'usajobs' ? federalSettingsHtml() : ''}
+        ${key === 'gcjobs' ? gcSettingsHtml() : ''}
+        ${key === 'jobbank' ? jobbankSettingsHtml() : ''}
         ${signInLine(key)}
         <div class="bot-card-actions">
           ${needsCreds ? `<button class="btn-connect" data-bot="${key}" data-action="connect">Connect account</button>` : ''}
@@ -3056,6 +3073,71 @@ async function renderFederalDetails() {
     } catch (err) { showStatus(st, 'Could not save: ' + err.message, 'error'); }
   });
 }
+
+// Government of Canada jobs (GC Jobs), Canada only. The agent fills in each application and,
+// with the user's confirmation of the GC Jobs notice, submits it.
+async function renderGcDetails() {
+  const profile = (await window.api.profile.get()) || {};
+  let g = {}; try { g = JSON.parse(profile.gc_details || '{}') || {}; } catch (_) {}
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const opt = (v, cur) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${v}</option>`;
+  const levels = ['None', 'Beginner', 'Intermediate', 'Advanced'];
+  content.innerHTML = `
+    <div class="page-header"><h2>Government of Canada jobs</h2>
+      <p>Federal public service jobs are on GC Jobs. Job-AI finds the ones that fit your CV, fills in the application and sends it.</p></div>
+    <div class="card"><h3>Your GC Jobs account</h3>
+      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">You need a free GC Jobs account. The agent opens GC Jobs and you sign in there once. Add your education once in any GC Jobs application: it is kept on your account.</p>
+      <label class="checkbox-label" style="margin:0 0 10px"><input type="checkbox" id="gc-on" ${g.wants ? 'checked' : ''}><span>Apply for Government of Canada jobs</span></label>
+      <button class="secondary" id="gc-acct">Open GC Jobs</button></div>
+    <div class="card"><h3>Your languages</h3>
+      <div class="field"><label for="gc-first">First official language</label><select id="gc-first">${opt('English', g.firstLang || 'English')}${opt('French', g.firstLang)}</select></div>
+      <div class="field"><label for="gc-en">English level</label><select id="gc-en">${levels.map((l) => opt(l, g.englishLevel || 'Advanced')).join('')}</select></div>
+      <div class="field"><label for="gc-fr">French level</label><select id="gc-fr">${levels.map((l) => opt(l, g.frenchLevel || 'None')).join('')}</select></div>
+      <label class="checkbox-label" style="margin:0 0 6px"><input type="checkbox" id="gc-sle" ${g.hasSle ? 'checked' : ''}><span>I have valid Second Language Evaluation (SLE) results</span></label></div>
+    <div class="card"><h3>Where you will work</h3>
+      <div class="field"><label for="gc-cities">Cities you want to work in (comma separated)</label><input id="gc-cities" value="${e((g.cities || []).join(', '))}" placeholder="e.g. Ottawa, Toronto"></div>
+      <label class="checkbox-label" style="margin:0 0 6px"><input type="checkbox" id="gc-move" ${g.relocate ? 'checked' : ''}><span>I would move anywhere in Canada for the right job</span></label></div>
+    <div class="card"><h3>Sending applications</h3>
+      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 10px">Every GC Jobs application starts with a notice: what you give must be true and may be checked, and false information can lead to your application being rejected or a criminal investigation. Job-AI answers only from your CV and says No to anything your CV doesn't show.</p>
+      <label class="checkbox-label" style="margin:0 0 10px"><input type="checkbox" id="gc-confirm" ${g.confirmed ? 'checked' : ''}><span>My CV and details are true. I agree that Job-AI confirms the GC Jobs notice for me.</span></label>
+      <label class="checkbox-label" style="margin:0 0 12px"><input type="checkbox" id="gc-auto" ${g.autoSubmit !== false ? 'checked' : ''}><span>Submit for me (off: Job-AI fills it in and you press Submit on GC Jobs)</span></label>
+      <button class="primary" id="gc-save">Save</button> <span class="status-msg" id="gc-st"></span></div>`;
+  document.getElementById('gc-acct').addEventListener('click', () => window.api.shell.openExternal('https://emploisfp-psjobs.cfp-psc.gc.ca/psrs-srfp/applicant/page1710?toggleLanguage=en'));
+  document.getElementById('gc-save').addEventListener('click', async () => {
+    const st = document.getElementById('gc-st'); const v = (id) => document.getElementById(id);
+    const next = { ...g, wants: v('gc-on').checked, firstLang: v('gc-first').value, englishLevel: v('gc-en').value, frenchLevel: v('gc-fr').value, hasSle: v('gc-sle').checked,
+      cities: v('gc-cities').value.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 20), relocate: v('gc-move').checked, confirmed: v('gc-confirm').checked, autoSubmit: v('gc-auto').checked };
+    if (next.wants && next.autoSubmit && !next.confirmed) { showStatus(st, 'To submit for you, tick the confirmation above. Or untick Submit for me.', 'error'); return; }
+    try {
+      await window.api.profile.save({ gc_details: JSON.stringify(next) });
+      if (!next.wants) window.api.bot.stop('gcjobs').catch(() => {});
+      g = next; showStatus(st, 'Saved.', 'success');
+    } catch (err) { showStatus(st, 'Could not save: ' + err.message, 'error'); }
+  });
+}
+
+// ── Job Bank (Canada): Connect Gmail ─────────────────────────────────────────
+// The Job Bank agent emails each application from the user's own Gmail (send only).
+async function refreshJobBankGmail(note) {
+  const box = document.getElementById('jb-gmail');
+  if (!box) return;
+  let st = { connected: false };
+  try { st = await window.api.gmail.status(); } catch (_) {}
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  box.innerHTML = st.connected
+    ? `<small>Applies by email to jobs on Job Bank (Government of Canada), sent from <strong>${e(st.email)}</strong>. Employers reply to you there.</small><br><button class="secondary" id="jb-gmail-off" style="margin:6px 0 0;padding:4px 12px;font-size:13px">Disconnect Gmail</button>`
+    : `<small>Applies by email to jobs on Job Bank (Government of Canada), sent from your own Gmail. Job-AI can only send, it can't read your email.${note ? `<br><span style="color:var(--danger,#a8432f)">${e(note)}</span>` : ''}</small><br><button class="primary" id="jb-gmail-on" style="margin:6px 0 0;padding:5px 14px;font-size:13px">Connect Gmail</button>`;
+}
+document.addEventListener('click', async (ev) => {
+  if (ev.target.closest('#jb-gmail-on')) {
+    const b = ev.target.closest('#jb-gmail-on'); b.disabled = true; b.textContent = 'Finish in your browser…';
+    const r = await window.api.gmail.connect().catch((err) => ({ error: err.message }));
+    refreshJobBankGmail(r && r.error ? r.error : '');
+  } else if (ev.target.closest('#jb-gmail-off')) {
+    await window.api.gmail.disconnect().catch(() => {});
+    refreshJobBankGmail();
+  }
+});
 
 async function renderTracDetails() {
   let profile = {}; try { profile = (await window.api.profile.get()) || {}; } catch (_) {}
