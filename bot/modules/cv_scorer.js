@@ -121,7 +121,7 @@ Leave out soft skills and personal qualities (communication, attention to detail
 Return ONLY a valid JSON array of such objects, 10 to 20 items, most important first. No commentary.
 Example:
 [{"term":"Active Directory","essential":true,"alts":["AD","Entra ID","Azure AD"]},{"term":"user acceptance testing","essential":false,"alts":["UAT"]},{"term":"ITIL","essential":true,"alts":["IT service management","ITSM"]}]
-${opts.federal ? `\n\nThis text is a U.S. federal "specialized experience" statement written as duties. Turn each duty into the short skill or experience it needs: 2 to 4 words, never a sentence, and give its everyday wordings as alts (e.g. "Providing technical Human Resource advice" -> term "HR advice", alts ["human resources advice", "HR guidance", "advise managers", "policy advice"]; "receiving, reviewing, documenting, or resolving IT help desk tickets" -> term "help desk tickets", alts ["service desk", "tickets", "incident tickets", "helpdesk"]). Use "HR" and "human resources" both where relevant. Mark a skill essential only if the statement requires it.` : ''}
+${opts.federal ? `\n\nThis text is a U.S. federal "specialized experience" statement written as duties. Turn each duty into the short skill or experience it needs: 2 to 4 words, never a sentence, and give its everyday wordings as alts (e.g. "Providing technical Human Resource advice" -> term "HR advice", alts ["human resources advice", "HR guidance", "advise managers", "policy advice"]; "receiving, reviewing, documenting, or resolving IT help desk tickets" -> term "help desk tickets", alts ["service desk", "tickets", "incident tickets", "helpdesk"]). Use "HR" and "human resources" both where relevant. Mark a skill essential only if the statement requires it.` : ''}${opts.jobbank ? `\n\nThis is a Canada Job Bank advert built from standard job-description wording: "Duties" are generic task statements and "Requirements" are listed separately. Turn each duty into the short skill it needs: 2 to 4 words, never a sentence, with its everyday CV wordings as alts (e.g. "Respond to users experiencing difficulties with computer" -> term "user IT support", alts ["technical support", "troubleshooting", "help desk", "service desk", "resolving user issues"]; "Take vital signs" -> term "vital signs", alts ["observations", "obs", "patient monitoring"]). Mark essential ONLY the 3 or 4 duties that define this job and any required certificate or licence (e.g. "AZ licence", "CPR certificate"). Leave out education level, years of experience, languages and the "Desirable, not required" list: those are not skills to look for in the CV.` : ''}
 
 JOB DESCRIPTION:
 ${focusJD(jdText, 3000)}`;
@@ -136,7 +136,8 @@ ${focusJD(jdText, 3000)}`;
     const raw = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(raw)) return [];
     const kws = normaliseKeywords(raw);
-    return opts.federal ? kws.map((k) => ({ ...k, loose: true })) : kws;
+    // Duty-written adverts (federal, Job Bank): match on word stems, not exact phrases.
+    return opts.federal || opts.jobbank ? kws.map((k) => ({ ...k, loose: true })) : kws;
   } catch {
     return [];
   }

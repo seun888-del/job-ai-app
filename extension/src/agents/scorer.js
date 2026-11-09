@@ -86,7 +86,7 @@ export async function scoreJob(job, log) {
     const raw = cleanText(c.text);
     let r;
     // Federal jobs: scored on the specialized experience paragraph, tailored to the full advert.
-    try { r = await cvScorer.scoreCV(raw, (job.source === 'usajobs' && job.scoreText) || job.description, { federal: job.source === 'usajobs' && !!job.scoreText }); }
+    try { r = await cvScorer.scoreCV(raw, (job.source === 'usajobs' && job.scoreText) || job.description, { federal: job.source === 'usajobs' && !!job.scoreText, jobbank: job.source === 'jobbank' }); }
     catch (e) {
       // Never guess a score: try the job again later, then skip it.
       const n = (job.retryCount || 0) + 1;

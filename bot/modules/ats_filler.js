@@ -1041,11 +1041,15 @@ async function _buildAnswer(question, fieldType, job) {
   if (/^(first|given|forename)( name)?$/.test(nameQ)) return firstName || '';
   if (/^(last|family|surname)( name)?$/.test(nameQ)) return lastName || '';
 
+  // "Province" / "State" typed into a text box (US and Canada).
+  // Not known (or they live elsewhere): left blank, never guessed.
+  if (REGION_Q(q) && !/address|zip|post/i.test(q)) { const r = _homeRegion(); return r ? r.name : ''; }
+
   // Address from the profile ("15 Exchange Gardens, SW8 1BP"): the postcode is the part that
-  // looks like a UK postcode or US ZIP, the street is the rest.
+  // looks like a UK or Canadian postcode or a US ZIP, the street is the rest.
   if (/address|post ?code|postal|zip|street/i.test(q) && !/e-?mail|web/i.test(q)) {
     const addr = String(cfg.APPLICANT.address || '').trim();
-    const pc = (addr.match(/\b[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}\b/i) || addr.match(/\b\d{5}(?:-\d{4})?\b/) || [''])[0].toUpperCase();
+    const pc = (addr.match(/\b[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z] ?\d[ABCEGHJ-NPRSTV-Z]\d\b/i) || addr.match(/\b[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}\b/i) || addr.match(/\b\d{5}(?:-\d{4})?\b/) || [''])[0].toUpperCase();
     if (/post ?code|postal|zip/i.test(q)) return pc;
     if (/line ?2|line two|apartment|suite/i.test(q)) return '';
     return addr.replace(pc, '').replace(/[\s,]+$/, '').trim();
@@ -1307,6 +1311,59 @@ function _usState() {
   return name ? { code: name[0], name: name[1] } : null;
 }
 
+const CA_PROVINCES = { AB: 'Alberta', BC: 'British Columbia', MB: 'Manitoba', NB: 'New Brunswick', NL: 'Newfoundland and Labrador', NS: 'Nova Scotia', NT: 'Northwest Territories', NU: 'Nunavut', ON: 'Ontario', PE: 'Prince Edward Island', QC: 'Quebec', SK: 'Saskatchewan', YT: 'Yukon' };
+// A Canadian postal code's first letter is its province (X covers NT and NU; NT is the usual one).
+const CA_POSTAL = { A: 'NL', B: 'NS', C: 'PE', E: 'NB', G: 'QC', H: 'QC', J: 'QC', K: 'ON', L: 'ON', M: 'ON', N: 'ON', P: 'ON', R: 'MB', S: 'SK', T: 'AB', V: 'BC', X: 'NT', Y: 'YT' };
+// Larger Canadian cities whose names are not also UK or US place names (no London, Windsor, Surrey, Halifax, Victoria).
+const CA_CITIES = { toronto: 'ON', ottawa: 'ON', mississauga: 'ON', brampton: 'ON', hamilton: 'ON', markham: 'ON', vaughan: 'ON', kitchener: 'ON', oakville: 'ON', scarborough: 'ON', etobicoke: 'ON', barrie: 'ON', oshawa: 'ON', guelph: 'ON',
+  montreal: 'QC', 'montréal': 'QC', 'quebec city': 'QC', 'québec': 'QC', laval: 'QC', gatineau: 'QC', longueuil: 'QC', sherbrooke: 'QC',
+  vancouver: 'BC', burnaby: 'BC', richmond: 'BC', kelowna: 'BC', coquitlam: 'BC', abbotsford: 'BC', nanaimo: 'BC', calgary: 'AB', edmonton: 'AB', 'red deer': 'AB', lethbridge: 'AB',
+  winnipeg: 'MB', saskatoon: 'SK', regina: 'SK', dartmouth: 'NS', "st. john's": 'NL', "st john's": 'NL', moncton: 'NB', fredericton: 'NB', 'saint john': 'NB', charlottetown: 'PE', whitehorse: 'YT', yellowknife: 'NT', iqaluit: 'NU' };
+// US ZIP code (first 3 digits) to state.
+const ZIP3 = [[5, 5, 'NY'], [10, 27, 'MA'], [28, 29, 'RI'], [30, 38, 'NH'], [39, 49, 'ME'], [50, 54, 'VT'], [55, 55, 'MA'], [56, 59, 'VT'], [60, 69, 'CT'], [70, 89, 'NJ'], [100, 149, 'NY'], [150, 196, 'PA'], [197, 199, 'DE'],
+  [200, 205, 'DC'], [206, 219, 'MD'], [220, 246, 'VA'], [247, 268, 'WV'], [270, 289, 'NC'], [290, 299, 'SC'], [300, 319, 'GA'], [320, 349, 'FL'], [350, 369, 'AL'], [370, 385, 'TN'], [386, 397, 'MS'], [398, 399, 'GA'],
+  [400, 427, 'KY'], [430, 459, 'OH'], [460, 479, 'IN'], [480, 499, 'MI'], [500, 528, 'IA'], [530, 549, 'WI'], [550, 567, 'MN'], [569, 569, 'DC'], [570, 577, 'SD'], [580, 588, 'ND'], [590, 599, 'MT'], [600, 629, 'IL'],
+  [630, 658, 'MO'], [660, 679, 'KS'], [680, 693, 'NE'], [700, 714, 'LA'], [716, 729, 'AR'], [730, 749, 'OK'], [750, 799, 'TX'], [800, 816, 'CO'], [820, 831, 'WY'], [832, 838, 'ID'], [840, 847, 'UT'], [850, 865, 'AZ'],
+  [870, 884, 'NM'], [885, 885, 'TX'], [889, 898, 'NV'], [900, 961, 'CA'], [967, 968, 'HI'], [970, 979, 'OR'], [980, 994, 'WA'], [995, 999, 'AK']];
+
+// The US state or Canadian province the applicant lives in, from their location and address:
+// an abbreviation ("Toronto, ON"), a full name, a Canadian postal code, a US ZIP or a big city.
+// Null when they live elsewhere or it can't be told: then the question is left for a person.
+function _homeRegion() {
+  const A = cfg.APPLICANT || {};
+  const text = [A.location, A.address].filter(Boolean).join(', ');
+  const low = text.toLowerCase();
+  const country = A.country || '';
+  const ca = (code) => ({ country: 'Canada', code, name: CA_PROVINCES[code] });
+  const caPostal = (text.match(/\b([ABCEGHJ-NPRSTVXY])\d[ABCEGHJ-NPRSTV-Z] ?\d[ABCEGHJ-NPRSTV-Z]\d\b/i) || [])[1];
+  if (country === 'Canada' || caPostal) {
+    const abbr = (text.match(/,\s*([A-Z]{2})\b/g) || []).map((m) => m.replace(/[^A-Z]/g, '')).find((c) => CA_PROVINCES[c]);
+    if (abbr) return ca(abbr);
+    const named = Object.entries(CA_PROVINCES).sort((a, b) => b[1].length - a[1].length).find(([, n]) => new RegExp(`\\b${n}\\b`, 'i').test(text) || (n === 'Quebec' && /québec/i.test(text)));
+    if (named) return ca(named[0]);
+    if (caPostal) return ca(CA_POSTAL[caPostal.toUpperCase()]);
+    const city = Object.keys(CA_CITIES).sort((a, b) => b.length - a.length).find((c) => new RegExp(`(^|[^a-zé])${c.replace(/[.']/g, '\\$&')}($|[^a-zé])`).test(low));
+    if (city && country === 'Canada') return ca(CA_CITIES[city]);
+    if (country === 'Canada') return null;
+  }
+  if (country === 'United States') {
+    const st = _usState();
+    if (st) return { country: 'United States', ...st };
+    const zip = (text.match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1];
+    if (zip) { const z = Number(zip.slice(0, 3)); const hit = ZIP3.find(([a, b]) => z >= a && z <= b); if (hit) return { country: 'United States', code: hit[2], name: US_STATES[hit[2]] }; }
+  }
+  return null;
+}
+// "What is your province of residence?", "State", "Which state do you live in?", "Province/Territory".
+const REGION_Q = (q) => /\b(province|territory|state)\b/i.test(q) && !/united states|statement|\bstate (why|your|the|how|what|any|if)\b|please state|state of the art|marital|current state|state.?owned|state.?funded/i.test(q);
+function _pickRegionOption(region, options) {
+  const n = region.name.toLowerCase(), c = region.code.toLowerCase();
+  const norm = (t) => String(t || '').trim().toLowerCase().replace(/é/g, 'e');
+  return (options.find((o) => [n, c].includes(norm(o.text).replace(/[^a-z ]/g, '').trim()))
+    || options.find((o) => norm(o.text).startsWith(n.replace(/é/g, 'e')))
+    || options.find((o) => new RegExp(`\\b${n.replace(/é/g, 'e')}\\b|\\(${c}\\)`).test(norm(o.text))))?.text || null;
+}
+
 function _pickDropdownOption(question, options) {
   const q = (question || '').toLowerCase();
   const loc = _pickLocationOption(question, options.map(o => o.text));
@@ -1321,10 +1378,11 @@ function _pickDropdownOption(question, options) {
     if (avail === '1month')      return options.find(o => /1 month|one month/i.test(o.text))?.text || null;
   }
   if (/salary|compensation/i.test(q)) return null;
-  // US state ("Which state do you reside in?"): from the location/address ("New York, NY").
-  if (/\bstate\b/i.test(q) && !/united states/i.test(q) && cfg.APPLICANT.country === 'United States') {
-    const st = _usState();
-    if (st) return options.find(o => o.text.trim().toLowerCase() === st.name.toLowerCase() || o.text.trim() === st.code)?.text || null;
+  // State or province of residence (US and Canada). Not in the employer's list = they can't take
+  // this applicant there: no answer, so the job is left rather than guessed.
+  if (REGION_Q(q)) {
+    const r = _homeRegion();
+    return r ? _pickRegionOption(r, options) : null;
   }
   // The applicant's own country (a phone country-code list too: "United States +1").
   if (/country|where.*based/i.test(q)) {
@@ -1413,6 +1471,8 @@ async function _aiPickOption(question, optionTexts, job) {
   if (!question || !optionTexts.length) return null;
   // Nationality and birthplace aren't in the profile, so the AI would only be guessing.
   if (/\b(sole|dual|single) national|nationalit|country of birth|place of birth|born in\b/i.test(question)) return null;
+  // Where the applicant lives decides if the employer may legally hire them: only the profile answers it.
+  if (REGION_Q(question)) return null;
   const cacheKey = `o:${question}|${optionTexts.join('|')}`;
   if (_answerCache.has(cacheKey)) return _answerCache.get(cacheKey);
   const picked = await _aiPickOptionUncached(question, optionTexts, job);

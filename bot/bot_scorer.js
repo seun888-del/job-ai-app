@@ -221,7 +221,7 @@ async function processJob(job) {
   // call: the AI account has a per-minute limit shared by every user.
   let { score, fit, unscored, cvText: boostedText, rawCvText, missingKeywords, allKeywords } = job.source === 'trac'
     ? await (async () => { const t = cleanText(await cvSelector.extractCVText(bestCV.path)); return { score: 0, cvText: t, rawCvText: t, missingKeywords: [] }; })()
-    : await scoreWithBoost(bestCV, scoreJD, matchLevel, { federal: job.source === 'usajobs' && scoreJD !== job.description });
+    : await scoreWithBoost(bestCV, scoreJD, matchLevel, { federal: job.source === 'usajobs' && scoreJD !== job.description, jobbank: job.source === 'jobbank' });
   // The AI couldn't read the advert's keywords: try the job again later, then skip it.
   if (unscored) {
     if ((job.retryCount || 0) < 2) {
@@ -251,7 +251,7 @@ async function processJob(job) {
 
     for (const altCV of others) {
       console.log(`\n  [Scorer Agent] ${score}% — trying next CV: ${altCV.name}`);
-      const result = await scoreWithBoost(altCV, scoreJD, matchLevel, { federal: job.source === 'usajobs' && scoreJD !== job.description });
+      const result = await scoreWithBoost(altCV, scoreJD, matchLevel, { federal: job.source === 'usajobs' && scoreJD !== job.description, jobbank: job.source === 'jobbank' });
 
       const pass = !!(result.fit && result.fit.pass), bestPass = !!(bestFit && bestFit.pass);
       if ((pass && !bestPass) || (pass === bestPass && result.score > bestScore)) {

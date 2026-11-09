@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Job-AI: Auto Apply to Jobs That Fit Your CV",
   "short_name": "Job-AI",
-  "version": "0.5.61",
+  "version": "0.5.62",
   "description": "Auto apply to jobs that fit your CV. Skips poor matches, tailors your CV to each job and fills in the employer's form. UK and US.",
   "icons": {
     "16": "icons/icon16.png",
@@ -26,8 +26,10 @@
     "unlimitedStorage",
     "tabs",
     "scripting",
-    "power"
+    "power",
+    "identity"
   ],
+  "optional_host_permissions": ["https://www.jobbank.gc.ca/*"],
   "host_permissions": [
     "https://api.tryjobai.com/*",
     "https://www.healthjobsuk.com/*",

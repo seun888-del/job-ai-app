@@ -2,7 +2,7 @@
 // Every function the shared agent code runs inside a web page, bundled by id.
 module.exports = {
   "f93d8a3ef8df9": el => el.files?.length || 0,
-  "fa970bfd884c6": () => {
+  "f50f30538e390": () => {
     const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
     const textOf = (e) => {
       const l = (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label');
@@ -32,7 +32,7 @@ module.exports = {
     }
     return [...new Set(out)];
   },
-  "f8fcfea8a925b": () => {
+  "f1582cc5c84c8": () => {
     const out = [];
     document.querySelectorAll('[data-jobai-yn]').forEach(e => e.removeAttribute('data-jobai-yn'));
     for (const box of document.querySelectorAll('div')) {
@@ -52,7 +52,7 @@ module.exports = {
     return out;
   },
   "f6bf25fe2b85d": el => el.click(),
-  "fa77ab52b1714": () => {
+  "ff8b72e744471": () => {
     const labelOf = (cb) => { const l = (cb.id && document.querySelector(`label[for="${CSS.escape(cb.id)}"]`)) || cb.closest('label'); return ((l && l.innerText) || cb.getAttribute('aria-label') || cb.value || '').replace(/\s+/g, ' ').trim(); };
     const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
     const all = [...document.querySelectorAll('input[type="checkbox"]')].filter(shown);
@@ -93,7 +93,7 @@ module.exports = {
   },
   "f281df73ea86f": el => el.checked,
   "f984ff3b07e9e": el => { const l = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label'); (l || el).click(); },
-  "f1b11dedd0ea7": ({ name, want }) => {
+  "f9062b1fb382d": ({ name, want }) => {
     const rs = Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`));
     for (const r of rs) {
       const w = r.closest('[role="radio"]');
@@ -107,7 +107,7 @@ module.exports = {
     }
     return false;
   },
-  "f4c2674b69e0b": el => {
+  "f91a4a731e8d2": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         // Also accept a WRAPPING <label> (no for=) — Workable nests the input
         // inside a <label> whose text is the question, with no fieldset/aria at
@@ -124,7 +124,7 @@ module.exports = {
         const label = (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || el.getAttribute('aria-label') || ll?.innerText || wl?.innerText || '').trim();
         return { label, placeholder: el.placeholder || '' };
       },
-  "f3b23a78b9c67": el => {
+  "f280caa33d325": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const fs   = el.closest('fieldset');
@@ -137,7 +137,7 @@ module.exports = {
         return { question, options };
       },
   "fc2e0d667fec4": el => !!(el.offsetParent || (el.labels && [...el.labels].some(l => l.offsetParent))),
-  "fa67528cec682": el => {
+  "f0c4ed2aa0952": el => {
         const name = el.name || '';
         const allR = name ? Array.from(document.querySelectorAll(`input[type="radio"][name="${name}"]`)) : [el];
         // Option text: label[for] / wrapping <label> / the radio's parent text
@@ -185,13 +185,13 @@ module.exports = {
         return { groupName: name, legend: q, options };
       },
   "f24044144b7ba": () => true,
-  "f4fbbb957bca8": el => {
+  "f3241c962bcca": el => {
           const w = el.closest('[role="radio"],fieldset'); return el.required || el.getAttribute('aria-required') === 'true' || (w && w.getAttribute('aria-required') === 'true');
         },
   "f4d9d6c3d9a53": el => { const p = el.closest('[role="radio"]') || el.closest('label') || (el.labels && el.labels[0]) || el.parentElement; (p || el).click(); },
   "f347f48337a5c": el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.click(); },
   "f473f1b370347": (els, i) => { const el = els[i]; if (!el) return; const l = el.closest('label') || (el.id && document.querySelector(`label[for="${el.id}"]`)); (l || el).click(); },
-  "f1a6b7df0e4ac": () => {
+  "fe62e436a89f6": () => {
       for (const g of document.querySelectorAll('[class*="file-upload"], fieldset, [class*="field"]')) {
         const head = (g.querySelector('label, legend, [class*="label"]') || {}).innerText || '';
         if (!/cover letter/i.test(head) || !/\*/.test(head) || g.querySelector('textarea')) continue;
@@ -201,7 +201,7 @@ module.exports = {
       }
       return false;
     },
-  "f3079b5118679": () => {
+  "f19badca2c5b1": () => {
         for (const g of document.querySelectorAll('[class*="file-upload"], fieldset, [class*="field"]')) {
           const head = (g.querySelector('label, legend, [class*="label"]') || {}).innerText || '';
           const ta = /cover letter/i.test(head) && g.querySelector('textarea');
@@ -209,7 +209,7 @@ module.exports = {
         }
         return false;
       },
-  "f3e4797337887": el => {
+  "f07f193c7c1f5": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab  = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const fs   = el.closest('fieldset');
@@ -219,22 +219,22 @@ module.exports = {
         const ll   = el.closest('.application-question')?.querySelector('.application-label');
         return (lab?.innerText || (alb ? byId(alb.split(' ')[0]) : '') || ll?.innerText || wl?.innerText || el.placeholder || el.getAttribute('aria-label') || '').trim();
       },
-  "f3bf7b89e9a4e": el => {
+  "fef8298953616": el => {
         const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label') || el.parentElement;
         return { text: (lab?.innerText || '').toLowerCase(), id: el.id || '' };
       },
   "fb76b21ebf7e0": el => { const l = el.closest('label') || el.parentElement; (l || el).click(); },
   "f03b4b2773ef4": el => { el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); },
-  "fb9acdf14d91a": () => {
+  "fa08702decda5": () => {
     const el = document.querySelector('input[name="cf-turnstile-response"], input[name*="turnstile" i], input[name="g-recaptcha-response"]');
     return !!(el && el.value && el.value.length > 20);
   },
-  "f58c6f6269920": () => {
+  "ffc9ff588cfa3": () => {
     const shown = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 60 && r.height > 60 && cs.visibility !== 'hidden' && cs.display !== 'none' && cs.opacity !== '0'; };
     const challenge = [...document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[title*="challenge" i], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"], iframe[src*="captcha-delivery"]')].some(shown);
     return challenge || /verify you are human|slide right to secure|are you a robot/i.test(document.body?.innerText || '');
   },
-  "f5f36b20a688f": () => {
+  "f635c2c739280": () => {
     let fields = 0, radios = 0, boxes = 0;
     for (const el of document.querySelectorAll('input[required], select[required], textarea[required]')) {
       if (el.offsetParent === null) continue;
@@ -253,7 +253,7 @@ module.exports = {
     }
     return { fields, radios, boxes };
   },
-  "f17724d6ac189": () => {
+  "ff6589b315bf6": () => {
             const t = (document.body?.innerText || '').toLowerCase();
             const success = /application (received|submitted)|thank you for applying|thanks for applying|successfully applied|we('| ha)ve received your|application complete/.test(t);
             const validationError = /please select|please (fill|complete)|this field is required|is required\b|please provide|please enter/.test(t);
@@ -268,14 +268,14 @@ module.exports = {
             return { success, validationError, submitting, formGone, turnstile, emailCode };
           },
   "f8cc200e5ff13": () => /verify you are human/i.test(document.body?.innerText || '') || !!document.querySelector('iframe[src*="challenges.cloudflare.com"], .cf-turnstile, [name="cf-turnstile-response"]'),
-  "f37b54efac2b8": () => {
+  "f1a2da66b20f6": () => {
       const t = (document.body?.innerText || '').toLowerCase();
       return {
         success: /application (received|submitted)|thank you for (applying|your interest)|thanks for applying|successfully applied|we('| ha)ve received your|application complete/.test(t) || /confirmation/.test(location.href),
         wrong: /(invalid|incorrect|wrong|expired).{0,30}code|code.{0,30}(invalid|incorrect|expired|didn.t match)/.test(t),
       };
     },
-  "f9fea4f6b111d": el => {
+  "f98b62e23b18f": el => {
         const byId = id => { const e = id && document.getElementById(id); return e ? (e.innerText || '').trim() : ''; };
         const lab = (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label');
         const alb = el.getAttribute('aria-labelledby') || '';
@@ -286,13 +286,13 @@ module.exports = {
         const chosen = control && control.querySelector('[class*="single-value"],[class*="singleValue"],[class*="multi-value"],[class*="multiValue"]');
         return { question, has: !!(chosen && chosen.textContent.trim()) };
       },
-  "f87896960ea1a": el => {
+  "f4d284423858f": el => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
         const opts = Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent);
         return opts.map(o => (o.innerText || o.textContent || '').trim());
       },
-  "f24fcff94188c": el => {
+  "f2e0ed16954c2": el => {
         el.focus();
         // react-select only opens on the full pointer + mouse sequence (a lone mousedown is ignored).
         const ctl = el.closest('[class*="control"]') || el.parentElement;
@@ -302,7 +302,7 @@ module.exports = {
         }
       },
   "f8a7cb68b42c2": el => { const b = el.parentElement && el.parentElement.querySelector('button'); if (b) b.click(); },
-  "f0f66612e6ebc": (el, want) => {
+  "f56fb43e0b51c": (el, want) => {
         const id = el.getAttribute('aria-controls');
         const menu = id && document.getElementById(id);
         const opt = Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent)
@@ -468,6 +468,55 @@ module.exports = {
     return out;
   },
   "f189586c3428f": id => { const i = document.querySelector(`[data-jbq="${id}"]`); if (i) (i.closest('label') || i).click(); },
+  "fefd8e4ee8d5d": () => (document.querySelector('main') || document.body).innerText,
+  "fe4e8ebaaf88e": () => !!([...document.querySelectorAll('a,input[type=submit],button')].find((e) => /^\s*(Logout|Log out|Sign out)\s*$/i.test(e.textContent || e.value || '')))
+    && !document.querySelector('input[type=password]'),
+  "fe040a847db69": (ref) => {
+    const out = [];
+    // Each section link's title reads "<Section> for <job title> <reference> <state>", and its
+    // icon's alt is the state: "Completed", "To be completed" or "Optional".
+    for (const a of document.querySelectorAll('main a[title]')) {
+      const full = (a.getAttribute('title') || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+      if (!full.includes(ref) || !/ for /.test(full)) continue;
+      const name = (a.innerText || '').replace(/\s+/g, ' ').trim() || full.split(' for ')[0];
+      const alt = [...a.querySelectorAll('img')].map((i) => i.alt || '').join(' ').toLowerCase() || full.toLowerCase();
+      const state = /optional/.test(alt) ? 'optional' : /to be completed/.test(alt) ? 'todo' : /completed/.test(alt) ? 'done' : 'unknown';
+      out.push({ name, full, state });
+    }
+    return out;
+  },
+  "f897b14adf98b": ({ ref, name }) => [...document.querySelectorAll('main a')].findIndex((a) => {
+    const t = (a.getAttribute('title') || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    return t.includes(ref) && t.toLowerCase().startsWith(name.toLowerCase());
+  }),
+  "f1cbe7898b644": () => [...document.querySelectorAll('main .alert-danger, main .error, main [class*=error], main .label-danger')]
+    .map((e) => e.innerText.replace(/\s+/g, ' ').trim()).filter((t) => t && t.length < 400).slice(0, 5),
+  "f38ea70885897": () => {
+    const qs = [];
+    const sels = [...document.querySelectorAll('main select')];
+    for (const s of sels) {
+      const lab = (s.id && document.querySelector(`label[for="${s.id}"]`)) || s.closest('fieldset, .form-group, div');
+      const question = (lab ? lab.innerText : '').replace(/Please Specify|Yes\s*No\s*$/g, '').replace(/\s+/g, ' ').trim();
+      // The detail box that follows this select (before the next select).
+      let ta = null;
+      const all = [...document.querySelectorAll('main select, main textarea')];
+      for (let i = all.indexOf(s) + 1; i < all.length; i++) { if (all[i].tagName === 'SELECT') break; if (all[i].tagName === 'TEXTAREA') { ta = all[i]; break; } }
+      const taLab = ta && ta.id ? document.querySelector(`label[for="${ta.id}"]`) : null;
+      qs.push({ selName: s.name, selId: s.id, options: [...s.options].map((o) => o.text.trim()).filter(Boolean), question: question.slice(0, 1500),
+        detailName: ta ? ta.name : '', detailId: ta ? ta.id : '', detailAsk: taLab ? taLab.innerText.replace(/\s+/g, ' ').trim().slice(0, 600) : '' });
+    }
+    return qs;
+  },
+  "f99858a99b16a": () => [...document.querySelectorAll('main input[type=checkbox]')].map((c) => ({ id: c.id, name: c.name, label: ((c.id && document.querySelector(`label[for="${c.id}"]`)) || c.parentElement || {}).innerText || '' })),
+  "f30eaa5ea3222": () => [...document.querySelectorAll('main select, main input[type=text], main textarea')].filter((e) => e.name).map((e) => {
+    const l = e.id && document.querySelector(`label[for="${e.id}"]`);
+    return { name: e.name, tag: e.tagName, label: (l ? l.innerText : e.name).replace(/\s+/g, ' ').trim().slice(0, 80),
+      options: e.tagName === 'SELECT' ? [...e.options].map((o) => o.text.trim()).filter((t) => t && !/^Please Specify$/i.test(t)) : null };
+  }),
+  "f873b5b96bc7e": (name) => [...document.querySelectorAll(`main input[type=checkbox][name="${name}"]`)].map((c) => {
+    const l = (c.id && document.querySelector(`label[for="${c.id}"]`)) || c.closest('label, tr, li') || c.parentElement;
+    return { value: c.value, label: (l ? l.innerText : '').replace(/\s+/g, ' ').trim() };
+  }),
   "f308ebf110f8b": () => {
       const btn = Array.from(document.querySelectorAll('button')).find(b =>
         /accept.*cookie|accept all/i.test(b.textContent || '')

@@ -179,25 +179,28 @@ document.addEventListener('click', async (e) => {
 
 // Switched region: the job sites there that need the user's own account are off by default,
 // so offer them once per region instead of leaving them hidden in Search Preferences.
-async function regionSitesPrompt(region) {
-  const us = region === 'us';
+// force: opened from the Setup checklist (shown even if they saw it before).
+async function regionSitesPrompt(region, force = false) {
+  const us = region === 'us', ca = region === 'ca';
   const key = 'region_sites_prompt_' + region;
-  // Canada has no extra job sites besides LinkedIn (retired by default), so nothing to offer.
-  if (region === 'ca') return;
-  try { if (localStorage.getItem(key) || document.getElementById('region-prompt')) return; } catch (_) { return; }
+  try { if ((!force && localStorage.getItem(key)) || document.getElementById('region-prompt')) return; } catch (_) { return; }
+  let gmail = { connected: false }; try { gmail = await window.api.gmail.status(); } catch (_) {}
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const [prefs, profile] = await Promise.all([window.api.searchPrefs.get().catch(() => ({})), window.api.profile.get().catch(() => ({}))]);
   const on = String(prefs.extra_sites || '').split(',').map((s) => s.trim());
   let F = {}; try { F = JSON.parse(profile.federal_details || '{}') || {}; } catch (_) {}
   const rows = [
-    ...extraForRegion(region).map(([k, l]) => [k, l, `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, on.includes(k)]),
+    // Job Bank first in Canada: it is the one most people want, and it needs no new account.
+    ...extraForRegion(region).sort((a, b) => (b[0] === 'jobbank') - (a[0] === 'jobbank')).map(([k, l]) => [k, l, k === 'jobbank'
+      ? `Applies by email to jobs on Job Bank, the Government of Canada job board, sent from your own Gmail. No Job Bank account needed. ${gmail.connected ? `Sends from ${gmail.email}.` : 'You connect Gmail next: Job-AI can only send, it can\'t read your email.'}`
+      : `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, k === 'jobbank' ? (on.includes(k) || !localStorage.getItem(key)) : on.includes(k)]),
     ...(us ? [['federal', 'Federal government jobs', 'Needs a USAJOBS account (you sign in with Login.gov). Job-AI writes the resume, you apply there yourself.', !!F.wants]] : []),
   ];
   const o = document.createElement('div'); o.id = 'region-prompt';
   o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
   o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:520px;width:100%;max-height:86vh;overflow:auto;border-radius:12px;padding:22px 24px">
-    <h3 style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">More job sites in the ${us ? 'USA' : 'UK'}</h3>
-    <p style="margin:0 0 14px;color:var(--text-muted,#4a453b);font-size:14px">Job-AI applies on employers' own websites for you. It can also use these if you have an account there. Tick any you want.</p>
+    <h3 style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">More job sites in ${us ? 'the USA' : ca ? 'Canada' : 'the UK'}</h3>
+    <p style="margin:0 0 14px;color:var(--text-muted,#4a453b);font-size:14px">Job-AI applies on employers' own websites for you. ${ca ? 'It can also apply to these. Tick any you want.' : 'It can also use these if you have an account there. Tick any you want.'}</p>
     ${rows.map(([k, l, note, c]) => `<label style="display:flex;gap:10px;align-items:flex-start;margin:0 0 12px;cursor:pointer"><input type="checkbox" class="rp-site" value="${k}" ${c ? 'checked' : ''} style="flex:0 0 16px;width:16px;height:16px;min-width:16px;max-width:16px;margin:3px 0 0;padding:0;accent-color:var(--primary,#3b82f6)"><span><strong>${e(l)}</strong><br><small style="color:var(--text-muted,#4a453b)">${e(note)}</small></span></label>`).join('')}
     <div id="rp-fed" style="display:none;grid-template-columns:1fr 1fr;gap:0 10px;margin:-4px 0 10px 26px">
       <div class="field" style="margin-bottom:8px"><label for="rp-cit">Are you a U.S. citizen?</label><select id="rp-cit"><option value="">Choose</option><option value="yes" ${F.usCitizen === 'yes' ? 'selected' : ''}>Yes</option><option value="no" ${F.usCitizen === 'no' ? 'selected' : ''}>No</option></select></div>
@@ -218,6 +221,14 @@ async function regionSitesPrompt(region) {
       const cur = new Set(String((await window.api.searchPrefs.get()).extra_sites || '').split(',').map((s) => s.trim()).filter(Boolean));
       for (const [k] of extraForRegion(region)) { if (picked.has(k)) cur.add(k); else cur.delete(k); }
       await window.api.searchPrefs.save({ extra_sites: [...cur].join(',') });
+      // Job Bank sends from Gmail: connect it now (Google opens in the browser) unless already done.
+      if (ca && picked.has('jobbank') && !gmail.connected) {
+        const btn = $o('#rp-yes'); btn.disabled = true; btn.textContent = 'Finish in your browser…';
+        showStatus($o('#rp-st'), 'Pick your Gmail, then tick "Send email on your behalf" and press Continue.', 'info');
+        const r = await window.api.gmail.connect().catch((err) => ({ error: err.message }));
+        btn.disabled = false; btn.textContent = 'Turn on';
+        if (!r || !r.connected) { showStatus($o('#rp-st'), (r && r.error) || 'Gmail was not connected. Try again, or untick Job Bank.', 'error'); return; }
+      }
       if (us) await window.api.profile.save({ federal_details: JSON.stringify({ ...F, wants: picked.has('federal'), ...(picked.has('federal') ? { usCitizen: $o('#rp-cit').value, hoursPerWeek: Math.min(80, Math.max(1, parseInt($o('#rp-hrs').value, 10) || 40)) } : {}) }) });
     } catch (err) { showStatus($o('#rp-st'), 'Could not save: ' + err.message, 'error'); return; }
     seen(); o.remove();
@@ -1461,9 +1472,10 @@ async function renderLicense() {
 // Sign-in agents are off unless the user turns them on under Extra job sites (Search
 // Preferences), because each needs the user's own account. UK: Reed. USA: Dice, Wellfound.
 // LinkedIn in both. Indeed stays off. Same rule as bot/modules/retired_agents.js.
-const EXTRA_SITES = [['reed', 'Reed', 'uk'], ['linkedin', 'LinkedIn', 'both'], ['dice', 'Dice', 'us'], ['wellfound', 'Wellfound', 'us']];
+// Job Bank (Canada) needs no Job Bank account: it applies by email from the user's Gmail.
+const EXTRA_SITES = [['reed', 'Reed', 'uk'], ['linkedin', 'LinkedIn', 'both'], ['dice', 'Dice', 'us'], ['wellfound', 'Wellfound', 'us'], ['jobbank', 'Job Bank (apply by email)', 'ca']];
 const extraForRegion = (region) => EXTRA_SITES.filter(([, , r]) => r === 'both' || r === region);
-const RETIRED_AGENTS = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound']);
+const RETIRED_AGENTS = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound', 'jobbank']);
 function applyExtraSites(extraCsv, region) {
   const on = String(extraCsv || '').split(',').map(s => s.trim());
   RETIRED_AGENTS.clear(); RETIRED_AGENTS.add('indeed');
@@ -2409,6 +2421,9 @@ async function renderDashboard() {
   // Government of Canada jobs (GC Jobs) in Canada only, for those who turned them on.
   let gcDetails = {}; try { gcDetails = JSON.parse(profile.gc_details || '{}') || {}; } catch (_) {}
   const wantsGc = region === 'ca' && !!gcDetails.wants;
+  // Job Bank is "set up" once it is ticked and Gmail is connected.
+  let jbGmail = { connected: false }; try { if (region === 'ca') jbGmail = await window.api.gmail.status(); } catch (_) {}
+  const jobbankOn = region === 'ca' && extraCsv.split(',').map((s) => s.trim()).includes('jobbank') && !!jbGmail.connected;
   const appAgentKeys = Object.keys(BOT_LABELS).filter(k => k !== 'scorer' && !RETIRED_AGENTS.has(k) && !(!isUK && k === 'trac') && !(k === 'usajobs' && !wantsFederal) && !(k === 'gcjobs' && !wantsGc) && !(k === 'jobbank' && region !== 'ca'));
   // Tell phone control (tryjobai.com/app) which agents this dashboard shows and which are ticked.
   const shareAgentPrefs = () => { try { window.api.remote.setPrefs({ keys: appAgentKeys, enabled: appAgentKeys.filter(k => localStorage.getItem('agent_enabled_' + k) !== '0') }); } catch (_) {} };
@@ -2541,6 +2556,7 @@ async function renderDashboard() {
         <button class="preflight-link${setupDone.search ? ' is-done' : ''}" data-view="search">${setupDone.search ? '✓' : '⚙️'} Search preferences</button>
         <button class="preflight-link${setupDone.cvs ? ' is-done' : ''}" data-view="cvs">${setupDone.cvs ? '✓' : '📄'} CVs</button>
         ${isUK ? `<button class="preflight-link${setupDone.trac ? ' is-done' : ''}" data-view="trac-details">${setupDone.trac ? '✓' : '🏥'} NHS / Trac details</button>` : ''}
+        ${region === 'ca' ? `<button class="preflight-link${jobbankOn ? ' is-done' : ''}" id="jb-setup-link">${jobbankOn ? '✓' : '✉️'} Job Bank email</button>` : ''}
         ${isUS ? `<button class="preflight-link${wantsFederal && fedDetails.usCitizen ? ' is-done' : ''}" data-view="federal-details">${wantsFederal && fedDetails.usCitizen ? '✓' : '🏛️'} Federal jobs details</button>` : ''}
       </div>
     </div>
@@ -3129,6 +3145,7 @@ async function refreshJobBankGmail(note) {
     : `<small>Applies by email to jobs on Job Bank (Government of Canada), sent from your own Gmail. Job-AI can only send, it can't read your email.${note ? `<br><span style="color:var(--danger,#a8432f)">${e(note)}</span>` : ''}</small><br><button class="primary" id="jb-gmail-on" style="margin:6px 0 0;padding:5px 14px;font-size:13px">Connect Gmail</button>`;
 }
 document.addEventListener('click', async (ev) => {
+  if (ev.target.closest('#jb-setup-link')) { regionSitesPrompt('ca', true); return; }
   if (ev.target.closest('#jb-gmail-on')) {
     const b = ev.target.closest('#jb-gmail-on'); b.disabled = true; b.textContent = 'Finish in your browser…';
     const r = await window.api.gmail.connect().catch((err) => ({ error: err.message }));

@@ -15,7 +15,10 @@ const DELAY = (ms) => new Promise((r) => setTimeout(r, ms));
 async function request(url, { method = 'GET', body = null, headers = {}, cookie = '' } = {}) {
   const c = new AbortController(); const t = setTimeout(() => c.abort(), 30000);
   try {
-    const r = await fetch(url, { method, body, signal: c.signal,
+    // In the Chrome extension the browser keeps Job Bank's session cookie itself (Cookie and
+    // User-Agent headers are not allowed there), so ask it to send cookies with each request.
+    const inBrowser = typeof chrome !== 'undefined' && !!(chrome.runtime && chrome.runtime.id);
+    const r = await fetch(url, { method, body, signal: c.signal, ...(inBrowser ? { credentials: 'include' } : {}),
       headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml,*/*', 'Accept-Language': 'en-CA,en;q=0.9', ...(cookie ? { Cookie: cookie } : {}), ...headers } });
     const cookies = (typeof r.headers.getSetCookie === 'function' ? r.headers.getSetCookie() : []).map((s) => s.split(';')[0]);
     return { status: r.status, body: await r.text(), cookies };
@@ -42,8 +45,19 @@ function parseResults(html) {
   return out;
 }
 
+// Job Bank uses Canada's standard job titles ("help desk technician"), so "Help Desk Analyst"
+// finds nothing. With no results, search again without the trailing job word ("help desk").
+const TRAILING_ROLE = /\s+(analyst|engineer|technician|specialist|administrator|advisor|adviser|officer|consultant|associate|executive|agent|representative)$/i;
+
 // Jobs posted on Job Bank by the employer, newest first. location: a city/province, '' = Canada.
-async function search(term, { location = '', maxPages = 4 } = {}) {
+async function search(term, opts = {}) {
+  const found = await searchExact(term, opts);
+  const shorter = String(term || '').trim().replace(TRAILING_ROLE, '');
+  if (found.length || !shorter || shorter === String(term || '').trim() || shorter.split(/\s+/).length < 2) return found;
+  return searchExact(shorter, opts);
+}
+
+async function searchExact(term, { location = '', maxPages = 4 } = {}) {
   const byId = new Map();
   let cookie = '';
   for (let page = 1; page <= maxPages; page++) {
@@ -93,7 +107,17 @@ async function howToApply(id, cookie = '') {
   const t = strip(x);
   // Things the employer asks applicants to include ("Include this reference number...").
   const ref = (t.match(/[Ii]nclude this reference number when applying:\s*([^\n]{1,60})/) || [])[1] || '';
-  return { ok: true, email, directApply: /Direct Apply/i.test(t), byMail: /By mail/i.test(t), inPerson: /In person/i.test(t), reference: ref.trim() };
+  const online = ((x.match(/href="(https?:\/\/(?![^"]*jobbank\.gc\.ca)[^"]+)"/) || [])[1] || '').replace(/&amp;/g, '&');
+  return { ok: true, email, online, directApply: /Direct Apply/i.test(t), byMail: /By mail/i.test(t), inPerson: /In person/i.test(t), reference: ref.trim() };
 }
 
-module.exports = { search, fetchPosting, howToApply, parseResults, BASE };
+// Why a job can't be applied to by email, in the user's words ('' when it can).
+function noEmailReason(how) {
+  if (!how || !how.ok || how.email) return '';
+  if (how.online) return "Applies on the employer's own website, not by email";
+  if (how.directApply) return "Applies through Job Bank's Direct Apply, which needs a Job Bank account";
+  if (how.byMail || how.inPerson) return 'Applies by post or in person only';
+  return 'No way to apply by email';
+}
+
+module.exports = { search, fetchPosting, howToApply, noEmailReason, parseResults, BASE };

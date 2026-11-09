@@ -133,7 +133,7 @@ export class AtsAgent extends SiteAgent {
       else if (saved && saved.status === 'pending') queued++;
       else if (!saved) skip('blocked title or company');
       // First win: three queued is enough to get the first application out; the rest straight after.
-      if (this.firstWin && (await store.byStatus('pending', this.source)).length >= 3) { this.log('Sending one application first, then checking the rest.'); break; }
+      if (this.firstWin && (await store.byStatus('pending', this.source)).length >= 3) { this.log('Sending one application first, then checking the rest.'); this.cutShort = true; break; }
       await sleep(800);
     }
     if (checked) {

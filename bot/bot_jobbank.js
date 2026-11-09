@@ -20,8 +20,14 @@ const salary = require('./modules/salary_filter');
 const titleMatch = require('./modules/title_match');
 const jb = require('./modules/jobbank');
 const { sendMail } = require('./modules/gmail_send');
+const { cleanJobBankJD } = require('./modules/jobbank_jd');
 
 const SOURCE = 'jobbank';
+// Test mode: JOBBOT_JOBBANK_TEST_TO=<your own address> sends every application THERE instead of
+// to the employer (subject says which employer it would have gone to), at most 3 per run.
+const TEST_TO = String(process.env.JOBBOT_JOBBANK_TEST_TO || '').trim();
+let testSent = 0;
+const tested = new Set(); // jobs already test-sent this run, so none is sent twice
 const ROUND_MS = 30 * 60 * 1000;
 const DELAY = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (m) => console.log(`  [Job Bank] ${m}`);
@@ -46,10 +52,14 @@ async function phase1() {
     const fits = jobs.filter((j) => titleMatch.titleMatches(j.title, matchers));
     log(`"${term}"${where ? ` near ${where}` : ''}: ${jobs.length} job(s) posted on Job Bank, ${fits.length} match your title.`);
     for (const j of fits) {
-      if (queue.has(j.jobId) || queue.wasApplied(j.jobId)) continue;
+      // A job scored before the cleaner existed (every tick box counted as a must-have) is
+      // checked once more with the clean advert; anything else already seen is left alone.
+      const prev = queue.read().find((x) => x.jobId === j.jobId);
+      const recheck = prev && prev.status === 'skipped' && ((prev.extra && prev.extra.jdClean) || 0) < 2 && /must-haves|tailored resume only matches|% match/.test(prev.reason || '');
+      if ((queue.has(j.jobId) && !recheck) || queue.wasApplied(j.jobId)) continue;
       if (cfg.TITLE_BLOCKLIST.some((k) => j.title.toLowerCase().includes(k))) continue;
       if (cfg.COMPANY_BLOCKLIST.some((b) => j.company.toLowerCase().includes(b))) continue;
-      if (queue.hasCanonical(j.title, j.company)) continue;
+      if (!recheck && queue.hasCanonical(j.title, j.company)) continue;
       const base = { jobId: j.jobId, title: j.title, company: j.company, url: j.url, source: SOURCE, extra: { location: j.location, pay: j.salary } };
       const skip = (reason) => queue.add({ ...base, status: 'skipped', reason });
       const p = await jb.fetchPosting(j.id);
@@ -58,10 +68,17 @@ async function phase1() {
       // "The employer accepts applications from: Canadian citizens and permanent or temporary residents..."
       if (p.who && !/other candidates/i.test(p.who) && !canWorkInCanada()) { skip('Only people who can already work in Canada'); continue; }
       if (remoteOnly && !/remote/i.test(p.description)) { skip('Work type (on site) not wanted'); continue; }
-      const description = `${j.salary ? `Pay: ${j.salary}. ` : ''}${p.description}`;
+      // Only jobs that take email can be sent: check before spending AI on the resume.
+      const how = await jb.howToApply(j.id).catch(() => ({ ok: false }));
+      if (!how.ok) continue; // Job Bank didn't answer: try again next round
+      const noEmail = jb.noEmailReason(how);
+      if (noEmail) { if (prev) queue.update(j.jobId, { status: 'skipped', reason: noEmail, extra: { ...(prev.extra || {}), jdClean: 2 } }); else skip(noEmail); continue; }
+      // The duties and real requirements, not every tick box (see jobbank_jd.js).
+      const description = cleanJobBankJD(p.description, { title: j.title });
       if (description.split(/\s+/).length < 60) { skip('Job description too short'); continue; }
       if (!salary.isAcceptable(description, cfg.APPLICANT.salaryExpectation)) { skip('Below your salary expectation'); continue; }
-      queue.add({ ...base, description, extra: { ...base.extra, jobBankId: j.id, number: p.number } });
+      if (recheck) { queue.update(j.jobId, { status: 'pending', reason: '', description, extra: { ...(prev.extra || {}), jobBankId: j.id, number: p.number, jdClean: 2 } }); log(`Checking again: ${j.title} @ ${j.company}`); continue; }
+      queue.add({ ...base, description, extra: { ...base.extra, jobBankId: j.id, number: p.number, jdClean: 2 } });
       queued++;
       log(`Found: ${j.title} @ ${j.company}`);
     }
@@ -79,11 +96,12 @@ function emailText(job, letter) {
   const A = cfg.APPLICANT;
   const name = [A.firstName, A.lastName].filter(Boolean).join(' ');
   let body = String(letter || '').trim();
-  if (!body) body = `Dear Hiring Manager,\n\nI would like to apply for the ${job.title} position${job.company ? ` at ${job.company}` : ''} advertised on Job Bank. My resume is attached.\n\nThank you for your time.\n\nKind regards,\n${name}`;
-  // Contact details under the letter, so the employer can reply or call.
+  if (!body) body = `I would like to apply for the ${job.title} position${job.company ? ` at ${job.company}` : ''} advertised on Job Bank. My resume is attached.\n\nThank you for your time.`;
+  // An email reads as a letter: greeting first, then a sign-off with name and contact details.
+  if (!/^\s*(dear|hello|hi)\b/i.test(body)) body = `Dear Hiring Manager,\n\n${body}`;
+  body = body.replace(/\n+\s*(kind regards|best regards|regards|sincerely|yours sincerely|yours faithfully),?[\s\S]*$/i, '').trim();
   const contact = [A.phone, process.env.JOBBOT_GMAIL_USER].filter(Boolean).join('\n');
-  if (contact && !body.includes(A.phone || '\u0000')) body += `\n\n${contact}`;
-  return body;
+  return `${body}\n\nKind regards,\n${name}${contact ? `\n${contact}` : ''}\n\nMy resume is attached.`;
 }
 
 async function phase2(until) {
@@ -92,21 +110,31 @@ async function phase2(until) {
     const ready = queue.getByStatus('cv_ready').filter((j) => j.source === SOURCE);
     const emailed = recentlyEmailed();
     for (const job of ready) {
+      if (tested.has(job.jobId)) continue;
       if (queue.countAppliedToday() >= cfg.MAX_APPLICATIONS_PER_DAY) { log('Daily limit reached.'); await DELAY(Math.max(0, until - Date.now())); return; }
       const ex = job.extra || {};
       console.log(`\n  [Job Bank] ── ${job.title} @ ${job.company}`);
       const how = await jb.howToApply(ex.jobBankId || String(job.jobId).replace(/^jobbank_/, '')).catch(() => ({ ok: false }));
       if (!how.ok) { log('Could not read how to apply, trying again later.'); continue; }
-      if (!how.email) { queue.update(job.jobId, { status: 'skipped', reason: 'The employer does not take applications by email (Direct Apply, mail or in person only)' }); log('No email to apply to, skipped.'); continue; }
+      if (!how.email) { const why = jb.noEmailReason(how); queue.update(job.jobId, { status: 'skipped', reason: why }); log(`Skipped: ${job.title} (${why})`); continue; }
       if (emailed.has(how.email)) { queue.update(job.jobId, { status: 'skipped', reason: 'Already applied to this employer by email in the last 30 days' }); continue; }
       if (!job.cvPath) { queue.update(job.jobId, { status: 'skipped', reason: 'No tailored resume to attach' }); continue; }
       queue.update(job.jobId, { status: 'applying' });
       const A = cfg.APPLICANT;
       const name = [A.firstName, A.lastName].filter(Boolean).join(' ');
       const subject = `Application for ${job.title}${ex.number ? ` (Job Bank #${ex.number})` : ''}${how.reference ? ` - Ref ${how.reference}` : ''}${name ? ` - ${name}` : ''}`.replace(/ - /g, ', ');
+      if (TEST_TO && testSent >= 3) { queue.update(job.jobId, { status: 'cv_ready' }); log('Test mode: 3 test emails sent, stopping here.'); await DELAY(Math.max(0, until - Date.now())); return; }
       try {
-        await sendMail({ to: how.email, fromName: name, subject, text: emailText(job, job.coverLetter),
+        await sendMail({ to: TEST_TO || how.email, fromName: name, subject: TEST_TO ? `[TEST, would go to ${how.email}] ${subject}` : subject, text: emailText(job, job.coverLetter),
           attachments: [{ path: job.cvPath, filename: `${name || 'Resume'} Resume.pdf`.replace(/[\\/:*?"<>|]/g, '') }] });
+        if (TEST_TO) {
+          testSent++; tested.add(job.jobId);
+          // A test send isn't an application: put the job back as ready so a real run can still apply.
+          queue.update(job.jobId, { status: 'cv_ready' });
+          log(`✓ TEST sent to ${TEST_TO} (would go to the employer): ${job.title} @ ${job.company}`);
+          await DELAY(5000);
+          continue;
+        }
         queue.update(job.jobId, { status: 'applied', reason: 'Emailed from your Gmail', extra: { ...ex, email: how.email } });
         queue.markApplied(job.jobId);
         emailed.add(how.email);

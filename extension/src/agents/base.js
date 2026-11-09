@@ -106,7 +106,8 @@ export class SiteAgent {
         await this.scorePending({ untilOneReady: this.firstWin });
         await this.applyReady();
         // After the first one is out, check the rest of this round's jobs straight away.
-        if (this.firstWin) { this.firstWin = false; await this.search().catch((e) => this.log('Search error: ' + e.message)); await this.scorePending(); await this.applyReady(); }
+        // Search again only if the first search stopped early to get that one out (Company Sites).
+        if (this.firstWin) { this.firstWin = false; if (this.cutShort) { this.cutShort = false; await this.search().catch((e) => this.log('Search error: ' + e.message)); } await this.scorePending(); await this.applyReady(); }
         this.log(`Round done. Next search at ${new Date(roundEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`);
         await this.wait(roundEnd);
       }

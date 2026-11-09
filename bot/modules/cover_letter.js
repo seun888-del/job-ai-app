@@ -11,6 +11,15 @@ const AVAILABILITY_LABEL = {
   '3months': '3 months notice',
 };
 
+// "...Research Ltd. please allow me..." -> "...Research Ltd. Please allow me...": a sentence never
+// starts lower case (but "e.g. the", "i.e. a", "etc. and" are left alone).
+function fixSentenceCaps(text) {
+  return String(text || '').replace(/([.!?])(\s+)([a-z])/g, (m, p, sp, c, at, all) => {
+    const word = (all.slice(0, at).match(/(\S+)$/) || ['', ''])[1].toLowerCase();
+    return /^(e\.g|i\.e|etc|vs|approx|incl)$/.test(word) ? m : `${p}${sp}${c.toUpperCase()}`;
+  });
+}
+
 async function generateCoverLetter(jobTitle, company, jobDescription, cvText) {
   if (!await llmAvailable()) return null;
 
@@ -52,10 +61,10 @@ Sentence 1: name the role and company in a confident, specific opening — NOT "
 Sentence 2: say one concrete thing about why this specific role or company — pulled from what the JD actually says (a challenge, a mission, a technology) — not generic enthusiasm.
 
 PARAGRAPH 2 — MATCH (3 sentences):
-Take the top 3 requirements from the JD. For each, write one sentence that maps it directly to a specific skill or experience from the CV. Be explicit, e.g. "Your need for X is matched by my Y". No vague claims.
+Take the top 3 requirements from the JD. For each, write one plain sentence about what the candidate has actually done that covers it, the way a person would say it ("I manage user access in Active Directory every day"). Never use the formula "Your need for X is matched by my Y" or "Your requirement for X is met by". No vague claims.
 
 PARAGRAPH 3 — EVIDENCE (2 sentences):
-State one concrete, quantified achievement from the CV. Explain in one sentence exactly why it proves the candidate can do this job.
+State one concrete, quantified achievement from the CV that was NOT already used in paragraph 1. Then say in one modest sentence what it would mean for this role. Never write "This proves" or "This demonstrates".
 
 PARAGRAPH 4 — CLOSE (1 sentence only):
 Genuine, specific enthusiasm for this role. End with a clear ask for the interview.
@@ -67,13 +76,16 @@ HARD RULES:
 - Every sentence must be specific to THIS job. Cut anything that could appear in any other cover letter
 - BANNED openers: "I am writing to", "I would like to apply", "I am interested in", "With X years", "As a", "I am excited to", "I am passionate"
 - BANNED words: "passionate", "team player", "results-driven", "hard-working", "go-getter", "leveraging", "spearheading", "seamlessly", "proactive", "dynamic", "fast learner", "hit the ground running", "self-motivated"
-- Do NOT invent experience not in the CV
+- Do NOT invent experience not in the CV. Only give years of experience as the candidate's total; never claim a number of years with one tool, system or industry unless the CV states it
+- Use each achievement or number once only; never repeat the same one
+- Write like a confident person, not a sales script. BANNED phrases: "aligns perfectly", "directly aligns", "perfect fit", "precise fit", "is matched by", "is met by", "This proves", "This demonstrates", "your directive", "I am drawn to", "addresses the core"
+- Plain everyday English. Every sentence starts with a capital letter
 - Do NOT mention salary
 - Return ONLY the 4 paragraph body — nothing else`;
 
   try {
     const letter = await llmChat(prompt);
-    const clean = sanitizeDashes((letter || '').trim());
+    const clean = fixSentenceCaps(sanitizeDashes((letter || '').trim()));
     return clean || null;
   } catch {
     return null;
