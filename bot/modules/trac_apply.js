@@ -1721,7 +1721,7 @@ async function fillApplication(page, ctx) {
     return { result: 'dry_run', paused, status: st, draftUrl, aiQuestion };
   } catch (e) {
     log('  [Trac] Apply error: ' + e.message);
-    return { result: false, paused };
+    return { result: false, paused, error: e.message };
   } finally {
     if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
     try { page.setDefaultTimeout(30000); } catch (_) {} // restore for non-form steps (login, search)

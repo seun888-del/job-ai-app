@@ -317,7 +317,7 @@ async function phase2(page, until = Infinity) {
       }
       console.log(`\n  [Trac Agent] ── ${job.title} @ ${job.company}`);
       queue.update(job.jobId, { status: 'applying' });
-      const { result, paused, status, draftUrl, aiQuestion } = await fillWhileScorerWaits(page, {
+      const { result, paused, status, draftUrl, aiQuestion, error } = await fillWhileScorerWaits(page, {
         job, applicant: cfg.APPLICANT || {}, details: cfg.TRAC_DETAILS || {}, supportingStatement: job.coverLetter || '', submit: autoSubmit(), log: console.log,
         // Copy from a FINISHED application (newest first) when starting a new form.
         preferCopyFrom: queue.getByStatus('ready_to_submit').filter((j) => j.source === SOURCE).sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))).map((j) => j.title),
@@ -346,7 +346,11 @@ async function phase2(page, until = Infinity) {
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, complete ? 'READY TO SUBMIT' : 'NEEDS INFO', note);
         console.log(`  [Trac Agent] ${complete ? '✓ Ready to submit' : '⚠ Needs your input'}: ${job.title}. ${note}`);
       } else {
-        queue.update(job.jobId, { status: 'apply_failed' });
+        // Often the browser, not the job: try each job up to 3 times, keeping the real error.
+        const tries = (job.retryCount || 0) + 1;
+        const err = String(error || '').slice(0, 160);
+        if (tries < 3) queue.update(job.jobId, { status: 'cv_ready', retryCount: tries, reason: 'Trying again' + (err ? ` (${err})` : '') });
+        else queue.update(job.jobId, { status: 'apply_failed', retryCount: tries, reason: 'Could not complete the form' + (err ? ` (${err})` : '') });
       }
       await DELAY(6000 + Math.random() * 5000);
     }

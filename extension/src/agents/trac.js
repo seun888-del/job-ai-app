@@ -172,7 +172,7 @@ export class TracAgent {
     }
   }
 
-  async record(job, { result, paused = [], status, draftUrl, aiQuestion }, aiBlocked = false) {
+  async record(job, { result, paused = [], status, draftUrl, aiQuestion, error }, aiBlocked = false) {
     if (result === 'applied') {
       await store.updateJob(job.jobId, { status: 'applied', appliedAt: new Date().toISOString(), reason: 'Submitted on Trac', ...(draftUrl ? { draftUrl } : {}) });
       this.log(`✓ Submitted: ${job.title}`);
@@ -188,7 +188,12 @@ export class TracAgent {
     } else if (result === 'needs_login') {
       await store.updateJob(job.jobId, { status: 'cv_ready' });
     } else {
-      await store.updateJob(job.jobId, { status: 'apply_failed', reason: 'Could not complete the form' });
+      // A failure is often the agent's NHS window, not the job (a closed or sleeping tab):
+      // try each job up to 3 times before giving up on it, and keep the real error with it.
+      const tries = (job.failCount || 0) + 1;
+      const err = String(error || '').slice(0, 160);
+      if (tries < 3) await store.updateJob(job.jobId, { status: 'cv_ready', failCount: tries, lastError: err });
+      else await store.updateJob(job.jobId, { status: 'apply_failed', failCount: tries, lastError: err, reason: 'Could not complete the form' + (err ? ` (${err})` : '') });
     }
     this.onChange();
   }
@@ -221,14 +226,27 @@ export class TracAgent {
   // 4. Fill new jobs that passed the check.
   async applyReady() {
     const s = await this.settings();
+    let fastFails = 0, resets = 0;
+    // Jobs that failed before retries existed get one more go (they mostly failed on a broken window).
+    for (const j of (await store.jobs()).filter((x) => x.source === SOURCE && x.status === 'apply_failed' && x.reason === 'Could not complete the form' && !x.failCount)) await store.updateJob(j.jobId, { status: 'cv_ready', failCount: 2 });
     for (const job of await store.byStatus('cv_ready', SOURCE)) {
       if (!this.running) return;
       if ((await store.capUsed()) >= cfg.MAX_APPLICATIONS_PER_DAY) { this.log(cfg.MOVE.on && (await store.monthLeft()) <= 0 ? "This month's limit is reached." : 'Daily limit reached.'); return; }
       this.log(`Filling: ${job.title} @ ${job.company}`);
       await store.updateJob(job.jobId, { status: 'applying' });
       const finished = (await store.byStatus('ready_to_submit', SOURCE)).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).map((j) => j.title);
+      const t0 = Date.now();
       const r = await fillApplication(this.page, { job, applicant: cfg.APPLICANT, details: cfg.TRAC_DETAILS, supportingStatement: job.coverLetter || '', submit: await this.autoSubmit(), preferCopyFrom: finished, log: (m) => this.log(m) });
       await this.record(job, r);
+      // Several jobs failing within seconds means the NHS window itself is broken (closed or put
+      // to sleep): open a fresh one before carrying on, instead of failing every job in the queue.
+      fastFails = r.result === false && Date.now() - t0 < 15000 ? fastFails + 1 : 0;
+      if (fastFails >= 3) {
+        this.log('The NHS window stopped responding. Opening a fresh one and trying again.');
+        try { if (this.page && !this.page.isClosed()) await this.page.close(); } catch (_) {}
+        this.page = null; await this.ensurePage(); fastFails = 0; resets++;
+        if (resets > 2) { this.log('NHS applications keep failing to open. Stopping for now; they will be tried again next round.'); return; }
+      }
       await sleep(6000 + Math.random() * 5000);
     }
   }
