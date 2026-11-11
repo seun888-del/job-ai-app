@@ -72,7 +72,8 @@ export async function readyBacklog() {
 // user submits themselves (countedAt). Each job counts once.
 export async function appliedToday() {
   const d = new Date().toISOString().slice(0, 10);
-  return (await jobs()).filter((j) => (j.status === 'applied' && String(j.appliedAt || '').startsWith(d)) || String(j.countedAt || '').startsWith(d)).length;
+  // Jobs the user applied to themselves (Tailor tab) don't use up the agents' daily limit.
+  return (await jobs()).filter((j) => !j.manual && ((j.status === 'applied' && String(j.appliedAt || '').startsWith(d)) || String(j.countedAt || '').startsWith(d))).length;
 }
 
 // "Only move for more money": applications in the last 30 days against the monthly limit.

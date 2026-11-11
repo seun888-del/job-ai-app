@@ -106,7 +106,12 @@ function parseJobHeader(line) {
 
   const dm = DATE_ANY.exec(rest);
   let company = rest, dates = '';
-  if (dm) {
+  const tail = DATE_TAIL.exec(rest);
+  if (tail && tail.index > 0) {
+    // "Kirkstall Homes  Mar 2022 – Present": the whole date range, short month names included.
+    company = rest.slice(0, tail.index).trim().replace(/[|–—-]+$/, '').trim();
+    dates = tail[1].trim();
+  } else if (dm) {
     company = rest.slice(0, dm.index).trim().replace(/[|–—-]+$/, '').trim();
     dates   = rest.slice(dm.index).trim();
   }
@@ -124,6 +129,27 @@ function isDateLine(line) {
     .replace(new RegExp(`\\b(${MONTHS}|${MONTH_ABBR})\\b\\.?`, 'gi'), '')
     .replace(/\b(19|20)\d{2}\b|\b\d{1,2}\/|\b(present|current|now|to|until|till|date)\b/gi, '')
     .replace(/[\s\-–—,./()]/g, '') === '';
+}
+
+// One-line role with no pipe, a very common CV layout:
+//   "IT Support Analyst, Kirkstall Homes, Leeds (Mar 2022 - Present)"
+//   "Service Desk Agent at Aire Valley Council, June 2020 to February 2022"
+// Only when the line ENDS in a date range and the part before it splits into a short title and a
+// company, so an ordinary sentence that mentions a year is never taken for a job.
+const DATE_TAIL = new RegExp(`[\\s,(|]*((?:(?:${MONTHS}|${MONTH_ABBR})\\.?\\s+)?(?:19|20)\\d{2}\\s*(?:-|–|—|to|until)\\s*(?:(?:(?:${MONTHS}|${MONTH_ABBR})\\.?\\s+)?(?:19|20)\\d{2}|Present|Current|Now|Date))\\s*\\)?\\s*$`, 'i');
+function parseInlineHeader(line) {
+  const t = line.trim();
+  if (t.length > 140 || isBullet(t) || /[.!?]$/.test(t)) return null;
+  const m = DATE_TAIL.exec(t);
+  if (!m || m.index < 3) return null;
+  const head = t.slice(0, m.index).trim().replace(/[\s,|–—-]+$/, '');
+  const sep = head.match(/,\s*| at | @ | – | — | - /);
+  if (!sep) return null;
+  const title = head.slice(0, sep.index).trim(), company = head.slice(sep.index + sep[0].length).trim();
+  if (!title || !company || title.split(/\s+/).length > 8 || company.split(/\s+/).length > 10) return null;
+  // Job titles and employers start with a capital ("Led the move to Windows 11, finished 2023 - 2024" is a sentence).
+  if (!/^[A-Z0-9]/.test(title) || !/^[A-Z0-9]/.test(company)) return null;
+  return { title, company, dates: m[1].replace(/\s{2,}/g, ' ').trim(), bullets: [] };
 }
 
 function splitLines(cvText) {
@@ -184,7 +210,7 @@ function parseCV(cvText, opts = {}) {
       if (experience.length) experience[experience.length - 1].bullets.push(stripBullet(line));
       continue;
     }
-    const header = parseJobHeader(line);
+    const header = parseJobHeader(line) || parseInlineHeader(line);
     if (header) { experience.push(header); continue; }
     // The role's dates on their own line, before any of its bullets.
     const cur = experience[experience.length - 1];

@@ -479,7 +479,7 @@ async function processJob(job) {
       // "awaiting_review". No apply agent touches it until the user approves.
       let coverLetter = null;
       try {
-        coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, bestRawCvText || bestCvText);
+        coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, bestRawCvText || bestCvText, missingKeywords || []);
       } catch (err) {
         console.warn(`  [Scorer Agent] Cover letter failed: ${err.message}`);
       }
@@ -503,7 +503,7 @@ async function processJob(job) {
     });
 
     // Generate cover letter in background — updates queue when done
-    generateCoverLetter(jobTitle, job.company, job.description, bestRawCvText || bestCvText)
+    generateCoverLetter(jobTitle, job.company, job.description, bestRawCvText || bestCvText, missingKeywords || [])
       .then(coverLetter => {
         if (coverLetter) {
           queue.update(job.jobId, { coverLetter });

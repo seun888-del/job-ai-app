@@ -16,7 +16,7 @@ import { JobBankAgent, jobBankReady, JOBBANK_ORIGINS } from './agents/jobbank.js
 import { WorkHubAgent, WORKHUB_ORIGINS } from './agents/workhub.js';
 import { connectGmail, disconnectGmail, sendGmail } from './lib/gmail.js';
 import { Page } from './driver/page.js';
-import { scoreJob } from './agents/scorer.js';
+import { scoreJob, tailorPasted } from './agents/scorer.js';
 
 const { BACKEND, headers: apiHeaders, checkLicense, askAssistant, claimSetup, sendSetupCode } = require('./shims/llm.js');
 const { importTracText } = require('../../src/services/tracImporter');
@@ -828,7 +828,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     };
     // Which agents "Start applying" runs (tick box on each card, like the app). All ticked by default.
     const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
-    const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
+    const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter', manual: 'You (Tailor)' };
     const bySource = Object.keys(LABEL).map((s) => [s, applied.filter((j) => j.source === s).length]).filter(([, n]) => n);
     // Many jobs skipped as not a close match this week: offer the Wider match level once.
     const weekAgo = Date.now() - 7 * 864e5;
@@ -978,6 +978,8 @@ VIEWS.dashboard = async function renderDashboardView() {
         <div class="dash-col-side">
           <div class="dash-col-title">Applications (last 14 days)</div>
           <div class="card dash-applications-card">${buildApplicationsGraph(all)}</div>
+          <div class="dash-col-title" style="margin-top:18px">Found a job yourself?</div>
+          <div class="card"><p class="card-hint" style="margin:0 0 12px">Paste the advert and Job-AI tailors your ${region === 'us' ? 'resume' : 'CV'} and writes a cover letter for it.</p><button class="secondary" id="dash-tailor">Tailor for a job</button></div>
           <div class="dash-col-title" style="margin-top:18px">This computer</div>
           <div class="card computer-card">
             <label class="checkbox-label" style="align-items:flex-start;margin:0 0 12px"><input type="checkbox" class="pc" data-k="keepAwake" ${settings.keepAwake !== false ? 'checked' : ''}><span><strong>Keep awake while agents run</strong><br><small class="muted">Your computer will not go to sleep mid-application. A closed laptop lid still sleeps.</small></span></label>
@@ -1023,6 +1025,9 @@ VIEWS.dashboard = async function renderDashboardView() {
     }));
     // Set up before apply-by-email existed: offer it once, so nobody misses it.
     if (setupDone.search && !$('.welcome-overlay')) regionSitesPrompt(region, { newOnly: true });
+    $('#dash-tailor')?.addEventListener('click', () => navigate('tailor'));
+    // The new Tailor tab: tell people once (after any region pop-up has been answered).
+    if (setupDone.search && !$('.welcome-overlay')) setTimeout(() => { if (current === 'dashboard') tailorNewPrompt(); }, 1500);
     $$('.preflight-link[data-view]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
     $$('.cv-fill-btn').forEach((b) => b.addEventListener('click', () => pickCv('#gs-cv-st', cvToPersonal)));
     // Job Bank: allow jobbank.gc.ca (asked inside the click, as Chrome requires), then Google sign-in for Gmail.
@@ -1329,7 +1334,7 @@ VIEWS.analytics = async function renderAnalytics() {
   const all = await store.jobs();
   const applied = all.filter((j) => j.status === 'applied'), skipped = all.filter((j) => j.status === 'skipped'), failed = all.filter((j) => j.status === 'apply_failed');
   const count = (list, key) => Object.entries(list.reduce((m, j) => { const k = key(j); if (k) m[k] = (m[k] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]);
-  const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
+  const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter', manual: 'You (Tailor)' };
   const bySource = count(applied, (j) => LABEL[j.source] || j.source), byCv = count(applied, (j) => j.cvName || 'Unknown');
   const skipReasons = count(skipped, (j) => String(j.reason || '').replace(/\s*\(\d+%\)$/, '').replace(/\d+%/g, 'N%')).slice(0, 10);
   const companies = count(applied, (j) => j.company).slice(0, 10), titles = count(applied, (j) => j.title).slice(0, 10);
@@ -1363,6 +1368,7 @@ VIEWS.analytics = async function renderAnalytics() {
 const FAQS = [
   ['How do I get started?', 'Open Setup (top right) and fill in Personal Details, CVs, Search Preferences and License. Set up on your phone? Then it is already done: type the 6-digit code on the License page. Next, press Start applying. The "How to start applying" checklist on the Dashboard shows anything still missing.'],
   ['Where does Job-AI apply?', 'On employers\' own career websites, through the Company Sites agent. In the UK the NHS (Trac) agent also applies to NHS jobs. Each has its own agent card on the Dashboard.'],
+  ['Can Job-AI tailor my CV for a job I found myself?', 'Yes. Open the Tailor tab and paste the job advert, or a link to it. Job-AI rewrites your CV around what the advert asks for and writes a cover letter, using only what is really on your CV. Download them and apply, then press "I applied" to add the job to your Tracker. You can tailor 3 on a free trial and 15 a week on a plan.'],
   ['Do I need job site accounts?', 'No. Company Sites applies straight on each employer\'s website, so there is nothing to sign in to. The only sign in is NHS Trac, in the UK, if you use the NHS agent.'],
   ['What do the agents do?', 'Each agent finds jobs that match your job titles, skips jobs that do not fit, tailors your CV and cover letter to each job that does, and applies. They work in their own minimised Chrome windows, so leave those windows alone and keep this Job-AI tab open.'],
   ['Why are some jobs showing as skipped?', 'Jobs are skipped when they do not fit what you asked for: the wrong work type or level, below your salary, an external application site, or a CV match under 45% (or under your own minimum if you set one). The Activity tab and the Tracker show the reason for each one.'],
@@ -1427,7 +1433,7 @@ setInterval(() => { if (current === 'dashboard' && !document.hidden) renderDashb
 const STAGE_LIST = [['applied', 'Applied'], ['phone_screen', 'Phone screen'], ['interview', 'Interview'], ['offer', 'Offer'], ['rejected', 'Rejected'], ['withdrawn', 'Withdrawn']];
 const STAGE = { phone_screen: ['Phone screen', 'badge-info'], interview: ['Interview', 'badge-info'], offer: ['Offer', 'badge-success'], rejected: ['Rejected', 'badge-muted'], withdrawn: ['Withdrawn', 'badge-muted'] };
 const STATUS = { awaiting_review: ['Waiting for your review', 'badge-warning'], processing: ['Tailoring CV', 'badge-info'], applied: ['Applied', 'badge-success'], apply_failed: ['Failed', 'badge-danger'], skipped: ['Skipped', 'badge-muted'], pending: ['Found', 'badge-info'], cv_ready: ['CV ready', 'badge-info'], applying: ['Applying', 'badge-info'], ready: ['Waiting for you', 'badge-warning'], ready_to_submit: ['Ready to submit', 'badge-success'] };
-const SOURCE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
+const SOURCE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter', manual: 'You (Tailor)' };
 let trackerFilter = 'all';
 let trackerQuery = '';
 VIEWS.tracker = async function renderTracker() {
@@ -1469,6 +1475,157 @@ VIEWS.tracker = async function renderTracker() {
   let tq = null;
   $('#trk-q').addEventListener('input', (e) => { trackerQuery = e.target.value; clearTimeout(tq); tq = setTimeout(drawRows, 150); });
 };
+
+// ── Tailor: paste any job advert, get a tailored CV + cover letter (every region) ──
+// For jobs the agents can't apply to (sites that need an account, a job a friend sent).
+// Same tailoring as the agents. Allowance: 3 in total on a free trial, 15 a week on a plan
+// (resets Monday). Counted on the server per licence (GET /v1/tailor/quota, POST /v1/tailor/use),
+// so reinstalling or clearing Chrome data doesn't reset it. A local count is only the fallback.
+const TAILOR_LIMIT = { trial: 3, active: 15 };
+let tailorBusy = false;
+function tailorWeekStart() {
+  const n = new Date(), d = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d;
+}
+async function tailorLocal(license) {
+  const log = (((await store.get('settings')) || {}).tailorLog || []);
+  const trial = license.status !== 'active', cap = trial ? TAILOR_LIMIT.trial : TAILOR_LIMIT.active;
+  const since = trial ? '' : tailorWeekStart().toISOString();
+  const used = log.filter((t) => t >= since).length;
+  return { period: trial ? 'trial' : 'week', cap, used, left: Math.max(0, cap - used) };
+}
+async function tailorLeft() {
+  const license = await store.get('license');
+  if (!licenceActive(license)) return { active: false };
+  try {
+    const r = await fetch(BACKEND + '/v1/tailor/quota', { headers: apiHeaders(license.key), signal: AbortSignal.timeout(10000) });
+    if (r.ok) return { active: true, ...(await r.json()) };
+  } catch (_) {}
+  return { active: true, ...(await tailorLocal(license)) };
+}
+async function useTailor() {
+  const license = await store.get('license');
+  const log = (((await store.get('settings')) || {}).tailorLog || []).concat(new Date().toISOString()).slice(-60);
+  await store.patch('settings', { tailorLog: log });
+  try {
+    const r = await fetch(BACKEND + '/v1/tailor/use', { method: 'POST', headers: apiHeaders(license.key), signal: AbortSignal.timeout(10000) });
+    if (r.ok || r.status === 402) return { active: true, ...(await r.json()) };
+  } catch (_) {}
+  return { active: true, ...(await tailorLocal(license)) };
+}
+const tailorLabel = (q, word) => !q.active ? '' : q.period === 'trial' ? `${q.left} of ${q.cap} free tailored ${word}s left` : `${q.left} of ${q.cap} left this week`;
+// Shown when the allowance is used up: trial = subscribe; plan = more on Monday.
+function tailorLimitCard(q, word) {
+  if (q.period === 'trial') return `<div class="card"><h3>You've used your ${q.cap} free tailored ${word}s</h3>
+    <p style="margin:0 0 14px">Subscribe to keep going: tailor ${TAILOR_LIMIT.active} ${word}s a week, and your agents keep applying for you every day.</p>
+    <button class="primary" id="tl-upgrade">Subscribe</button></div>`;
+  return `<div class="card"><h3>You've used your ${q.cap} for this week</h3>
+    <p style="margin:0">You get ${q.cap} more on Monday. Your agents keep applying for you in the meantime.</p></div>`;
+}
+async function tailorShowLimit(q, word) {
+  const out = $('#tl-out'); if (!out) return;
+  out.innerHTML = tailorLimitCard(q, word);
+  const license = await store.get('license');
+  $('#tl-upgrade')?.addEventListener('click', () => openTab(`https://tryjobai.com/pricing?lk=${encodeURIComponent(license.key)}&utm_source=extension&utm_campaign=tailor_limit`));
+}
+async function tailorPdf(path) { await vfsReady; return new Blob([vfs.readFileSync(path)], { type: 'application/pdf' }); }
+VIEWS.tailor = async function renderTailor() {
+  const { settings } = await loadConfig();
+  const cvs = await getCvs();
+  const last = (await store.get('tailorLast')) || null;
+  const lim = await tailorLeft();
+  const word = regionOf(settings) === 'us' ? 'resume' : 'CV';
+  content.innerHTML = `
+    <div class="page-header"><h2>Tailor</h2><p>Paste any job advert. Job-AI rewrites your ${word} for it and writes a cover letter.</p></div>
+    <div class="card"><h3>The job</h3>
+      <div class="tracd-grid">
+        <div class="field"><label for="tl-title">Job title</label><input id="tl-title" type="text" placeholder="e.g. Service Desk Analyst"></div>
+        <div class="field"><label for="tl-company">Company</label><input id="tl-company" type="text" placeholder="e.g. Northgate Housing"></div>
+      </div>
+      <div class="field"><label for="tl-jd">Job advert</label><textarea id="tl-jd" rows="9" placeholder="Paste the whole advert here, or a link to it" style="width:100%;min-height:180px;resize:vertical;font:inherit;font-size:14px;line-height:1.5"></textarea></div>
+      ${cvs.length > 1 ? `<div class="field"><label for="tl-cv">Which ${word}</label><select id="tl-cv">${cvs.map((c) => `<option value="${esc(c.id || '')}">${esc(c.label || c.name || 'CV')}</option>`).join('')}</select></div>` : ''}
+      <div class="ext-inline" style="gap:12px;align-items:center;flex-wrap:wrap"><button class="primary" id="tl-go">Tailor my ${word}</button>
+        <span class="muted" id="tl-left" style="font-size:13px">${tailorLabel(lim, word)}</span></div>
+      <div class="status-msg" id="tl-st" style="margin-top:10px"></div>
+    </div>
+    <div id="tl-out"></div>`;
+  const out = $('#tl-out');
+  const show = (r) => {
+    const good = r.score >= 70;
+    out.innerHTML = `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div><h3 style="margin:0 0 4px">${esc(r.title)}${r.company ? ` at ${esc(r.company)}` : ''}</h3>
+          <p class="muted" style="margin:0">Made from ${esc(r.cvName)} on ${esc(new Date(r.at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</p></div>
+        <span class="badge ${good ? 'badge-success' : r.fits ? 'badge-info' : 'badge-warning'}" style="font-size:14px;padding:6px 12px">${r.score}% match</span></div>
+      <p style="margin:12px 0">${r.tailored === false ? `Job-AI couldn't read the layout of your ${word}, so it is unchanged. The cover letter is written for this job. ` : ''}${r.fits ? `${good ? 'A strong fit.' : 'A fair fit.'}${r.tailored === false ? '' : ` Your ${word} is rewritten around what this advert asks for.`}` : `Not a close match for your ${word}${r.fitReason ? ` (${esc(r.fitReason)})` : ''}. You can still apply, but it may be a long shot.`}</p>
+      ${r.gaps && r.gaps.length ? `<p class="muted" style="margin:0 0 12px"><strong>The advert also asks for:</strong> ${esc(r.gaps.join(', '))}. Add these to your ${word} only if you really have them.</p>` : ''}
+      <div class="ext-inline" style="gap:8px;flex-wrap:wrap"><button class="primary" id="tl-open">Open ${word}</button><button class="secondary" id="tl-dl">Download PDF</button>
+        ${r.trackedId ? '<span class="badge badge-success">In your Tracker</span>' : '<button class="secondary" id="tl-track">I applied, add to Tracker</button>'}</div>
+      ${r.coverLetter ? `<h3 style="margin:20px 0 8px">Cover letter</h3><div id="tl-cl" style="white-space:pre-wrap;line-height:1.55;font-size:14px;background:var(--surface-2, #f6f3ec);border:1px solid var(--border, #e6e1d6);border-radius:10px;padding:16px;max-height:360px;overflow:auto">${esc(r.coverLetter)}</div>
+      <div style="margin-top:8px"><button class="secondary" id="tl-copy">Copy cover letter</button></div>` : ''}</div>`;
+    const blob = () => tailorPdf(r.cvPath).catch(() => { setSt('#tl-st', `That ${word} is no longer on this device. Tailor it again.`, true); return null; });
+    $('#tl-open').onclick = async () => { const b = await blob(); if (b) window.open(URL.createObjectURL(b), '_blank'); };
+    $('#tl-dl').onclick = async () => {
+      const b = await blob(); if (!b) return;
+      const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = r.fileName || 'Tailored_CV.pdf';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    };
+    $('#tl-copy')?.addEventListener('click', (e) => navigator.clipboard.writeText(r.coverLetter).then(() => { e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy cover letter'; }, 1500); }).catch(() => {}));
+    $('#tl-track')?.addEventListener('click', async () => {
+      const id = 'tl' + Date.now(), at = new Date().toISOString();
+      await store.addJob({ jobId: id, title: r.title, company: r.company, url: r.url || '', source: 'manual', manual: true, status: 'applied', stage: 'applied', appliedAt: at, cvPath: r.cvPath, cvScore: r.score, cvName: r.cvName, coverLetter: r.coverLetter });
+      r.trackedId = id; await store.set('tailorLast', r); show(r); remoteNudge();
+    });
+  };
+  if (lim.active && !lim.left) tailorShowLimit(lim, word);
+  else if (last && last.cvPath) show(last);
+  $('#tl-go').addEventListener('click', async () => {
+    if (tailorBusy) return;
+    const title = $('#tl-title').value.trim(), company = $('#tl-company').value.trim();
+    let jd = $('#tl-jd').value.trim(), url = '';
+    if (!cvs.length) { setSt('#tl-st', `Add your ${word} first: Setup, then CVs.`, true); return; }
+    const l = await tailorLeft();
+    if (!l.active) { setSt('#tl-st', 'Tailoring needs an active free trial or plan. See the License page.', true); return; }
+    if (!l.left) { setSt('#tl-st', ''); tailorShowLimit(l, word); return; }
+    if (!title) { setSt('#tl-st', 'Add the job title.', true); $('#tl-title').focus(); return; }
+    if (/^https?:\/\/\S+$/i.test(jd)) {
+      url = jd; setSt('#tl-st', 'Reading the advert from that link…');
+      try { jd = String((await fetchJD({ url })) || '').trim(); } catch (_) { jd = ''; }
+      if (jd.length < 200) { setSt('#tl-st', "Couldn't read the advert from that link. Copy the advert's text and paste it instead.", true); return; }
+    }
+    if (jd.length < 200) { setSt('#tl-st', 'Paste the whole advert, including what the job involves and what they are looking for.', true); return; }
+    tailorBusy = true; const btn = $('#tl-go'); btn.disabled = true; out.innerHTML = '';
+    try {
+      const r = await tailorPasted({ title, company, description: jd.slice(0, 12000), cvId: $('#tl-cv') ? $('#tl-cv').value : '' }, (m) => setSt('#tl-st', m + '…'));
+      const n = await useTailor();
+      const res = { ...r, title, company, url, at: new Date().toISOString() };
+      await store.set('tailorLast', res);
+      store.log(`Tailored your ${word} for ${title}${company ? ' at ' + company : ''} (${r.score}% match).`);
+      if (current !== 'tailor') return;
+      setSt('#tl-st', ''); $('#tl-jd').value = '';
+      if ($('#tl-left')) $('#tl-left').textContent = tailorLabel(n, word);
+      show(res);
+    } catch (e) {
+      setSt('#tl-st', `Couldn't tailor it this time (${e.message}). Please try again.`, true);
+    } finally { tailorBusy = false; if ($('#tl-go')) $('#tl-go').disabled = false; }
+  });
+};
+// One-time pop-up so people who already use Job-AI find the new Tailor tab.
+async function tailorNewPrompt() {
+  const settings = (await store.get('settings')) || {};
+  if ((settings.featureSeen || {}).tailor || $('#region-prompt') || $('#tailor-prompt') || $('.welcome-overlay')) return;
+  const word = regionOf(settings) === 'us' ? 'resume' : 'CV';
+  const o = document.createElement('div'); o.id = 'tailor-prompt';
+  o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
+  o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:480px;width:100%;border-radius:12px;padding:22px 24px">
+    <h3 style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">New: Tailor any job</h3>
+    <p style="margin:0 0 16px;color:var(--text-muted,#4a453b);font-size:14px">Found a job yourself? Paste the advert into the new Tailor tab. Job-AI rewrites your ${word} for it and writes a cover letter, ready to send.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="secondary" id="tp-no" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Not now</button><button class="primary" id="tp-yes" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Try it</button></div></div>`;
+  document.body.appendChild(o);
+  const seen = async () => { await store.patch('settings', { featureSeen: { ...(((await store.get('settings')) || {}).featureSeen || {}), tailor: true } }); o.remove(); };
+  $('#tp-no').addEventListener('click', seen);
+  $('#tp-yes').addEventListener('click', async () => { await seen(); navigate('tailor'); });
+}
 
 // ── Activity ─────────────────────────────────────────────────────────────────
 let unLog = null;
@@ -2035,6 +2192,8 @@ const TOUR_STEPS_SETUP = [
   { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want to apply for, for example "IT Support Analyst". The agents use these terms to find jobs on company career sites. Have a Reed or LinkedIn account? You can also tick it under Extra job sites.', action: 'Add at least one job title, set your work type, then click Save.' },
   { view: 'license', title: 'Step 4: Activate your license', tip: 'Enter the license key from your welcome email. The AI that tailors your CV runs on our cloud, so there is nothing extra to install.', action: 'Paste your license key into the box and click Activate.' },
   { view: 'dashboard', title: 'Step 5: Your agents', tip: 'The Company Sites agent finds jobs on employers\' own career pages and applies there directly, so there are no job site accounts to sign in to.', action: 'Leave Company Sites ticked. In the UK you also see the NHS (Trac) agent: keep it ticked if you want NHS jobs.' },
+  { view: 'tailor', title: 'Found a job yourself? Tailor it', tip: 'Paste any job advert, or a link to it, into the Tailor tab. Job-AI rewrites your CV around what that advert asks for and writes a cover letter, using only what is really on your CV.', action: 'Download the CV, copy the letter and apply. Then press "I applied" to add it to your Tracker.' },
+  { view: 'earn', title: 'Earn more: check your pay', tip: 'See what jobs like yours pay near you right now. Happy where you are? Turn on "Only move for more money" and Job-AI only applies to a few jobs a month that pay well above your salary.', action: 'Add your job title and salary, then press Check my pay.' },
   { view: 'dashboard', title: 'All set: start applying', tip: 'Click Start applying and each agent opens its own minimised Chrome window and works inside it: searching, tailoring your CV and applying to matching jobs.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
   { view: 'trac-details', title: 'NHS jobs: the Trac Agent', tip: 'NHS jobs use a separate system called Trac with much longer forms, so the NHS agent has its own page: employment history, references, education and the monitoring questions.', action: 'Open "NHS / Trac details" and fill it in once, or click "Upload completed Trac PDF" to fill it from an old application. Then sign in to Trac with the button on the NHS agent card.' },
 ];
@@ -2042,6 +2201,8 @@ const TOUR_STEPS_SETUP = [
 const USE_TOUR = (nhs) => [
   { view: 'dashboard', title: 'Start applying', tip: 'The Company Sites agent finds jobs on employers\' own websites, tailors your CV to each one and applies there. There are no job site accounts to sign in to. Press Start applying and it works in its own minimised Chrome window.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
   { view: 'tracker', title: 'See every application', tip: 'The Tracker lists every job your agents found and what happened to it, with the reason for anything they skipped.', action: 'Check it any time. Anything that needs you shows at the top of the Dashboard.' },
+  { view: 'tailor', title: 'Found a job yourself? Tailor it', tip: 'Paste any job advert, or a link to it, into the Tailor tab. Job-AI rewrites your CV around what that advert asks for and writes a cover letter, using only what is really on your CV.', action: 'Download the CV, copy the letter and apply. Then press "I applied" to add it to your Tracker.' },
+  { view: 'earn', title: 'Earn more: check your pay', tip: 'See what jobs like yours pay near you right now. Happy where you are? Turn on "Only move for more money" and Job-AI only applies to a few jobs a month that pay well above your salary.', action: 'Add your job title and salary, then press Check my pay.' },
   ...(nhs ? [{ view: 'trac-details', title: 'NHS jobs', tip: 'NHS applications go through Trac. We filled in your jobs and qualifications from your CV. Trac forms also ask for your address, referees and a few declarations.', action: 'Check this page, add anything missing and click Save. Then sign in to Trac from the NHS agent card. Finished forms wait as "Ready to submit" unless you turn on Submit for me.' }] : []),
   { view: 'dashboard', title: 'Control it from your phone', tip: 'Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.', action: 'On iPhone, add it to your Home Screen to get notifications. Keep this computer on and Chrome open while the agents work.' },
 ];
@@ -2329,7 +2490,7 @@ async function remoteStatus() {
   const g = await remoteGate();
   const all = await store.jobs();
   const applied = await store.appliedToday(), cap = cfg.MAX_APPLICATIONS_PER_DAY;
-  const SRC = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
+  const SRC = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter', manual: 'You (Tailor)' };
   const recent = all.filter((j) => ['applied', 'apply_failed', 'ready', 'ready_to_submit'].includes(j.status))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 12)
     .map((j) => ({ title: j.title || '', company: j.company || '', source: SRC[j.source] || '', status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting', at: j.appliedAt || j.updatedAt || '', ...(j.status === 'apply_failed' && j.reason ? { reason: String(j.reason).slice(0, 140) } : {}), ...((j.status === 'applied' && cfg.movePay(j)) || {}) }));
@@ -2348,7 +2509,7 @@ async function remoteStatus() {
     skip_reasons: Object.entries(skipReasons).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([reason, count]) => ({ reason, count })),
   };
 }
-const REMOTE_SITE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
+const REMOTE_SITE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter', manual: 'You (Tailor)' };
 const REMOTE_STAGES = ['applied', 'phone_screen', 'interview', 'offer', 'rejected', 'withdrawn'];
 const TRAC_LIST = 'https://apps.trac.jobs/applicationlist';
 async function remoteExtra() {

@@ -709,6 +709,89 @@ ipcMain.handle('tracker:sync', async () => {
 ipcMain.handle('tracker:update', (event, id, fields) => db.updateTrackerEntry(id, fields));
 ipcMain.handle('tracker:delete', (event, id) => db.deleteTrackerEntry(id));
 
+// ── Tailor tab: paste any job advert, get a tailored CV + cover letter ──────
+// Allowance: 3 in total on a free trial, 15 a week on a plan (resets Monday). Counted on the
+// server per licence (GET /v1/tailor/quota, POST /v1/tailor/use) so a reinstall doesn't reset it;
+// the local log in tailor_use.json is only the fallback. Jobs the user then applies to themselves
+// go in the Tracker as "You (Tailor)" and never count against the agents' daily cap.
+const TAILOR_LIMIT = { trial: 3, active: 15 };
+const tailorFile = (n) => path.join(app.getPath('userData'), n);
+const readJson = (n, d) => { try { return JSON.parse(fs.readFileSync(tailorFile(n), 'utf8')); } catch (_) { return d; } };
+function tailorLocal(lic) {
+  const log = (readJson('tailor_use.json', {}).log) || [];
+  const trial = lic.status !== 'active', cap = trial ? TAILOR_LIMIT.trial : TAILOR_LIMIT.active;
+  const n = new Date(), w = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
+  w.setUTCDate(w.getUTCDate() - ((w.getUTCDay() + 6) % 7));
+  const used = log.filter((t) => trial || t >= w.toISOString()).length;
+  return { period: trial ? 'trial' : 'week', cap, used, left: Math.max(0, cap - used) };
+}
+async function tailorQuotaCall(method) {
+  const lic = db.getLicense();
+  if (!licenseLocallyValid(lic)) return { active: false };
+  try {
+    const r = await fetch(`${JOBBOT_BACKEND_URL}/v1/tailor/${method === 'POST' ? 'use' : 'quota'}`, {
+      method, headers: { Authorization: `Bearer ${lic.license_key}`, 'X-Machine-Id': machineId() }, signal: AbortSignal.timeout(10000),
+    });
+    if (r.ok || r.status === 402) return { active: true, ...(await r.json()) };
+  } catch (_) {}
+  return { active: true, ...tailorLocal(lic) };
+}
+const tailorLeft = () => tailorQuotaCall('GET');
+async function useTailor() {
+  const log = ((readJson('tailor_use.json', {}).log) || []).concat(new Date().toISOString()).slice(-60);
+  fs.writeFileSync(tailorFile('tailor_use.json'), JSON.stringify({ log }));
+  return tailorQuotaCall('POST');
+}
+async function advertFromLink(url) {
+  const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' }, signal: AbortSignal.timeout(20000) });
+  if (!r.ok) return '';
+  return String(await r.text())
+    .replace(/<(script|style|noscript|svg|nav|header|footer)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<(br|\/p|\/li|\/h\d|\/div)[^>]*>/gi, '\n').replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, "'").replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim().slice(0, 12000);
+}
+ipcMain.handle('tailor:left', () => tailorLeft());
+ipcMain.handle('tailor:last', () => readJson('tailor_last.json', null));
+ipcMain.handle('tailor:run', async (event, q) => {
+  const v = q || {};
+  const lim = await tailorLeft();
+  if (!lim.active) return { ok: false, error: 'Tailoring needs an active free trial or plan. See the License page.' };
+  if (!lim.left) return { ok: false, limit: lim };
+  const title = String(v.title || '').trim().slice(0, 120), company = String(v.company || '').trim().slice(0, 120);
+  let advert = String(v.advert || '').trim(), url = '';
+  if (!title) return { ok: false, error: 'Add the job title.' };
+  if (/^https?:\/\/\S+$/i.test(advert)) {
+    url = advert;
+    event.sender.send('tailor:step', 'Reading the advert from that link');
+    try { advert = await advertFromLink(url); } catch (_) { advert = ''; }
+    if (advert.length < 200) return { ok: false, error: "Couldn't read the advert from that link. Copy the advert's text and paste it instead." };
+  }
+  if (advert.length < 200) return { ok: false, error: 'Paste the whole advert, including what the job involves and what they are looking for.' };
+  const r = await botManager.tailorOnce({ title, company, description: advert, cvId: v.cvId || '' }, app.getPath('userData'), (s) => { try { event.sender.send('tailor:step', s); } catch (_) {} });
+  if (!r.ok) return { ok: false, error: `Couldn't tailor it this time (${r.error}). Please try again.` };
+  const left = await useTailor();
+  const res = { ...r, title, company, url, at: new Date().toISOString() };
+  fs.writeFileSync(tailorFile('tailor_last.json'), JSON.stringify(res));
+  return { ...res, left };
+});
+// Only ever opens the CV the Tailor tab itself made.
+ipcMain.handle('tailor:open', (event, how) => {
+  const last = readJson('tailor_last.json', null);
+  if (!last || !last.cvPath || !fs.existsSync(last.cvPath)) return false;
+  if (how === 'folder') shell.showItemInFolder(last.cvPath); else shell.openPath(last.cvPath);
+  return true;
+});
+ipcMain.handle('tailor:track', () => {
+  const last = readJson('tailor_last.json', null);
+  if (!last || last.trackedId) return last;
+  const id = 'tl' + Date.now();
+  db.syncTrackerEntry({ job_id: id, title: last.title, company: last.company || null, url: last.url || null, source: 'manual', cv_name: last.cvName || null, applied_at: new Date().toISOString() });
+  last.trackedId = id;
+  fs.writeFileSync(tailorFile('tailor_last.json'), JSON.stringify(last));
+  return last;
+});
+
 // ── Analytics ────────────────────────────────────────────────────────────
 ipcMain.handle('analytics:get', () => queueReader.getAnalytics());
 

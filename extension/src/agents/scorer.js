@@ -153,9 +153,58 @@ export async function scoreJob(job, log) {
     return;
   }
   let coverLetter = null;
-  try { coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, raw); } catch (_) {}
+  try { coverLetter = await generateCoverLetter(jobTitle, job.company, job.description, raw, missing); } catch (_) {}
   // "Review before applying" (Search preferences): hold it for the user, as the app does.
   const review = !!((await store.get('settings')) || {}).reviewBeforeApply;
   await store.updateJob(job.jobId, { status: review ? 'awaiting_review' : 'cv_ready', cvPath: paths.saved, cvScore: score, cvName: cv.label || cv.name, cvText: cvText.slice(0, 8000), ...(coverLetter ? { coverLetter } : {}) });
   log(review ? `✓ CV tailored (${score}%), waiting for your review: ${jobTitle}` : `✓ CV tailored (${score}%): ${jobTitle}`);
+}
+
+// "Tailor for a job" tab: the user pastes an advert and gets a tailored CV + cover letter now.
+// Same pipeline as scoreJob (best of their CVs, structured tailoring, never invents experience),
+// but nothing is skipped: a weak match is still tailored and the result says how well it fits.
+export async function tailorPasted({ title, company, description, cvId }, log = () => {}) {
+  let cvs = await allCvs();
+  if (cvId) cvs = cvs.filter((c) => (c.id || '') === cvId).concat(cvs.filter((c) => (c.id || '') !== cvId)).slice(0, 1);
+  if (!cvs.length) throw new Error('Add your CV first (Setup, then CVs).');
+  const jobTitle = String(title || '').split('\n')[0].trim() || 'This job';
+  const level = cfg.MATCH_LEVEL;
+  let best = null;
+  for (const c of cvs) {
+    const raw = cleanText(c.text);
+    log('Checking your CV against the advert');
+    const r = await cvScorer.scoreCV(raw, description, {});
+    const fit = cvScorer.matchFit(raw, r.allKeywords, level);
+    let score = r.score, text = raw;
+    if (!best || score > best.score) best = { cv: c, raw, cvText: text, score, before: r.score, fit, missing: r.missingKeywords || [], all: r.allKeywords || [] };
+  }
+  const full = `${cfg.APPLICANT.firstName} ${cfg.APPLICANT.lastName}`.trim();
+  const paths = buildPaths('/jobai/output/saved_cvs', '/jobai/output', cfg.RESUME_FILENAME, jobTitle, company || 'Employer', best.score, full);
+  const pdfOpts = full ? { overrideName: full } : {};
+  let score = best.score, rendered = false;
+  log('Rewriting your CV for this job');
+  try {
+    const base = parseCV(best.raw, pdfOpts);
+    const bullets = (base.experience || []).reduce((n, r) => n + (r.bullets ? r.bullets.length : 0), 0);
+    if (!base.experience.length || !bullets) throw new Error('no work experience parsed');
+    const missingSet = new Set(best.missing.map((k) => String(k).toLowerCase()));
+    const matchedKeywords = best.all.filter((k) => k && k.term && !missingSet.has(String(k.term).toLowerCase()));
+    const t = await tailorStructured(base, jobTitle, description, best.missing, best.raw, { matchedKeywords });
+    const A = cfg.APPLICANT;
+    const contact = [A.location, A.phone, A.email].map((s) => String(s || '').trim()).filter(Boolean).join('   |   ');
+    if (contact) t.contact = contact;
+    const sub = String(t.subtitle || '').trim();
+    if (!sub || /[™®]|[^\x00-\x7F]/.test(sub) || /\bsummary\b|work experience|\bprofile\b|\beducation\b|\bskills\b/i.test(sub)) t.subtitle = jobTitle;
+    if (t.profile) t.profile = String(t.profile).replace(/\bsummary\b[\s™®]*\bwork experience\b/gi, ' ').replace(/[™®]/g, '').replace(/\s{2,}/g, ' ').trim();
+    Object.assign(t, await writeFittedPDF(t, paths.saved, pdfOpts));
+    rendered = true;
+    if (best.all.length) score = cvScorer.rescoreCV(structuredText(t), best.all).score;
+  } catch (e) { log('Using the full-text layout (' + e.message + ')'); }
+  if (!rendered) await writePDF(best.cvText, paths.saved, pdfOpts);
+  log('Writing your cover letter');
+  let coverLetter = '';
+  try { coverLetter = await generateCoverLetter(jobTitle, company || 'your company', description, best.raw, best.missing); } catch (_) {}
+  // Skills the advert asks for that the CV does not show (never added to the CV as claims).
+  const gaps = [...new Set(best.missing.map((k) => String(k && k.term ? k.term : k).trim()).filter((k) => k && k.length <= 40 && !/[?|]/.test(k)))].slice(0, 8);
+  return { cvPath: paths.saved, fileName: String(paths.saved).split('/').pop(), tailored: rendered, score, before: best.before, fits: !!best.fit.pass, fitReason: best.fit.reason || '', gaps, coverLetter, cvName: best.cv.label || best.cv.name || 'Main CV' };
 }

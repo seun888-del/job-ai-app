@@ -20,7 +20,16 @@ function fixSentenceCaps(text) {
   });
 }
 
-async function generateCoverLetter(jobTitle, company, jobDescription, cvText) {
+// Skills the advert asks for that the CV does not show (from the scorer). A letter that names one
+// would claim experience the person doesn't have, so it is rewritten once without them.
+function claimsMissing(letter, missing) {
+  const low = String(letter || '').toLowerCase();
+  return (missing || []).map((k) => String(k && k.term ? k.term : k || '').trim())
+    .filter((k) => k.length >= 2 && k.length <= 40 && !/[?|]/.test(k))
+    .filter((k) => new RegExp('(^|[^a-z0-9])' + k.toLowerCase().replace(/[.*+?^${}()[\]\\]/g, '\\$&') + '($|[^a-z0-9])').test(low));
+}
+
+async function generateCoverLetter(jobTitle, company, jobDescription, cvText, missing = []) {
   if (!await llmAvailable()) return null;
 
   const { firstName, lastName, yearsExperience, availability, experienceLevel } = cfg.APPLICANT;
@@ -58,10 +67,10 @@ OUTPUT — 4 paragraphs, no headings, no labels, no sign-off, no "Dear Hiring Ma
 
 PARAGRAPH 1 — HOOK (2 sentences):
 Sentence 1: name the role and company in a confident, specific opening — NOT "I am writing to apply". Lead with the candidate's most relevant strength or achievement connected to the role's #1 requirement.
-Sentence 2: say one concrete thing about why this specific role or company — pulled from what the JD actually says (a challenge, a mission, a technology) — not generic enthusiasm.
+Sentence 2: say one concrete thing about why this specific role or company — pulled from what the JD actually says (a challenge, a mission, who they serve) — not generic enthusiasm. Do not tie the candidate to any tool or skill here that the CV does not show.
 
 PARAGRAPH 2 — MATCH (3 sentences):
-Take the top 3 requirements from the JD. For each, write one plain sentence about what the candidate has actually done that covers it, the way a person would say it ("I manage user access in Active Directory every day"). Never use the formula "Your need for X is matched by my Y" or "Your requirement for X is met by". No vague claims.
+Take the 3 most important JD requirements THAT THE CV GIVES EVIDENCE FOR (skip any the CV does not show, even if the JD calls them essential). For each, write one plain sentence about what the candidate has actually done that covers it, the way a person would say it ("I manage user access in Active Directory every day"). Never use the formula "Your need for X is matched by my Y" or "Your requirement for X is met by". No vague claims.
 
 PARAGRAPH 3 — EVIDENCE (2 sentences):
 State one concrete, quantified achievement from the CV that was NOT already used in paragraph 1. Then say in one modest sentence what it would mean for this role. Never write "This proves" or "This demonstrates".
@@ -76,6 +85,7 @@ HARD RULES:
 - Every sentence must be specific to THIS job. Cut anything that could appear in any other cover letter
 - BANNED openers: "I am writing to", "I would like to apply", "I am interested in", "With X years", "As a", "I am excited to", "I am passionate"
 - BANNED words: "passionate", "team player", "results-driven", "hard-working", "go-getter", "leveraging", "spearheading", "seamlessly", "proactive", "dynamic", "fast learner", "hit the ground running", "self-motivated"
+- Only name tools, systems, software, qualifications, certificates and licences that the CV itself names. If the JD asks for one the CV does not name, leave it out completely: do not claim it, imply it, or say the candidate is "familiar with" or "comfortable with" it
 - Do NOT invent experience not in the CV. Only give years of experience as the candidate's total; never claim a number of years with one tool, system or industry unless the CV states it
 - Use each achievement or number once only; never repeat the same one
 - Write like a confident person, not a sales script. BANNED phrases: "aligns perfectly", "directly aligns", "perfect fit", "precise fit", "is matched by", "is met by", "This proves", "This demonstrates", "your directive", "I am drawn to", "addresses the core"
@@ -84,9 +94,14 @@ HARD RULES:
 - Return ONLY the 4 paragraph body — nothing else`;
 
   try {
-    const letter = await llmChat(prompt);
-    const clean = fixSentenceCaps(sanitizeDashes((letter || '').trim()));
-    return clean || null;
+    let letter = fixSentenceCaps(sanitizeDashes(String(await llmChat(prompt) || '').trim()));
+    const bad = claimsMissing(letter, missing);
+    if (letter && bad.length) {
+      console.log(`  [CoverLetter] Mentions ${bad.join(', ')} (not on the CV), rewriting`);
+      const again = fixSentenceCaps(sanitizeDashes(String(await llmChat(prompt + `\n- The candidate's CV does NOT show: ${bad.join(', ')}. Do not mention any of these at all.`) || '').trim()));
+      if (again && claimsMissing(again, missing).length < bad.length) letter = again;
+    }
+    return letter || null;
   } catch {
     return null;
   }

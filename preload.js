@@ -59,6 +59,14 @@ contextBridge.exposeInMainWorld('api', {
     save: (site, username, password) => ipcRenderer.invoke('credentials:save', { site, username, password }),
     get: (site) => ipcRenderer.invoke('credentials:get', site),
   },
+  tailor: {
+    left: () => ipcRenderer.invoke('tailor:left'),
+    last: () => ipcRenderer.invoke('tailor:last'),
+    run: (q) => ipcRenderer.invoke('tailor:run', q),
+    open: (how) => ipcRenderer.invoke('tailor:open', how),
+    track: () => ipcRenderer.invoke('tailor:track'),
+    onStep: (cb) => { const h = (e, s) => cb(s); ipcRenderer.on('tailor:step', h); return () => ipcRenderer.removeListener('tailor:step', h); },
+  },
   move: {
     status: () => ipcRenderer.invoke('move:status'),
     save: (settings) => ipcRenderer.invoke('move:save', settings),

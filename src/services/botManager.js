@@ -294,6 +294,43 @@ function assistFill(jobId, userDataPath) {
   return { ok: true };
 }
 
+// Tailor tab: one pasted job, tailored on request (bot/tailor_once.js). One at a time.
+let tailorProc = null;
+function tailorOnce(input, userDataPath, onStep) {
+  if (tailorProc) return Promise.resolve({ ok: false, error: 'Already tailoring one. Please wait.' });
+  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', JOBBOT_USERDATA: userDataPath };
+  const license = db.getLicense();
+  if (license && license.license_key) {
+    env.JOBBOT_BACKEND_URL = JOBBOT_BACKEND_URL;
+    env.JOBBOT_LICENSE_KEY = license.license_key;
+  }
+  const inFile = path.join(require('os').tmpdir(), `jobai_tailor_${Date.now()}.json`);
+  require('fs').writeFileSync(inFile, JSON.stringify(input));
+  return new Promise((resolve) => {
+    let buf = '', result = null;
+    const proc = spawn(process.execPath, [path.join(BOT_DIR, 'tailor_once.js'), inFile], { cwd: BOT_DIR, env });
+    tailorProc = proc;
+    const timer = setTimeout(() => { try { proc.kill(); } catch (_) {} }, 4 * 60 * 1000);
+    proc.stdout.on('data', (chunk) => {
+      buf += chunk.toString();
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (line.startsWith('TAILOR_STEP ')) { if (onStep) onStep(line.slice(12)); }
+        else if (line.startsWith('TAILOR_RESULT ')) { try { result = JSON.parse(line.slice(14)); } catch (_) {} }
+      }
+    });
+    proc.stderr.on('data', () => {});
+    const finish = () => {
+      clearTimeout(timer); tailorProc = null;
+      try { require('fs').unlinkSync(inFile); } catch (_) {}
+      resolve(result || { ok: false, error: 'It took too long. Please try again.' });
+    };
+    proc.on('exit', finish);
+    proc.on('error', finish);
+  });
+}
+
 function stopAll() {
   if (assistProc) { try { assistProc.kill(); } catch (_) {} }
   for (const botName of Object.keys(bots)) stop(botName);
@@ -313,6 +350,7 @@ module.exports = {
   stop,
   stopAll,
   assistFill,
+  tailorOnce,
   getStatus,
   setLogHandler,
   setStatusHandler,
