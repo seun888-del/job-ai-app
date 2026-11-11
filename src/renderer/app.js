@@ -3686,7 +3686,7 @@ async function renderTailor() {
       </div>
       <div class="field"><label for="tl-jd">Job advert</label><textarea id="tl-jd" rows="9" placeholder="Paste the whole advert here, or a link to it" style="width:100%;min-height:180px;resize:vertical;font:inherit;font-size:14px;line-height:1.5"></textarea></div>
       ${cvs.length > 1 ? `<div class="field"><label for="tl-cv">Which ${word}</label><select id="tl-cv">${cvs.map((c) => `<option value="${esc(c.id)}">${esc(c.label || 'CV')}</option>`).join('')}</select></div>` : ''}
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button class="primary" id="tl-go">Tailor my ${word}</button>
+      <div class="tl-actions" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:18px"><button class="primary" id="tl-go">Tailor my ${word}</button>
         <span class="muted" id="tl-left" style="font-size:13px">${tailorLabel(lim, word)}</span></div>
       <div class="status-msg" id="tl-st" style="margin-top:10px"></div>
     </div>
@@ -3702,7 +3702,7 @@ async function renderTailor() {
         <span class="badge ${good ? 'badge-success' : r.fits ? 'badge-info' : 'badge-warning'}" style="font-size:14px;padding:6px 12px">${r.score}% match</span></div>
       <p style="margin:12px 0">${r.tailored === false ? `Job-AI couldn't read the layout of your ${word}, so it is unchanged. The cover letter is written for this job. ` : ''}${r.fits ? `${good ? 'A strong fit.' : 'A fair fit.'}${r.tailored === false ? '' : ` Your ${word} is rewritten around what this advert asks for.`}` : `Not a close match for your ${word}${r.fitReason ? ` (${esc(r.fitReason)})` : ''}. You can still apply, but it may be a long shot.`}</p>
       ${r.gaps && r.gaps.length ? `<p class="muted" style="margin:0 0 12px"><strong>The advert also asks for:</strong> ${esc(r.gaps.join(', '))}. Add these to your ${word} only if you really have them.</p>` : ''}
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="tl-open">Open ${word}</button><button class="secondary" id="tl-folder">Show in folder</button>
+      <div class="tl-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="tl-open">Open ${word}</button><button class="secondary" id="tl-folder">Show in folder</button>
         ${r.trackedId ? '<span class="badge badge-success">In your Tracker</span>' : '<button class="secondary" id="tl-track">I applied, add to Tracker</button>'}</div>
       ${r.coverLetter ? `<h3 style="margin:20px 0 8px">Cover letter</h3><div style="white-space:pre-wrap;line-height:1.55;font-size:14px;background:var(--surface-2, #f6f3ec);border:1px solid var(--border, #e6e1d6);border-radius:10px;padding:16px;max-height:360px;overflow:auto">${esc(r.coverLetter)}</div>
       <div style="margin-top:8px"><button class="secondary" id="tl-copy">Copy cover letter</button></div>` : ''}</div>`;

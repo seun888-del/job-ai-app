@@ -53,3 +53,5 @@ main { min-width: 0; }
 
 /* UC card sits above Recent activity: give it the normal card gap (.bot-card sets 0). */
 .bot-card.uc-card, .bot-card.wsl-card { margin-bottom: 18px; }
+/* Tailor tab: buttons in one row line up (primary and secondary have different top margins). */
+.tl-actions button { margin: 0; }

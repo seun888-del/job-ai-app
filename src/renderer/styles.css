@@ -1305,3 +1305,5 @@ textarea.tracd { resize: vertical; }
 
 /* ── Emailed code box ───────────────────────────────────────────────────────── */
 .code-input { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 22px; letter-spacing: 0.3em; text-align: center; text-transform: uppercase; padding: 12px 10px; }
+/* Tailor tab: buttons in one row line up (primary and secondary have different top margins). */
+.tl-actions button { margin: 0; }
