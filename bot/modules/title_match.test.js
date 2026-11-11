@@ -31,6 +31,18 @@ const CASES = [
   ['Warehouse Operative', 'warehouse manager', false], ['Warehouse Operative', 'warehouse supervisor', false],
   ['Truck Driver', 'long haul truck driver', true], ['Electrician', 'construction electrician', true],
   ['Line Cook', 'line cook', true], ['Retail Sales Associate', 'sales associate - retail', true],
+  // "Support" searches need a support job (live Find a Job log, 2026-11-09)
+  ['Desktop Support Analyst', 'Software Engineer (C# / Desktop Applications)', false],
+  ['Desktop Support Analyst', 'Desktop Support Analyst - Professional Services', true],
+  ['Desktop Support Analyst', 'Desktop Engineer', true], ['Desktop Support Analyst', 'Desktop & Infrastructure Engineer', true], ['Desktop Support Analyst', 'Desktop and Endpoint Engineer', true], ['Desktop Support Analyst', 'Desktop Support Technician', true],
+  ['Systems Support Analyst', 'Business Systems Analyst', false], ['Systems Support Analyst', 'Finance Systems Analyst', false],
+  ['Systems Support Analyst', 'IT Systems Support Engineer', true], ['Application Support Analyst', 'Application Developer', false],
+  ['Application Support Analyst', 'Applications Support Engineer', true], ['IT Support', 'IT Technician', true],
+  ['IT Support', '2nd Line Engineer', true], ['Technical Support Engineer', 'Technical Sales Engineer', false],
+  ['Customer Support Advisor', 'Customer Service Advisor', true], ['Learning Support Assistant', 'Learning Support Assistant (SEN)', true],
+  ['Learning Support Assistant', 'Learning and Development Assistant', false], ['Support Worker', 'Senior Support Worker', true],
+  ['Mental Health Support Worker', 'Mental Health Nurse', false], ['Payroll Support Officer', 'Payroll Officer', false],
+  ['Payroll Support Officer', 'Payroll Support Administrator', true], ['Sales Support Executive', 'Sales Executive', false],
   // Boss roles match only boss searches
   ['Warehouse Manager', 'warehouse manager', true], ['Project Manager', 'construction project manager', true],
   ['Head Chef', 'head chef', true], ['Team Leader', 'Team Leader', true], ['Marketing Coordinator', 'digital marketing coordinator', true],

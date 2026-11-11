@@ -138,9 +138,11 @@ export class SiteAgent {
   // Common skip rules before a job is queued (same as the app's filterAndQueue).
   async queueIfWanted(job, details) {
     const t = (job.title || '').toLowerCase();
-    if (cfg.TITLE_BLOCKLIST.some((k) => t.includes(k))) return;
-    if (cfg.COMPANY_BLOCKLIST.some((b) => (job.company || '').toLowerCase().includes(b))) return;
-    const add = (fields) => store.addJob({ ...job, ...fields, source: this.source });
+    // Every job left out says why in the log, so nothing disappears silently.
+    const said = (reason) => this.log(`Skipped: ${job.title}${job.company ? ` @ ${job.company}` : ''} (${reason})`);
+    if (cfg.TITLE_BLOCKLIST.some((k) => t.includes(k))) return said('a word in the title is on your block list');
+    if (cfg.COMPANY_BLOCKLIST.some((b) => (job.company || '').toLowerCase().includes(b))) return said('company is on your block list');
+    const add = async (fields) => { const ok = await store.addJob({ ...job, ...fields, source: this.source }); if (ok && fields.status === 'skipped') said(fields.reason); return ok; };
     if (details && details.hasEasyApply === false) return add({ status: 'skipped', reason: details.isExternalOnly ? 'External site' : 'No apply button' });
     if (!details || !details.description || details.description.trim().split(/\s+/).length < (this.minWords || 80)) return add({ status: 'skipped', reason: 'Job description too short or missing' });
     if (details.isTrainingCourse || cfg.isTrainingCourseJD(details.description, job.title)) return add({ status: 'skipped', reason: 'Training course' });

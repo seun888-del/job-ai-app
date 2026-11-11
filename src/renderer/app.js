@@ -171,11 +171,43 @@ async function autoSetRegionOnce() {
 document.addEventListener('click', async (e) => {
   const btn = e.target.closest('.region-opt');
   if (!btn || btn.classList.contains('active')) return;
+  // Agents only ever run in one region. While they're running, ask before switching:
+  // staying is the default, switching stops them (never silently).
+  try {
+    const st = await window.api.bot.status();
+    const on = Object.entries(st || {}).filter(([, v]) => v === 'running').map(([k]) => k);
+    if (on.length) {
+      const from = regionCode((await window.api.profile.get()).country || 'United Kingdom');
+      if (!(await confirmRegionSwitch(from, regionCode(btn.dataset.region)))) return;
+      for (const k of on) { try { await window.api.bot.stop(k); } catch (_) {} }
+    }
+  } catch (_) {}
   await setRegion(btn.dataset.region);
   // Both views show the switch; Search Preferences also shows the location it swaps.
   if (_currentView === 'dashboard' || _currentView === 'search') render(_currentView);
   regionSitesPrompt(regionCode(btn.dataset.region));
 });
+
+// Agents are running and the user picked another region: stay (default) or switch and stop them.
+const REGION_NAME = { uk: 'the UK', us: 'the USA', ca: 'Canada' };
+function confirmRegionSwitch(from, to) {
+  return new Promise((resolve) => {
+    const o = document.createElement('div'); o.id = 'region-confirm';
+    o.style.cssText = 'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
+    o.innerHTML = `<div role="dialog" aria-modal="true" aria-labelledby="rc-h" style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:440px;width:100%;border-radius:12px;padding:22px 24px">
+      <h3 id="rc-h" style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">Your agents are applying in ${REGION_NAME[from] || from}</h3>
+      <p style="margin:0 0 18px;color:var(--text-muted,#4a453b);font-size:14px">Switching to ${REGION_NAME[to] || to} will stop them.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="secondary" id="rc-switch" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Switch and stop</button><button class="primary" id="rc-stay" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Stay in ${REGION_NAME[from] || from}</button></div></div>`;
+    document.body.appendChild(o);
+    const done = (v) => { o.remove(); document.removeEventListener('keydown', esc); resolve(v); };
+    const esc = (e) => { if (e.key === 'Escape') done(false); };
+    document.addEventListener('keydown', esc);
+    o.addEventListener('click', (e) => { if (e.target === o) done(false); });
+    o.querySelector('#rc-stay').addEventListener('click', () => done(false));
+    o.querySelector('#rc-switch').addEventListener('click', () => done(true));
+    o.querySelector('#rc-stay').focus();
+  });
+}
 
 // Switched region: the job sites there that need the user's own account are off by default,
 // so offer them once per region instead of leaving them hidden in Search Preferences.

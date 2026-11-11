@@ -13,6 +13,7 @@ import { WellfoundAgent } from './agents/wellfound.js';
 import { AtsAgent, feedJobs, fetchJD, fillAndOpen, releaseHeld } from './agents/ats.js';
 import { UsajobsAgent, federalQuestionnaire } from './agents/usajobs.js';
 import { JobBankAgent, jobBankReady, JOBBANK_ORIGINS } from './agents/jobbank.js';
+import { WorkHubAgent, WORKHUB_ORIGINS } from './agents/workhub.js';
 import { connectGmail, disconnectGmail, sendGmail } from './lib/gmail.js';
 import { Page } from './driver/page.js';
 import { scoreJob } from './agents/scorer.js';
@@ -77,6 +78,13 @@ function usStateOf(text) {
 }
 
 async function setRegion(region) {
+  // Agents only ever run in one region: switching stops everything still running in the old one.
+  const before = ((await store.get('settings')) || {}).region;
+  if (before && before !== region && typeof agents !== 'undefined') {
+    const on = Object.values(agents).filter((a) => a.running);
+    on.forEach((a) => a.stop());
+    if (on.length) store.log(`Switched to ${({ uk: 'the UK', us: 'the USA', ca: 'Canada' })[region] || region}: agents stopped. Press Start applying to look for jobs there.`);
+  }
   await store.patch('settings', { region });
   const profile = await store.get('profile');
   const loc = (profile.searchLocation || '').trim();
@@ -175,6 +183,7 @@ const agents = {
   ats: new AtsAgent({ onChange }),
   usajobs: new UsajobsAgent({ onChange }),
   jobbank: new JobBankAgent({ onChange }),
+  workhub: new WorkHubAgent({ onChange }),
 };
 const agent = agents.trac;
 const AGENTS = [
@@ -187,14 +196,26 @@ const AGENTS = [
   ['ats', 'Company Sites Agent', '', ''],
   ['usajobs', 'Federal Jobs Agent', '', ''],
   ['jobbank', 'Job Bank Agent', '', ''],
+  ['workhub', 'Recruiter Agent', '', ''],
 ];
 // Extra job sites: off unless the user turns them on in Search Preferences, because each one
 // applies through the user's own account on that site, signed in in this Chrome.
 // UK: Reed. USA: Dice and Wellfound. LinkedIn in both. Indeed stays off for everyone: its
 // Cloudflare check loops even when a person passes it. Same rule as the app (retired_agents.js).
-const EXTRA_SITES = [['reed', 'Reed', 'uk'], ['linkedin', 'LinkedIn', 'both'], ['dice', 'Dice', 'us'], ['wellfound', 'Wellfound', 'us'], ['jobbank', 'Job Bank (apply by email)', 'ca']];
+const EXTRA_SITES = [['reed', 'Reed', 'uk'], ['linkedin', 'LinkedIn', 'both'], ['dice', 'Dice', 'us'], ['wellfound', 'Wellfound', 'us'], ['jobbank', 'Job Bank (apply by email)', 'ca'], ['workhub', 'Recruiter Agent (apply by email)', 'uk']];
 const ALWAYS_OFF = ['indeed'];
-const RETIRED = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound', 'jobbank']);
+const RETIRED = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound', 'jobbank', 'workhub']);
+// Agents that apply by email from the user's own Gmail (one shared Gmail connection), and the
+// site each one needs to reach (asked for only when the user turns it on).
+const EMAIL_AGENTS = {
+  jobbank: { origins: JOBBANK_ORIGINS, name: 'Job Bank Agent', who: 'employers on Job Bank', site: 'Job Bank', doc: 'resume', blurb: 'Applies by email to jobs on Job Bank, the Government of Canada job board, sent from your own Gmail. No Job Bank account needed.' },
+  workhub: { origins: WORKHUB_ORIGINS, name: 'Recruiter Agent', who: 'recruiters', site: 'the UK government job site', doc: 'CV', blurb: "Emails your tailored CV and cover letter to recruiters advertising on Find a Job, the UK government job site. Sent from your own Gmail, no account needed." },
+};
+async function emailAgentState(key) {
+  const perm = await chrome.permissions.contains({ origins: EMAIL_AGENTS[key].origins }).catch(() => false);
+  const g = await jobBankReady(); // Gmail status (shared by every email agent)
+  return { perm, gmail: g.gmail, email: g.email };
+}
 const extraForRegion = (region) => EXTRA_SITES.filter(([, , r]) => r === 'both' || r === region);
 function applyExtraSites(settings) {
   const on = (settings && settings.extraSites) || {};
@@ -402,29 +423,53 @@ function runAgent(key) {
   a.loop = (async () => { if (prev) await prev.catch(() => {}); return a.start(); })();
   sendStep('agents_started');
 }
+// Agents are running and the user picked another region: stay (default) or switch and stop them.
+const REGION_NAME = { uk: 'the UK', us: 'the USA', ca: 'Canada' };
+function confirmRegionSwitch(from, to) {
+  return new Promise((resolve) => {
+    const o = document.createElement('div'); o.id = 'region-confirm';
+    o.style.cssText = 'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
+    o.innerHTML = `<div role="dialog" aria-modal="true" aria-labelledby="rc-h" style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:440px;width:100%;border-radius:12px;padding:22px 24px">
+      <h3 id="rc-h" style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">Your agents are applying in ${REGION_NAME[from] || from}</h3>
+      <p style="margin:0 0 18px;color:var(--text-muted,#4a453b);font-size:14px">Switching to ${REGION_NAME[to] || to} will stop them.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="secondary" id="rc-switch" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Switch and stop</button><button class="primary" id="rc-stay" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Stay in ${REGION_NAME[from] || from}</button></div></div>`;
+    document.body.appendChild(o);
+    const done = (v) => { o.remove(); document.removeEventListener('keydown', esc); resolve(v); };
+    const esc = (e) => { if (e.key === 'Escape') done(false); };
+    document.addEventListener('keydown', esc);
+    o.addEventListener('click', (e) => { if (e.target === o) done(false); });
+    o.querySelector('#rc-stay').addEventListener('click', () => done(false));
+    o.querySelector('#rc-switch').addEventListener('click', () => done(true));
+    o.querySelector('#rc-stay').focus();
+  });
+}
+
 // Switched region: the job sites there that need the user's own account are off by default,
 // so offer them once per region instead of leaving them hidden in Search Preferences.
-async function regionSitesPrompt(region) {
+async function regionSitesPrompt(region, { newOnly = false } = {}) {
   const us = region === 'us', ca = region === 'ca';
-  const key = region;
+  const key = newOnly ? `${region}_new` : region;
   const settings = await store.get('settings');
   if ((settings.regionPromptSeen || {})[key] || $('#region-prompt')) return;
   const on = settings.extraSites || {}, F = settings.federal || {};
-  const gm = ca ? await jobBankReady() : {};
-  // Canada: Job Bank first (most people want it, and it needs no new account), ticked by default.
-  const sites = extraForRegion(region).sort((a, b) => (b[0] === 'jobbank') - (a[0] === 'jobbank'));
+  // The region's email agent (Job Bank in Canada, Recruiter in the UK) first, ticked by default:
+  // most people want it, and it needs no new account.
+  const emailKey = Object.keys(EMAIL_AGENTS).find((k) => extraForRegion(region).some(([x]) => x === k));
+  const gm = emailKey ? await emailAgentState(emailKey) : {};
+  if (newOnly && (!emailKey || (settings.extraSites || {})[emailKey] !== undefined)) return;
+  const sites = extraForRegion(region).filter(([k]) => !newOnly || k === emailKey).sort((a, b) => (b[0] === emailKey) - (a[0] === emailKey));
   const rows = [
-    ...sites.map(([k, l]) => [k, l, k === 'jobbank'
-      ? `Applies by email to jobs on Job Bank, the Government of Canada job board, sent from your own Gmail. No Job Bank account needed. ${gm.gmail ? `Sends from ${gm.email}.` : "You connect Gmail next: Job-AI can only send, it can't read your email."}`
-      : `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, k === 'jobbank' ? on[k] !== false : !!on[k]]),
-    ...(us ? [['federal', 'Federal government jobs', 'Needs a USAJOBS account (you sign in with Login.gov). Job-AI writes the resume, you apply there yourself.', !!settings.wantsFederal]]
+    ...sites.map(([k, l]) => [k, l, EMAIL_AGENTS[k]
+      ? `${EMAIL_AGENTS[k].blurb} ${gm.gmail ? `Sends from ${gm.email}.` : "You connect Gmail next: Job-AI can only send, it can't read your email."}`
+      : `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, EMAIL_AGENTS[k] ? on[k] !== false : !!on[k]]),
+    ...(newOnly ? [] : us ? [['federal', 'Federal government jobs', 'Needs a USAJOBS account (you sign in with Login.gov). Job-AI writes the resume, you apply there yourself.', !!settings.wantsFederal]]
       : ca ? [] : [['nhs', 'NHS jobs', 'Needs a Trac account.', !!settings.wantsNhs]]),
   ];
   const o = document.createElement('div'); o.id = 'region-prompt';
   o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
   o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:520px;width:100%;max-height:86vh;overflow:auto;border-radius:12px;padding:22px 24px">
-    <h3 style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">More job sites in ${us ? 'the USA' : ca ? 'Canada' : 'the UK'}</h3>
-    <p style="margin:0 0 14px;color:var(--text-muted,#4a453b);font-size:14px">Job-AI applies on employers' own websites for you. ${ca ? 'It can also apply to these. Tick any you want.' : 'It can also use these if you have an account there. Tick any you want.'}</p>
+    <h3 style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">${newOnly ? `New: ${EMAIL_AGENTS[emailKey].name}` : `More job sites in ${us ? 'the USA' : ca ? 'Canada' : 'the UK'}`}</h3>
+    <p style="margin:0 0 14px;color:var(--text-muted,#4a453b);font-size:14px">${newOnly ? '' : "Job-AI applies on employers' own websites for you. "}${newOnly ? `Job-AI can now also email your CV and cover letter to ${EMAIL_AGENTS[emailKey].who}, as well as applying on employers' websites.` : emailKey ? 'It can also apply through these. Tick any you want.' : 'It can also use these if you have an account there. Tick any you want.'}</p>
     ${rows.map(([k, l, note, c]) => `<label style="display:flex;gap:10px;align-items:flex-start;margin:0 0 12px;cursor:pointer"><input type="checkbox" class="rp-site" value="${k}" ${c ? 'checked' : ''} style="flex:0 0 16px;width:16px;height:16px;min-width:16px;max-width:16px;margin:3px 0 0;padding:0;accent-color:var(--primary,#3b82f6)"><span><strong>${esc(l)}</strong><br><small style="color:var(--text-muted,#4a453b)">${esc(note)}</small></span></label>`).join('')}
     <div id="rp-fed" style="display:none;grid-template-columns:1fr 1fr;gap:0 10px;margin:-4px 0 10px 26px">
       <div class="field" style="margin-bottom:8px"><label for="rp-cit">Are you a U.S. citizen?</label><select id="rp-cit"><option value="">Choose</option><option value="yes" ${F.usCitizen === 'yes' ? 'selected' : ''}>Yes</option><option value="no" ${F.usCitizen === 'no' ? 'selected' : ''}>No</option></select></div>
@@ -440,21 +485,21 @@ async function regionSitesPrompt(region) {
   $('#rp-yes').addEventListener('click', async () => {
     const picked = new Set($$('.rp-site:checked').map((c) => c.value));
     // Job Bank: ask for jobbank.gc.ca now, inside the click (Chrome requires it), then Gmail below.
-    const jbAsk = ca && picked.has('jobbank') && !(gm.perm && gm.gmail) ? chrome.permissions.request({ origins: JOBBANK_ORIGINS }) : null;
+    const jbAsk = emailKey && picked.has(emailKey) && !(gm.perm && gm.gmail) ? chrome.permissions.request({ origins: EMAIL_AGENTS[emailKey].origins }) : null;
     if (picked.has('federal') && !$('#rp-cit').value) { setSt('#rp-st', 'Please say if you are a U.S. citizen. Most federal jobs need it.', true); return; }
     const cur = await store.get('settings');
     const extraSites = { ...(cur.extraSites || {}) };
-    for (const [k] of extraForRegion(region)) extraSites[k] = picked.has(k);
+    for (const [k] of sites) extraSites[k] = picked.has(k);
     const patch = { extraSites };
     if (us) { patch.wantsFederal = picked.has('federal'); if (picked.has('federal')) patch.federal = { ...(cur.federal || {}), usCitizen: $('#rp-cit').value, hoursPerWeek: Math.min(80, Math.max(1, parseInt($('#rp-hrs').value, 10) || 40)) }; }
-    else if (!ca) patch.wantsNhs = picked.has('nhs');
+    else if (!ca && !newOnly) patch.wantsNhs = picked.has('nhs');
     await store.patch('settings', patch);
     if (jbAsk) {
       const btn = $('#rp-yes'); btn.disabled = true; btn.textContent = 'Finish on the Google screen…';
       setSt('#rp-st', 'Pick your Gmail, then tick "Send email on your behalf" and press Continue.');
       try {
-        if (!(await jbAsk)) throw new Error('Job-AI needs to reach Job Bank to find jobs. Press Turn on again and allow it.');
-        await connectGmail();
+        if (!(await jbAsk)) throw new Error(`Job-AI needs to reach ${EMAIL_AGENTS[emailKey].site} to find jobs. Press Turn on again and allow it.`);
+        if (!gm.gmail) await connectGmail();
       } catch (e) { btn.disabled = false; btn.textContent = 'Turn on'; setSt('#rp-st', e.message, true); return; }
     }
     await seen(); o.remove();
@@ -719,9 +764,10 @@ function buildApplicationsGraph(all, N = 14) {
   return `<svg viewBox="0 0 ${W} ${H + 4}" class="applications-graph" xmlns="http://www.w3.org/2000/svg">${bars.join('')}${labels.join('')}</svg>`;
 }
 
-let dashBusy = false;
+let dashBusy = false, dashAgain = false;
 VIEWS.dashboard = async function renderDashboardView() {
-  if (dashBusy) return; dashBusy = true;
+  // A redraw asked for mid-redraw runs once more afterwards, so a change is never left unshown.
+  if (dashBusy) { dashAgain = true; return; } dashBusy = true;
   try {
     const { license, profile, trac, settings } = await loadConfig();
     const cv = await store.get('cv');
@@ -757,7 +803,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       trac: !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length),
     };
     const base = hasLicence && setupDone.cvs;
-    const canRun = { trac: uk && base && setupDone.trac, reed: uk && base && setupDone.search, linkedin: base && setupDone.search, indeed: us && base && setupDone.search, dice: us && base && setupDone.search, wellfound: us && base && setupDone.search, ats: base && setupDone.search, jobbank: regionOf(settings) === 'ca' && base && setupDone.search, usajobs: us && base && setupDone.search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
+    const canRun = { trac: uk && base && setupDone.trac, reed: uk && base && setupDone.search, linkedin: base && setupDone.search, indeed: us && base && setupDone.search, dice: us && base && setupDone.search, wellfound: us && base && setupDone.search, ats: base && setupDone.search, jobbank: regionOf(settings) === 'ca' && base && setupDone.search, workhub: regionOf(settings) === 'uk' && base && setupDone.search, usajobs: us && base && setupDone.search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
     for (const k of RETIRED) canRun[k] = false;
     const running = anyRunning();
     const hour = new Date().getHours();
@@ -782,7 +828,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     };
     // Which agents "Start applying" runs (tick box on each card, like the app). All ticked by default.
     const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
-    const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal', jobbank: 'Job Bank' };
+    const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
     const bySource = Object.keys(LABEL).map((s) => [s, applied.filter((j) => j.source === s).length]).filter(([, n]) => n);
     // Many jobs skipped as not a close match this week: offer the Wider match level once.
     const weekAgo = Date.now() - 7 * 864e5;
@@ -801,12 +847,14 @@ VIEWS.dashboard = async function renderDashboardView() {
       ['review', 'Check every application', 'Nothing is sent until you check it and press Submit.'],
     ];
     const siteAuth = await siteAuthState();
-    const jbState = await jobBankReady();
+    const emailState = {};
+    for (const k of Object.keys(EMAIL_AGENTS)) emailState[k] = await emailAgentState(k);
     const card = ([key, label, url, signLabel]) => {
       const on = agents[key].running;
-      const toggle = key === 'jobbank' ? `<div class="agent-submit-toggle" style="display:block"><small>Applies by email to jobs on Job Bank, sent from your own Gmail. No Job Bank account needed. Job-AI can only send email, it can't read yours.</small>
-          ${jbState.perm && jbState.gmail ? `<div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="color:var(--success, #15803d);font-weight:600">✓ Sends from ${esc(jbState.email)}</span><button class="welcome-skip-link jb-test">Send me a test email</button><button class="welcome-skip-link jb-disconnect">Disconnect</button><span class="status-msg" id="jb-st"></span></div>`
-            : '<div style="margin-top:8px"><button class="btn-connect jb-connect">Connect Gmail</button><span class="status-msg" id="jb-st"></span></div>'}</div>` : key === 'usajobs' ? `<div class="agent-submit-toggle" style="display:block"><small>Writes a 2-page federal resume for each job. You apply on USAJOBS with your own account.</small></div>` : key === 'ats' ? `<div class="agent-submit-toggle" style="display:block">
+      const es = emailState[key];
+      const toggle = EMAIL_AGENTS[key] ? `<div class="agent-submit-toggle" style="display:block"><small>${EMAIL_AGENTS[key].blurb} Job-AI can only send email, it can't read yours.</small>
+          ${es.perm && es.gmail ? `<div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="color:var(--success, #15803d);font-weight:600">✓ Sends from ${esc(es.email)}</span><button class="welcome-skip-link jb-disconnect" data-key="${key}">Disconnect</button><span class="status-msg" id="jb-st-${key}"></span></div>`
+            : `<div style="margin-top:8px"><button class="btn-connect jb-connect" data-key="${key}">Connect Gmail</button><span class="status-msg" id="jb-st-${key}"></span></div>`}</div>` : key === 'usajobs' ? `<div class="agent-submit-toggle" style="display:block"><small>Writes a 2-page federal resume for each job. You apply on USAJOBS with your own account.</small></div>` : key === 'ats' ? `<div class="agent-submit-toggle" style="display:block">
           <strong style="display:block;margin-bottom:6px">Jobs that need a person</strong>
           ${ATS_MODES.map(([v, t, hint]) => `<label style="display:flex;gap:8px;align-items:flex-start;margin:0 0 6px;cursor:pointer;font-weight:400">
             <input type="radio" name="ats-mode" class="ats-mode" value="${v}" ${atsMode === v ? 'checked' : ''} style="width:auto;margin-top:3px">
@@ -968,34 +1016,28 @@ VIEWS.dashboard = async function renderDashboardView() {
     if ($('#fw-count')) firstWinCount(region).then((n) => { const h = $('#fw-count'); if (h) h.textContent = n ? `${n >= 50 ? '50+' : n} live job${n === 1 ? '' : 's'} fit you right now` : 'Your agents are ready to find jobs for you'; });
     $$('.region-opt').forEach((b) => b.addEventListener('click', async () => {
       if (b.classList.contains('active')) return;
-      // UK-only agents can't keep running once their cards are hidden.
-      for (const k of Object.keys(agents)) if (!inRegion(k, b.dataset.region)) agents[k].stop();
+      // Agents running: switching would stop them, so ask first instead of stopping silently.
+      if (anyRunning() && !(await confirmRegionSwitch(region, b.dataset.region))) return;
       await setRegion(b.dataset.region); renderDashboard();
       regionSitesPrompt(b.dataset.region);
     }));
+    // Set up before apply-by-email existed: offer it once, so nobody misses it.
+    if (setupDone.search && !$('.welcome-overlay')) regionSitesPrompt(region, { newOnly: true });
     $$('.preflight-link[data-view]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
     $$('.cv-fill-btn').forEach((b) => b.addEventListener('click', () => pickCv('#gs-cv-st', cvToPersonal)));
     // Job Bank: allow jobbank.gc.ca (asked inside the click, as Chrome requires), then Google sign-in for Gmail.
     $$('.jb-connect').forEach((b) => b.addEventListener('click', () => {
-      const ask = chrome.permissions.request({ origins: JOBBANK_ORIGINS });
+      const k = b.dataset.key, A = EMAIL_AGENTS[k];
+      const ask = chrome.permissions.request({ origins: A.origins });
       b.disabled = true; b.textContent = 'Finish on the Google screen…';
       ask.then(async (ok) => {
-        if (!ok) throw new Error('Job-AI needs to reach Job Bank to find jobs. Press Connect Gmail again and allow it.');
-        await connectGmail();
+        if (!ok) throw new Error(`Job-AI needs to reach ${A.site} to find jobs. Press Connect Gmail again and allow it.`);
+        if (!emailState[k].gmail) await connectGmail();
         VIEWS.dashboard();
-      }).catch((e) => { b.disabled = false; b.textContent = 'Connect Gmail'; setSt('#jb-st', e.message, true); });
+      }).catch((e) => { b.disabled = false; b.textContent = 'Connect Gmail'; setSt('#jb-st-' + k, e.message, true); });
     }));
-    $$('.jb-test').forEach((b) => b.addEventListener('click', async () => {
-      b.disabled = true; setSt('#jb-st', 'Sending…');
-      try {
-        const name = [profile.firstName, profile.lastName].filter(Boolean).join(' ');
-        const r = await sendGmail({ to: jbState.email, fromName: name, subject: 'Job-AI test email',
-          text: `This is a test from Job-AI.\n\nYour Job Bank applications will be sent from this address (${jbState.email}), each with a cover letter and your tailored resume attached. Employers reply to you here.\n\nJob-AI can only send email. It can't read your inbox.` });
-        setSt('#jb-st', `✓ Sent to ${r.from}. Check your inbox.`);
-      } catch (e) { setSt('#jb-st', e.message, true); }
-      b.disabled = false;
-    }));
-    $$('.jb-disconnect').forEach((b) => b.addEventListener('click', async () => { agents.jobbank.stop(); await disconnectGmail(); VIEWS.dashboard(); }));
+    // One Gmail connection serves every email agent, so Disconnect stops them all.
+    $$('.jb-disconnect').forEach((b) => b.addEventListener('click', async () => { for (const k of Object.keys(EMAIL_AGENTS)) agents[k].stop(); await disconnectGmail(); VIEWS.dashboard(); }));
     $$('.signin').forEach((b) => b.addEventListener('click', () => {
       if (!b.dataset.site) return openTab(b.dataset.url);
       b.disabled = true; b.textContent = 'Waiting for you to sign in…';
@@ -1074,7 +1116,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     $('#extra-no')?.addEventListener('click', async () => { await store.set('extraNotice', 'done'); renderDashboard(); });
     $('#wider-no')?.addEventListener('click', async () => { await store.patch('settings', { widerOfferOff: true }); renderDashboard(); });
     $$('.nhs-statement').forEach((b) => b.addEventListener('click', () => { const p = $('#nhs-st-' + b.dataset.i); p.hidden = !p.hidden; b.textContent = p.hidden ? 'Supporting statement' : 'Hide supporting statement'; }));
-  } finally { dashBusy = false; }
+  } finally { dashBusy = false; if (dashAgain && current === 'dashboard') { dashAgain = false; renderDashboardView(); } else dashAgain = false; }
 };
 function renderDashboard() { return VIEWS.dashboard(); }
 
@@ -1287,7 +1329,7 @@ VIEWS.analytics = async function renderAnalytics() {
   const all = await store.jobs();
   const applied = all.filter((j) => j.status === 'applied'), skipped = all.filter((j) => j.status === 'skipped'), failed = all.filter((j) => j.status === 'apply_failed');
   const count = (list, key) => Object.entries(list.reduce((m, j) => { const k = key(j); if (k) m[k] = (m[k] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]);
-  const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal', jobbank: 'Job Bank' };
+  const LABEL = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
   const bySource = count(applied, (j) => LABEL[j.source] || j.source), byCv = count(applied, (j) => j.cvName || 'Unknown');
   const skipReasons = count(skipped, (j) => String(j.reason || '').replace(/\s*\(\d+%\)$/, '').replace(/\d+%/g, 'N%')).slice(0, 10);
   const companies = count(applied, (j) => j.company).slice(0, 10), titles = count(applied, (j) => j.title).slice(0, 10);
@@ -1385,16 +1427,26 @@ setInterval(() => { if (current === 'dashboard' && !document.hidden) renderDashb
 const STAGE_LIST = [['applied', 'Applied'], ['phone_screen', 'Phone screen'], ['interview', 'Interview'], ['offer', 'Offer'], ['rejected', 'Rejected'], ['withdrawn', 'Withdrawn']];
 const STAGE = { phone_screen: ['Phone screen', 'badge-info'], interview: ['Interview', 'badge-info'], offer: ['Offer', 'badge-success'], rejected: ['Rejected', 'badge-muted'], withdrawn: ['Withdrawn', 'badge-muted'] };
 const STATUS = { awaiting_review: ['Waiting for your review', 'badge-warning'], processing: ['Tailoring CV', 'badge-info'], applied: ['Applied', 'badge-success'], apply_failed: ['Failed', 'badge-danger'], skipped: ['Skipped', 'badge-muted'], pending: ['Found', 'badge-info'], cv_ready: ['CV ready', 'badge-info'], applying: ['Applying', 'badge-info'], ready: ['Waiting for you', 'badge-warning'], ready_to_submit: ['Ready to submit', 'badge-success'] };
-const SOURCE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site' };
+const SOURCE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
 let trackerFilter = 'all';
+let trackerQuery = '';
 VIEWS.tracker = async function renderTracker() {
   const all = (await store.jobs()).slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   const f = trackerFilter;
-  const shown = all.filter((j) => !j.trackerHidden && (f === 'all' || (f === 'applied' ? j.status === 'applied' : f === 'skipped' ? j.status === 'skipped' : !['applied', 'skipped'].includes(j.status))));
+  const inTab = all.filter((j) => !j.trackerHidden && (f === 'all' || (f === 'applied' ? j.status === 'applied' : f === 'skipped' ? j.status === 'skipped' : !['applied', 'skipped'].includes(j.status))));
+  // Search: every word typed must appear in the job title, company, site, status, reason or notes.
+  const text = (j) => [j.title, j.company, SOURCE[j.source] || j.source, ((j.status === 'applied' && STAGE[j.stage]) || STATUS[j.status] || [j.status])[0], j.reason, j.notes].join(' ').toLowerCase();
+  const matching = () => { const q = trackerQuery.toLowerCase().split(/\s+/).filter(Boolean); return q.length ? inTab.filter((j) => { const t = text(j); return q.every((w) => t.includes(w)); }) : inTab; };
   content.innerHTML = `
     <div class="page-header"><h2>Tracker</h2><p>Every job your agents found, and what happened to it.</p></div>
-    <div class="ext-inline" style="margin-bottom:12px">${[['all', 'All'], ['applied', 'Applied'], ['open', 'In progress'], ['skipped', 'Skipped']].map(([k, l]) => `<button class="${f === k ? 'primary' : 'secondary'} trk-f" data-f="${k}">${l}</button>`).join('')}</div>
-    ${shown.length ? `<div class="card card-wide"><div class="table-scroll"><table class="data-table tracker-table">
+    <div class="ext-inline" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">${[['all', 'All'], ['applied', 'Applied'], ['open', 'In progress'], ['skipped', 'Skipped']].map(([k, l]) => `<button class="${f === k ? 'primary' : 'secondary'} trk-f" data-f="${k}">${l}</button>`).join('')}
+      <input id="trk-q" type="search" placeholder="Search jobs, companies, notes" aria-label="Search the Tracker" value="${esc(trackerQuery)}" style="flex:1;min-width:200px;max-width:360px;margin:0;height:40px;padding:0 14px;border:1px solid var(--border, #d9d4c7);border-radius:10px;font-size:14px;background:var(--surface, #fff);color:var(--text, #1c1b17)"></div>
+    <div id="trk-rows"></div>`;
+  // Only the table redraws while typing, so the search box keeps focus.
+  const drawRows = () => {
+    const shown = matching();
+    const q = trackerQuery.trim();
+    $('#trk-rows').innerHTML = shown.length ? `${q ? `<p class="muted" style="margin:0 0 8px">${shown.length} job${shown.length === 1 ? '' : 's'} match "${esc(q)}"</p>` : ''}<div class="card card-wide"><div class="table-scroll"><table class="data-table tracker-table">
       <thead><tr><th>Job</th><th>Company</th><th>Site</th><th>Status</th><th>Notes</th><th>Updated</th><th></th></tr></thead>
       <tbody>${shown.slice(0, 300).map((j) => { const [l, c] = (j.status === 'applied' && STAGE[j.stage]) || STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.draftUrl || j.url); return `<tr>
         <td class="tracker-title" title="${esc(j.title)}">${u ? `<a class="tracker-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>` : esc(j.title)}</td>
@@ -1402,16 +1454,20 @@ VIEWS.tracker = async function renderTracker() {
         <td>${j.status === 'applied' ? `<select class="tracker-stage-select trk-stage" data-id="${esc(j.jobId)}" aria-label="Stage">${STAGE_LIST.map(([v, t]) => `<option value="${v}" ${(j.stage || 'applied') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : `<span class="badge ${c}" title="${esc(j.reason || '')}">${esc(l)}</span>`}</td>
         <td>${j.status === 'applied' ? `<textarea class="tracker-notes-input trk-notes" data-id="${esc(j.jobId)}" rows="1" placeholder="Add notes...">${esc(j.notes || '')}</textarea>` : ''}</td>
         <td>${esc(j.updatedAt ? new Date(j.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '')}</td><td class="row-actions">${docButtons(j)}<button class="tracker-delete-btn trk-del" data-id="${esc(j.jobId)}" title="Remove from Tracker" aria-label="Remove from Tracker">×</button></td></tr>`; }).join('')}</tbody>
-    </table></div></div>` : '<div class="card"><div class="empty-state">No applications tracked yet. Jobs appear here once the agents start working.</div></div>'}`;
+    </table></div></div>` : `<div class="card"><div class="empty-state">${q ? `No jobs match "${esc(q)}".` : 'No applications tracked yet. Jobs appear here once the agents start working.'}</div></div>`;
+    $$('.trk-stage').forEach((el) => el.addEventListener('change', () => store.updateJob(el.dataset.id, { stage: el.value }).then(remoteNudge)));
+    $$('.trk-notes').forEach((el) => {
+      const grow = () => { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px'; }; grow();
+      el.addEventListener('input', grow);
+      el.addEventListener('blur', () => store.updateJob(el.dataset.id, { notes: el.value.slice(0, 2000) }));
+    });
+    // Hidden from the Tracker only: the job stays known so it is never applied to twice.
+    $$('.trk-del').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { trackerHidden: true }); renderTracker(); }));
+  };
+  drawRows();
   $$('.trk-f').forEach((b) => b.addEventListener('click', () => { trackerFilter = b.dataset.f; renderTracker(); }));
-  $$('.trk-stage').forEach((el) => el.addEventListener('change', () => store.updateJob(el.dataset.id, { stage: el.value }).then(remoteNudge)));
-  $$('.trk-notes').forEach((el) => {
-    const grow = () => { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px'; }; grow();
-    el.addEventListener('input', grow);
-    el.addEventListener('blur', () => store.updateJob(el.dataset.id, { notes: el.value.slice(0, 2000) }));
-  });
-  // Hidden from the Tracker only: the job stays known so it is never applied to twice.
-  $$('.trk-del').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { trackerHidden: true }); renderTracker(); }));
+  let tq = null;
+  $('#trk-q').addEventListener('input', (e) => { trackerQuery = e.target.value; clearTimeout(tq); tq = setTimeout(drawRows, 150); });
 };
 
 // ── Activity ─────────────────────────────────────────────────────────────────
@@ -2072,6 +2128,7 @@ async function initOnboarding() {
         <div class="field" style="margin-bottom:10px"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="wc-wt" value="${v}"><span>${l}</span></label>`).join('')}</div></div>        <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
         <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-licence" style="width:16px;height:16px;margin:0"> <span>I have a full driving licence</span></label>
         <label id="wc-nhs-row" style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-nhs" style="width:16px;height:16px;margin:0"> <span>Also apply for NHS jobs (needs a Trac account)</span></label>
+        <label id="wc-mail-row" style="font-size:13.5px;display:none;gap:8px;align-items:flex-start;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-mail" style="width:16px;height:16px;margin:2px 0 0;flex:0 0 16px"> <span id="wc-mail-l">Also apply by email from my Gmail</span></label>
         <label id="wc-fed-row" style="font-size:13.5px;display:none;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-fed" style="width:16px;height:16px;margin:0"> <span>Also apply for federal government jobs (needs a USAJOBS account)</span></label>
         <div id="wc-fed-q" style="display:none;grid-template-columns:1fr 1fr;gap:0 10px;margin:-4px 0 12px">
           <div class="field" style="margin-bottom:10px"><label for="wc-fed-cit">Are you a U.S. citizen?</label><select id="wc-fed-cit"><option value="">Choose</option><option value="yes">Yes</option><option value="no">No</option></select></div>
@@ -2123,6 +2180,8 @@ async function initOnboarding() {
       const wt = (P.workTypePriority || []).length ? P.workTypePriority : ['remote', 'hybrid', 'onsite'];
       $$('.wc-wt').forEach((c) => { c.checked = wt.includes(c.value); });      $('#wc-licence').checked = !!P.drivingLicence;
       $('#wc-nhs').checked = !!st.wantsNhs;
+      const mailKeyOf = (r) => (r === 'uk' ? 'workhub' : r === 'ca' ? 'jobbank' : '');
+      const mailOn = (r) => (st.extraSites || {})[mailKeyOf(r)] !== false;
       const F = st.federal || {};
       $('#wc-fed').checked = !!st.wantsFederal; $('#wc-fed-cit').value = F.usCitizen || ''; $('#wc-fed-hrs').value = F.hoursPerWeek || 40;
       const fedQ = () => { $('#wc-fed-q').style.display = $('#wc-region').value === 'us' && $('#wc-fed').checked ? 'grid' : 'none'; };
@@ -2147,6 +2206,9 @@ async function initOnboarding() {
         $('#wc-postcode-l').textContent = us ? 'ZIP code' : ca ? 'Postal code' : 'Postcode';
         $('#wc-salary-l').textContent = `Lowest salary (${us ? '$' : ca ? 'CA$' : '£'} a year)`;
         $('#wc-nhs-row').style.display = r === 'uk' ? 'flex' : 'none';
+        $('#wc-mail-row').style.display = mailKeyOf(r) ? 'flex' : 'none';
+        $('#wc-mail').checked = mailOn(r);
+        $('#wc-mail-l').textContent = ca ? 'Also apply by email to Job Bank jobs, sent from my Gmail (Job-AI can only send, never read)' : 'Also email my CV to recruiters (Recruiter Agent), sent from my Gmail (Job-AI can only send, never read)';
         $('#wc-fed-row').style.display = us ? 'flex' : 'none'; fedQ();
         $('#wc-state-row').style.display = us ? '' : 'none';
         $('#wc-prov-row').style.display = ca ? '' : 'none';
@@ -2164,6 +2226,10 @@ async function initOnboarding() {
       if ((await getCvs()).length) showCheck(); else step('ws-cv');
     };
     const finish = async () => {
+      // Apply by email: Chrome only allows the site permission inside the click, so ask first.
+      const mailKey = { uk: 'workhub', ca: 'jobbank' }[$('#wc-region').value] || '';
+      const mailWanted = !!mailKey && $('#wc-mail').checked;
+      const mailAsk = mailWanted ? chrome.permissions.request({ origins: EMAIL_AGENTS[mailKey].origins }).catch(() => false) : null;
       const titles = $('#wc-titles').value.split(',').map((t) => t.trim()).filter(Boolean);
       const first = $('#wc-first').value.trim(), last = $('#wc-last').value.trim(), phone = $('#wc-phone').value.trim();
       if (!first || !last) { setSt('#w-st', 'Please add your first and last name.', true); return; }
@@ -2209,6 +2275,19 @@ async function initOnboarding() {
         if (!(t.searchTerms || []).length) t.searchTerms = titles.slice(0, 40);
         await store.set('trac', t);
       }
+      if (mailKey) {
+        const cur = await store.get('settings');
+        await store.patch('settings', { extraSites: { ...(cur.extraSites || {}), [mailKey]: mailWanted }, regionPromptSeen: { ...(cur.regionPromptSeen || {}), [region]: true, [`${region}_new`]: true } });
+      }
+      if (mailAsk) {
+        const btn = $('#w-done'); btn.disabled = true;
+        setSt('#w-st', 'Pick your Gmail, then tick "Send email on your behalf" and press Continue.');
+        try {
+          if (!(await mailAsk)) throw new Error('Allow Job-AI to reach the job site, or untick apply by email.');
+          if (!(await jobBankReady()).gmail) await connectGmail();
+        } catch (e) { btn.disabled = false; setSt('#w-st', `${e.message} You can connect Gmail later on the dashboard.`, true); }
+        btn.disabled = false;
+      }
       await loadConfig(); checkSteps();
       dismiss(); navigate('dashboard');
     };
@@ -2231,7 +2310,7 @@ async function initOnboarding() {
 // phone is the computer.
 // It also shares what needs the user, the applications list and the search settings (only when
 // they change), so the phone can submit a ready NHS form, set a stage, or change settings.
-const REMOTE_LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal jobs', jobbank: 'Job Bank' };
+const REMOTE_LABELS = { trac: 'NHS (Trac)', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company sites', usajobs: 'Federal jobs', jobbank: 'Job Bank', workhub: 'Recruiter' };
 let remoteCtl = null, remoteNudgeT = null;
 function remoteNudge() { clearTimeout(remoteNudgeT); remoteNudgeT = setTimeout(() => { if (remoteCtl) remoteCtl.abort(); }, 800); }
 async function remoteGate() {
@@ -2241,7 +2320,7 @@ async function remoteGate() {
   const search = !!((profile.searchTerms || []).length);
   const tracOk = !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length);
   const us = isUS(settings), uk = regionOf(settings) === 'uk';
-  const canRun = { trac: uk && base && tracOk, reed: uk && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, wellfound: us && base && search, ats: base && search, jobbank: regionOf(settings) === 'ca' && base && search, usajobs: us && base && search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
+  const canRun = { trac: uk && base && tracOk, reed: uk && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, wellfound: us && base && search, ats: base && search, jobbank: regionOf(settings) === 'ca' && base && search, workhub: regionOf(settings) === 'uk' && base && search, usajobs: us && base && search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
   for (const k of RETIRED) canRun[k] = false;
   const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
   return { license, cv, canRun, enabled };
@@ -2250,7 +2329,7 @@ async function remoteStatus() {
   const g = await remoteGate();
   const all = await store.jobs();
   const applied = await store.appliedToday(), cap = cfg.MAX_APPLICATIONS_PER_DAY;
-  const SRC = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank' };
+  const SRC = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
   const recent = all.filter((j) => ['applied', 'apply_failed', 'ready', 'ready_to_submit'].includes(j.status))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 12)
     .map((j) => ({ title: j.title || '', company: j.company || '', source: SRC[j.source] || '', status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting', at: j.appliedAt || j.updatedAt || '', ...(j.status === 'apply_failed' && j.reason ? { reason: String(j.reason).slice(0, 140) } : {}), ...((j.status === 'applied' && cfg.movePay(j)) || {}) }));
@@ -2269,7 +2348,7 @@ async function remoteStatus() {
     skip_reasons: Object.entries(skipReasons).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([reason, count]) => ({ reason, count })),
   };
 }
-const REMOTE_SITE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank' };
+const REMOTE_SITE = { trac: 'NHS', reed: 'Reed', linkedin: 'LinkedIn', indeed: 'Indeed', dice: 'Dice', wellfound: 'Wellfound', ats: 'Company site', usajobs: 'Federal', jobbank: 'Job Bank', workhub: 'Recruiter' };
 const REMOTE_STAGES = ['applied', 'phone_screen', 'interview', 'offer', 'rejected', 'withdrawn'];
 const TRAC_LIST = 'https://apps.trac.jobs/applicationlist';
 async function remoteExtra() {

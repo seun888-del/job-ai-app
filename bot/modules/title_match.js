@@ -21,6 +21,7 @@ const SAME = [
   [/\bhuman resources?\b|\bpeople(?= (advisor|adviser|partner|officer|manager|coordinator|assistant|generalist|business partner)\b)/g, 'hr'],
   [/\b(administrative|administration|administrator)\b/g, 'admin'],
   [/\bcustomer (support|care|services)\b/g, 'customer service'],
+  [/\bapplications\b/g, 'application'], [/\bsystems\b/g, 'system'],
   [/\b(nursing)\b/g, 'nurse'], [/\b(accounting|accounts)\b/g, 'accountant'],
   [/\b(despatch|dispatch|picker|packer|pick and pack|mhe|forklift|goods in|loader)\b/g, 'warehouse'],
 ];
@@ -38,6 +39,14 @@ const WEAK = new Set(('it ict information technology systems system operations o
 const JOB_WORDS = new Set([...ROLE_NOUNS, ...('manager director lead head architect developer coordinator officer specialist').split(' ')]);
 // A help/service desk job is a support job.
 const SUPPORT_LIKE = ['support', 'desk', 'helpdesk'];
+// "Support" names what the job does, so a support search needs a support job: "Desktop Support
+// Analyst" must not find "Software Engineer (Desktop Applications)", nor "Systems Support Analyst"
+// a "Business Systems Analyst". Technicians, desktop engineers and 1st/2nd/3rd line jobs are
+// support jobs whatever the title says.
+const isSupportJob = (have, f) => SUPPORT_LIKE.some((x) => have.has(x)) || have.has('technician') ||
+  // "Desktop and Endpoint Engineer", but not "Software Engineer (Desktop Applications)".
+  ((have.has('desktop') || have.has('endpoint')) && ['engineer', 'analyst', 'specialist'].some((w) => have.has(w)) && !have.has('software') && !have.has('application')) ||
+  / (desktop|deskside|end user|eus|(1st|2nd|3rd|first|second|third) line) (engineer|analyst|technician|specialist|officer|administrator|admin) |(1st|2nd|3rd|first|second|third) line/.test(f);
 
 // One matcher per term: { phrase, need: [words that must all be in the title], role: [one of
 // these must be in the title too, only when the key words are all broad] }.
@@ -48,13 +57,13 @@ function compile(terms) {
     const fallback = all.filter((w) => !GENERIC.has(w));
     const roles = all.filter((w) => JOB_WORDS.has(w));
     const weak = key.length > 0 && key.every((w) => WEAK.has(w));
-    return { phrase: flat(t), need: key.length ? key : fallback, role: weak ? roles : [], boss: all.some((w) => BOSS.has(w)) };
+    return { phrase: flat(t), need: key.length ? key : fallback, role: weak ? roles : [], boss: all.some((w) => BOSS.has(w)), support: all.includes('support') && key.length > 0 };
   }).filter((m) => m.phrase.length >= 2);
 }
 // A boss job is not a match for a non-boss search: "Warehouse Operative" must not find
 // "Warehouse Manager", "Customer Service Representative" not "Customer Service Supervisor".
 const BOSS = new Set(('manager managers supervisor supervisors director head chief superintendent foreman forewoman').split(' '));
-const hasRole = (m, have) => !m.role.length || m.role.some((w) => have.has(w) || (w === 'support' && SUPPORT_LIKE.some((x) => have.has(x))));
+const hasRole = (m, have, f) => (!m.support || isSupportJob(have, f)) && (!m.role.length || m.role.some((w) => have.has(w) || (w === 'support' && isSupportJob(have, f))));
 
 function titleMatches(title, matchers) {
   if (!matchers || !matchers.length) return true; // no terms: don't over-filter
@@ -69,7 +78,7 @@ function titleMatches(title, matchers) {
   if (SOFTWARE.test(f)) have.add('software');
   if (/\bhelp desk\b|\bhelpdesk\b/.test(f)) have.add('helpdesk');
   const bossTitle = [...have].some((w) => BOSS.has(w));
-  return matchers.some((m) => (!bossTitle || m.boss) && (f.includes(' ' + m.phrase + ' ') || (m.need.length > 0 && m.need.every((w) => have.has(w)) && hasRole(m, have))));
+  return matchers.some((m) => (!bossTitle || m.boss) && (f.includes(' ' + m.phrase + ' ') || (m.need.length > 0 && m.need.every((w) => have.has(w)) && hasRole(m, have, f))));
 }
 
 module.exports = { compile, titleMatches };

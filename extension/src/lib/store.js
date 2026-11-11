@@ -34,10 +34,14 @@ function withJobs(fn) {
   jobsLock = run.catch(() => {});
   return run;
 }
-export function addJob(job) {
+// The UK/USA/Canada switch: each job remembers the region it was found in, and only jobs of
+// the region the user is in now are tailored or sent.
+const regionNow = async () => ((await get('settings')) || {}).region || 'uk';
+export async function addJob(job) {
+  const region = job.region || await regionNow();
   return withJobs((all) => {
     if (all.some((j) => j.jobId === job.jobId)) return { value: false };
-    all.push({ status: 'pending', retryCount: 0, addedAt: new Date().toISOString(), ...job, updatedAt: new Date().toISOString() });
+    all.push({ status: 'pending', retryCount: 0, addedAt: new Date().toISOString(), ...job, region, updatedAt: new Date().toISOString() });
     return { save: true, value: true };
   });
 }
@@ -57,7 +61,7 @@ export async function updateJob(jobId, fields) {
   }
   return r;
 }
-export async function byStatus(status, source) { return (await jobs()).filter((j) => j.status === status && (!source || j.source === source)); }
+export async function byStatus(status, source) { const r = await regionNow(); return (await jobs()).filter((j) => j.status === status && (!source || j.source === source) && (!j.region || j.region === r)); }
 // Tailored jobs waiting to be sent (fresh only, see the app's countReadyBacklog).
 export async function readyBacklog() {
   const since = Date.now() - 2 * 864e5;
