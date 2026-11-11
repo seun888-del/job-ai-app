@@ -42,6 +42,14 @@ const JAMMED_HEADINGS = {
   ITSKILLS: 'IT SKILLS', EDUCATIONANDCERTIFICATIONS: 'EDUCATION AND CERTIFICATIONS',
   EDUCATIONCERTIFICATIONS: 'EDUCATION & CERTIFICATIONS', QUALIFICATIONS: 'QUALIFICATIONS',
 };
+// Letter-spaced headings ("K E Y  S K I L L S", from CV templates with wide letter spacing)
+// come out of some PDF readers one letter per word. Join the letters back up; a wider gap
+// marks a word break. Anything else is returned unchanged.
+function despaceHeading(line) {
+  const t = line.trim();
+  if (!/^[A-Z&](?: {1,4}[A-Z&]){3,}$/.test(t)) return line;
+  return t.split(/ {2,}/).map((w) => w.replace(/ /g, '')).join(' ');
+}
 // If a line is a jammed heading, return its spaced form; otherwise return it unchanged.
 function normalizeHeading(line) {
   const key = line.trim().replace(/\s+/g, '').toUpperCase();
@@ -185,7 +193,7 @@ function parseCV(cvText, opts = {}) {
   const sections = {};       // key -> array of body lines
   let current = null;
   for (let i = 0; i < lines.length; i++) {
-    const t = lines[i].trim();
+    const t = normalizeHeading(despaceHeading(lines[i].trim()));
     if (i < headerConsumed && !classifyHeading(t)) continue; // skip header lines
     if (isHeadingLine(t)) {
       const key = classifyHeading(normalizeHeading(t));

@@ -20,4 +20,13 @@ const r = parseCV(cv('IT Support Analyst | Kirkstall Homes  Mar 2022 – Present
 const ok = r.experience.length === 1 && r.experience[0].bullets.length === 2;
 console.log(ok ? 'ok  ' : 'FAIL', 'sentences with years stay bullets', JSON.stringify(r.experience.map((e) => [e.title, e.bullets])));
 if (!ok) fail++;
+// Letter-spaced headings ("K E Y S K I L L S") must start their own section, not join the last job.
+for (const head of ['K E Y S K I L L S', 'K E Y  S K I L L S']) {
+  const text = 'Sam Taylor\nLeeds | 07700 900123 | sam@example.com\n\nPROFILE\nIT support analyst.\n\nWORK EXPERIENCE\n'
+    + 'IT Support Analyst | Kirkstall Homes  Mar 2022 – Present\n• Fixed tickets.\n' + head + '\nTicketing: ServiceNow, Jira\nDocumentation: SOPs, knowledge base';
+  const p = parseCV(text);
+  const good = p.skills.length === 2 && p.experience[0].bullets.length === 1;
+  console.log(good ? 'ok  ' : 'FAIL', 'letter-spaced heading', JSON.stringify(head), JSON.stringify(p.skills), p.experience[0].bullets);
+  if (!good) fail++;
+}
 process.exit(fail ? 1 : 0);
