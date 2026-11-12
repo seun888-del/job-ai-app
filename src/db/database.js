@@ -312,6 +312,45 @@ function addSearchTerms(terms, source = 'user_added') {
   return getSearchTerms(true);
 }
 
+// A CV's job titles follow that CV. leadSearchTerms puts these titles first (agents search in
+// order), keeping every other term after them. dropSearchTerms removes titles a removed CV
+// brought in, unless another CV still suggests them (keep).
+function leadSearchTerms(terms, source = 'ai_generated') {
+  const rows = db.prepare('SELECT id, term, source, is_active FROM search_terms ORDER BY id').all();
+  const maxOld = rows.reduce((m, r) => Math.max(m, r.id), 0);
+  const byLower = new Map(rows.map(r => [r.term.trim().toLowerCase(), r]));
+  const lead = [];
+  for (const t of terms || []) {
+    const k = String(t).trim().toLowerCase();
+    if (!k || lead.some(x => x.term.toLowerCase() === k)) continue;
+    const r = byLower.get(k);
+    lead.push({ term: r ? r.term : String(t).trim(), source: r ? r.source : source, is_active: 1 });
+  }
+  const leadLower = new Set(lead.map(x => x.term.toLowerCase()));
+  const order = [...lead, ...rows.filter(r => !leadLower.has(r.term.trim().toLowerCase()))];
+  const ins = db.prepare('INSERT INTO search_terms (term, source, is_active) VALUES (?, ?, ?)');
+  // Insert the new order first, then remove the old rows, so a crash midway never loses terms.
+  db.transaction(() => {
+    for (const r of order) ins.run([r.term, r.source, r.is_active]);
+    db.prepare('DELETE FROM search_terms WHERE id <= ?').run([maxOld]);
+  })();
+  return getSearchTerms(true);
+}
+
+function dropSearchTerms(terms, keep = []) {
+  const k = new Set((keep || []).map(t => String(t).trim().toLowerCase()));
+  const del = db.prepare('DELETE FROM search_terms WHERE term = ? COLLATE NOCASE');
+  let n = 0;
+  db.transaction(() => {
+    for (const t of terms || []) {
+      const v = String(t).trim();
+      if (!v || k.has(v.toLowerCase())) continue;
+      n += del.run([v]).changes || 0;
+    }
+  })();
+  return n;
+}
+
 function deleteSearchTerm(id) {
   db.prepare('DELETE FROM search_terms WHERE id = ?').run([id]);
 }
@@ -484,6 +523,8 @@ module.exports = {
   saveSearchPreferences,
   getSearchTerms,
   addSearchTerms,
+  leadSearchTerms,
+  dropSearchTerms,
   deleteSearchTerm,
   setSearchTermActive,
   getExcludeKeywords,

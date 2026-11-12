@@ -642,9 +642,12 @@ function fillProfileFromCV(cvp, roles) {
     if (cvp.yearsExperience && !p.years_experience) { fields.years_experience = cvp.yearsExperience; filled.push('Years of experience'); }
     if (Object.keys(fields).length) db.saveProfile(fields);
   }
+  // The only CV leads the search: its job titles go first (agents search titles in order).
+  // With more CVs, an added CV only suggests its titles on the CVs page.
   let termsAdded = 0;
-  if (roles && roles.length && db.getSearchTerms(false).length === 0) {
-    termsAdded = db.addSearchTerms(roles, 'ai_generated').length;
+  if (roles && roles.length && (db.getSearchTerms(false).length === 0 || db.getCVs().length === 1)) {
+    const before = new Set(db.getSearchTerms(true).map(t => t.term.toLowerCase()));
+    termsAdded = db.leadSearchTerms(roles, 'ai_generated').filter(t => !before.has(t.term.toLowerCase())).length;
   }
   return { filled, termsAdded };
 }
@@ -652,11 +655,18 @@ function fillProfileFromCV(cvp, roles) {
 ipcMain.handle('cvs:addSuggestedTerms', (event, cvId) => {
   const cv = db.getCVs().find(c => c.id === cvId);
   if (!cv || !cv.suggested_roles.length) return db.getSearchTerms(false);
-  return db.addSearchTerms(cv.suggested_roles, 'ai_generated');
+  return db.leadSearchTerms(cv.suggested_roles, 'ai_generated');
 });
 
+// Removing a CV takes its job titles out of the search too, unless another CV still suggests them,
+// so a switched career doesn't keep searching the old titles.
 ipcMain.handle('cvs:remove', (event, cvId) => {
+  const all = db.getCVs();
+  const gone = all.find(c => c.id === cvId);
   db.removeCV(cvId);
+  if (gone && (gone.suggested_roles || []).length) {
+    db.dropSearchTerms(gone.suggested_roles, all.filter(c => c.id !== cvId).flatMap(c => c.suggested_roles || []));
+  }
 });
 
 // ── Connect Gmail (Job Bank email applications, Canada) ───────────────────

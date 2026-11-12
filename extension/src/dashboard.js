@@ -692,19 +692,38 @@ async function getCvs() {
   return cv && cv.text ? [{ id: 'cv1', label: 'Main CV', ...cv }] : [];
 }
 async function saveCvs(list) { await store.set('cvs', list); await store.set('cv', list[0] || null); }
-async function fillFromCv(text, cvId) {
+// The job titles a CV brought in follow that CV: when it is replaced or removed they leave the
+// search (unless another CV still suggests them), and the new main CV's titles go first, since
+// every agent searches the titles in order.
+const lowerSet = (a) => new Set((a || []).map((t) => String(t).trim().toLowerCase()));
+function swapCvTerms(have, oldRoles, newRoles, keepRoles) {
+  const drop = lowerSet(oldRoles), keep = lowerSet(keepRoles);
+  const rest = (have || []).filter((t) => !drop.has(String(t).trim().toLowerCase()) || keep.has(String(t).trim().toLowerCase()));
+  const lead = [...new Map((newRoles || []).map((t) => [String(t).trim().toLowerCase(), String(t).trim()])).values()].filter(Boolean);
+  const ledLower = new Set(lead.map((t) => t.toLowerCase()));
+  return [...lead, ...rest.filter((t) => !ledLower.has(String(t).trim().toLowerCase()))].slice(0, 40);
+}
+async function fillFromCv(text, cvId, { lead = false, oldRoles = [] } = {}) {
   const r = await readCvProfile(text);
   const { profile: P } = await loadConfig();
   const out = {}, filled = [];
   for (const [k, label] of CV_FIELDS) if (r[k] && !String(P[k] || '').trim()) { out[k] = r[k]; if (label) filled.push(label); }
-  let termsAdded = 0;
-  if (r.roles.length && !(P.searchTerms || []).length) { out.searchTerms = r.roles; termsAdded = r.roles.length; }
+  let termsAdded = 0, termsRemoved = 0;
+  const have = P.searchTerms || [];
+  if (r.roles.length && (!have.length || lead)) {
+    const others = (await getCvs()).filter((c) => c.id !== cvId).flatMap((c) => c.roles || []);
+    const next = swapCvTerms(have, oldRoles, r.roles, others);
+    const before = lowerSet(have), after = lowerSet(next);
+    termsAdded = [...after].filter((t) => !before.has(t)).length;
+    termsRemoved = [...before].filter((t) => !after.has(t)).length;
+    if (termsAdded || termsRemoved || JSON.stringify(next) !== JSON.stringify(have)) out.searchTerms = next;
+  }
   if (Object.keys(out).length) { await store.patch('profile', out); await loadConfig(); }
   // Same as the app's CVs page: the job titles this CV fits, and its keywords, shown with the CV.
   const list = await getCvs();
   const i = Math.max(0, list.findIndex((c) => c.id === cvId));
   if (list[i]) { list[i] = { ...list[i], roles: r.roles || [], keywords: r.keywords || [] }; await saveCvs(list); }
-  return { filled, termsAdded, roles: r.roles || [] };
+  return { filled, termsAdded, termsRemoved, roles: r.roles || [] };
 }
 // mode 'add' adds another CV (CVs page); otherwise the first CV is replaced.
 function pickCv(stSel, done, mode, label) {
@@ -718,16 +737,18 @@ function pickCv(stSel, done, mode, label) {
       const text = await extractText(f);
       if (text.replace(/\s/g, '').length < 200) throw new Error('No readable text found. Is it a scanned image?');
       const list = await getCvs();
+      const oldRoles = mode === 'add' ? [] : ((list[0] && list[0].roles) || []);
       const entry = { id: 'cv' + Date.now(), label: (label || '').trim() || (list.length && mode === 'add' ? f.name.replace(/\.[^.]+$/, '') : 'Main CV'), name: f.name, type: f.type, text, dataB64: toBase64(buf) };
       if (mode === 'add') list.push(entry); else list[0] = { ...entry, label: (list[0] && list[0].label) || entry.label };
       await saveCvs(list);
       checkSteps();
       let msg = 'Using: ' + f.name;
       try {
-        const r = await fillFromCv(text, mode === 'add' ? entry.id : (list[0] && list[0].id));
+        const r = await fillFromCv(text, mode === 'add' ? entry.id : (list[0] && list[0].id), { lead: mode !== 'add' || list.length === 1, oldRoles });
         const parts = [];
         if (r.filled.length) parts.push(`Filled in from your CV: ${r.filled.join(', ')}.`);
-        if (r.termsAdded) parts.push(`Added ${r.termsAdded} job titles to search for.`);
+        if (r.termsRemoved) parts.push(`Your search now uses this CV's job titles (removed ${r.termsRemoved} from your old CV).`);
+        else if (r.termsAdded) parts.push(`Added ${r.termsAdded} job titles to search for.`);
         else if (r.roles.length) parts.push(`Suggested ${r.roles.length} job titles that fit your CV. See them on the CVs page.`);
         if (parts.length) msg = parts.join(' ') + ' Check your details, then Save.';
       } catch (err) { msg += '. ' + err.message; }
@@ -1711,14 +1732,19 @@ VIEWS.cvs = async function renderCVs() {
   $('.cv-replace')?.addEventListener('click', () => pickCv('#cv-st', again, 'replace'));
   $$('.cv-remove').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('Remove this CV from Job-AI?')) return;
-    const list = await getCvs(); list.splice(Number(b.dataset.i), 1); await saveCvs(list); VIEWS.cvs();
+    const list = await getCvs(); const [gone] = list.splice(Number(b.dataset.i), 1); await saveCvs(list);
+    const { profile } = await loadConfig(); const have = profile.searchTerms || [];
+    const next = swapCvTerms(have, (gone && gone.roles) || [], [], list.flatMap((c) => c.roles || []));
+    if (next.length !== have.length) { await store.patch('profile', { searchTerms: next }); await loadConfig(); }
+    VIEWS.cvs();
   }));
   $$('.cv-add-terms').forEach((b) => b.addEventListener('click', async () => {
     const cv = cvs[Number(b.dataset.i)]; const { profile } = await loadConfig();
     const have = profile.searchTerms || [], lower = new Set(have.map((t) => t.toLowerCase()));
     const add = (cv.roles || []).filter((r) => !lower.has(r.toLowerCase()));
-    if (add.length) { await store.patch('profile', { searchTerms: [...have, ...add].slice(0, 40) }); await loadConfig(); }
-    setSt(`.cv-terms-st[data-i="${b.dataset.i}"]`, add.length ? `✓ Added ${add.length} to your search. See Search preferences.` : 'These are already in your search.');
+    const next = swapCvTerms(have, [], cv.roles || [], []);
+    if (JSON.stringify(next) !== JSON.stringify(have)) { await store.patch('profile', { searchTerms: next }); await loadConfig(); }
+    setSt(`.cv-terms-st[data-i="${b.dataset.i}"]`, add.length ? `✓ Added ${add.length} to your search, searched first. See Search preferences.` : '✓ Already in your search, now searched first.');
   }));
 };
 
