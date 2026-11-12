@@ -3698,8 +3698,7 @@ async function renderTailor() {
     out.innerHTML = `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px">${esc(r.title)}${r.company ? ` at ${esc(r.company)}` : ''}</h3>
-          <p class="muted" style="margin:0">Made from ${esc(r.cvName)} on ${esc(new Date(r.at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</p></div>
-        <span class="badge ${good ? 'badge-success' : r.fits ? 'badge-info' : 'badge-warning'}" style="font-size:14px;padding:6px 12px">${r.score}% match</span></div>
+          <p class="muted" style="margin:0">Made from ${esc(r.cvName)} on ${esc(new Date(r.at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</p></div></div>
       <p style="margin:12px 0">${r.tailored === false ? `Job-AI couldn't read the layout of your ${word}, so it is unchanged. The cover letter is written for this job. ` : ''}${r.fits ? `${good ? 'A strong fit.' : 'A fair fit.'}${r.tailored === false ? '' : ` Your ${word} is rewritten around what this advert asks for.`}` : `Not a close match for your ${word}${r.fitReason ? ` (${esc(r.fitReason)})` : ''}. You can still apply, but it may be a long shot.`}</p>
       ${r.gaps && r.gaps.length ? `<p class="muted" style="margin:0 0 12px"><strong>The advert also asks for:</strong> ${esc(r.gaps.join(', '))}. Add these to your ${word} only if you really have them.</p>` : ''}
       <div class="tl-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="tl-open">Open ${word}</button><button class="secondary" id="tl-folder">Show in folder</button>
