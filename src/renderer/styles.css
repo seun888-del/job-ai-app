@@ -1151,9 +1151,9 @@ li.active .nav-icon-check::after, li.active .nav-icon-chart::after { color: #fff
 
 /* Start applying + all primary buttons use --primary (light blue) */
 
-/* Applications box: its bottom aligns with the LinkedIn (2nd) agent card's bottom */
+/* Applications box sits right under its heading, level with the agent cards, however many agents show */
 .dash-col-side { display: flex; flex-direction: column; }
-.dash-applications-card { margin-top: auto; }
+.dash-applications-card { margin-top: 0; }
 @media (max-width: 980px){
   .dash-col-side { display: block; }
   .dash-applications-card { margin-top: 12px; }
