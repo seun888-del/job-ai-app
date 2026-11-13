@@ -31,8 +31,12 @@ export class Page {
     this._timeout = 30000;
     this._onUpd = (id, info, tab) => { if (id === this.tabId && (info.url || tab.url)) this._url = info.url || tab.url; };
     this._onRem = (id) => { if (id === this.tabId) this._closed = true; };
+    // Chrome's Memory Saver can discard a background tab and bring it back under a NEW id.
+    // Follow the tab to its new id, or every later step fails with "No tab with id".
+    this._onRep = (added, removed) => { if (removed === this.tabId) { this.tabId = added; openedBy.forEach((o, c) => { if (o === removed) openedBy.set(c, added); }); } };
     chrome.tabs.onUpdated.addListener(this._onUpd);
     chrome.tabs.onRemoved.addListener(this._onRem);
+    chrome.tabs.onReplaced.addListener(this._onRep);
     this.keyboard = {
       press: (key) => this._act('', 0, 'keyActive', key).catch(() => {}),
       type: (text) => this._act('', 0, 'typeActive', String(text)).catch(() => {}),
@@ -45,11 +49,15 @@ export class Page {
     const tab = await chrome.tabs.create({ url: url || 'about:blank', active, ...(windowId ? { windowId } : {}) });
     const p = new Page(tab.id, tab.windowId);
     p._url = tab.pendingUrl || tab.url || '';
+    // Agent tabs work in the background: never let Chrome discard them to save memory.
+    await chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
     if (url && /^https?:/i.test(url)) await p._waitComplete(45000);
     return p;
   }
 
   isClosed() { return this._closed; }
+  // True if the tab still exists. Marks the page closed when it doesn't.
+  async alive() { if (this._closed) return false; try { await chrome.tabs.get(this.tabId); return true; } catch (_) { this._closed = true; return false; } }
   url() { return this._url; }
   async title() { const t = await chrome.tabs.get(this.tabId); return t.title || ''; }
   setDefaultTimeout(ms) { this._timeout = ms || 30000; }
@@ -57,7 +65,7 @@ export class Page {
   async setViewportSize() {}
   async bringToFront() { const t = await chrome.tabs.update(this.tabId, { active: true }); if (t.windowId) await chrome.windows.update(t.windowId, { focused: true }).catch(() => {}); }
   async close() { this._cleanup(); await chrome.tabs.remove(this.tabId).catch(() => {}); this._closed = true; }
-  _cleanup() { chrome.tabs.onUpdated.removeListener(this._onUpd); chrome.tabs.onRemoved.removeListener(this._onRem); }
+  _cleanup() { chrome.tabs.onUpdated.removeListener(this._onUpd); chrome.tabs.onRemoved.removeListener(this._onRem); chrome.tabs.onReplaced.removeListener(this._onRep); }
   async screenshot() { return new Uint8Array(0); } // not needed in the extension
   on() {} off() {} once() {}
   frames() { return [this]; }

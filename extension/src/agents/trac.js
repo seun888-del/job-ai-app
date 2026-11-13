@@ -36,6 +36,15 @@ function preFilter(job) {
 export class TracAgent {
   constructor({ onChange = () => {} } = {}) { this.running = false; this.page = null; this.onChange = onChange; }
   log(m) { store.log('[NHS] ' + m); }
+  // A working tab in the agents' window: reuse it while it exists, else open a fresh one.
+  async ensurePage() {
+    if (this.page && (await this.page.alive())) return this.page;
+    try { if (this.page && !this.page.isClosed()) await this.page.close(); } catch (_) {}
+    if (!this.windowId) { this.windowId = await agentWindow(this); }
+    try { this.page = await Page.open('about:blank', { windowId: this.windowId }); }
+    catch (_) { this.windowId = await agentWindow(this); this.page = await Page.open('about:blank', { windowId: this.windowId }); }
+    return this.page;
+  }
 
   async settings() { return store.get('settings'); }
   async autoSubmit() { const s = await this.settings(); return !!(s.autoSubmit && s.autoSubmit.trac); }
@@ -55,6 +64,7 @@ export class TracAgent {
         if (off) { if (this._offMsg !== off) this.log(off); this._offMsg = off; await this.wait(Date.now() + 5 * 60 * 1000); continue; }
         this._offMsg = '';
         const cycleEnd = Date.now() + 10 * 60 * 1000;
+        await this.ensurePage(); // the tab may have been closed or discarded since last round
         await this.search().catch((e) => this.log('Search error: ' + e.message));
         if (!this.running) break;
         await this.prepare().catch((e) => this.log('Prepare error: ' + e.message));
@@ -190,8 +200,15 @@ export class TracAgent {
     } else {
       // A failure is often the agent's NHS window, not the job (a closed or sleeping tab):
       // try each job up to 3 times before giving up on it, and keep the real error with it.
-      const tries = (job.failCount || 0) + 1;
       const err = String(error || '').slice(0, 160);
+      // The NHS window's tab vanished (closed, or put to sleep by Chrome). Not the job's fault:
+      // keep it queued without counting a try; applyReady opens a fresh window.
+      if (/No tab with id|tab was closed|Frame with ID 0 was removed/i.test(err)) {
+        await store.updateJob(job.jobId, { status: 'cv_ready', lastError: err });
+        if (this.page) this.page._closed = true;
+        this.onChange(); return;
+      }
+      const tries = (job.failCount || 0) + 1;
       if (tries < 3) await store.updateJob(job.jobId, { status: 'cv_ready', failCount: tries, lastError: err });
       else await store.updateJob(job.jobId, { status: 'apply_failed', failCount: tries, lastError: err, reason: 'Could not complete the form' + (err ? ` (${err})` : '') });
     }
@@ -229,8 +246,15 @@ export class TracAgent {
     let fastFails = 0, resets = 0;
     // Jobs that failed before retries existed get one more go (they mostly failed on a broken window).
     for (const j of (await store.jobs()).filter((x) => x.source === SOURCE && x.status === 'apply_failed' && x.reason === 'Could not complete the form' && !x.failCount)) await store.updateJob(j.jobId, { status: 'cv_ready', failCount: 2 });
+    // Jobs that failed only because the NHS window's tab vanished get retried (once).
+    for (const j of (await store.jobs()).filter((x) => x.source === SOURCE && x.status === 'apply_failed' && /No tab with id/.test(x.reason || '') && !x.tabRetry)) await store.updateJob(j.jobId, { status: 'cv_ready', failCount: 0, tabRetry: true, reason: '' });
     for (const job of await store.byStatus('cv_ready', SOURCE)) {
       if (!this.running) return;
+      if (!this.page || !(await this.page.alive())) {
+        if (resets > 2) { this.log('The NHS window keeps closing. Stopping for now; the jobs will be tried again next round.'); return; }
+        this.log('The NHS window was closed. Opening a fresh one.');
+        this.page = null; await this.ensurePage(); resets++;
+      }
       if ((await store.capUsed()) >= cfg.MAX_APPLICATIONS_PER_DAY) { this.log(cfg.MOVE.on && (await store.monthLeft()) <= 0 ? "This month's limit is reached." : 'Daily limit reached.'); return; }
       this.log(`Filling: ${job.title} @ ${job.company}`);
       await store.updateJob(job.jobId, { status: 'applying' });

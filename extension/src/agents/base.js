@@ -124,7 +124,7 @@ export class SiteAgent {
   }
   // The agents' shared minimised window, opened on first use.
   async ensurePage() {
-    if (this.page && !this.page.isClosed()) return this.page;
+    if (this.page && (await this.page.alive())) return this.page;
     if (!this.windowId) {
       this.windowId = await agentWindow(this);
       if (!this._unwatch) this._unwatch = stopOnWindowClose(this);

@@ -857,6 +857,10 @@ VIEWS.dashboard = async function renderDashboardView() {
     const anyExtra = Object.values(settings.extraSites || {}).some(Boolean);
     const extraNotice = (await store.get('extraNotice')) === 'show' && !anyExtra;
     const offerWider = tooFar.length >= 8 && profile.matchLevel !== 'wide' && !settings.widerOfferOff;
+    // Ask for a Chrome Web Store review only once Job-AI has clearly helped: 10+ applications sent.
+    // "Not now" asks again in 14 days, at most twice; a click on Leave a review never asks again.
+    const askReview = hasLicence && applied.length >= 10 && !settings.reviewDone && !offerWider && !extraNotice
+      && (!settings.reviewSnoozeUntil || Date.now() > Date.parse(settings.reviewSnoozeUntil));
 
     // Company sites: what to do with a job that needs a person. auto = skip it (only "Applied"
     // ever shows), assist = send the rest and bring those to the user, review = send nothing
@@ -929,6 +933,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 24 hours, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
       ${extraNotice ? `<div class="no-license-banner"><span><strong>New:</strong> Job-AI can now also apply on ${extraForRegion(region).map(([, l]) => l).join(us ? ', ' : ' and ').replace(/, ([^,]*)$/, ' and $1')} if you have an account there. It still applies on employers' own websites as well.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="extra-yes">Turn on</button><button class="welcome-skip-link" id="extra-no">No thanks</button></span></div>` : ''}
+      ${askReview ? `<div class="no-license-banner"><span>Job-AI has sent ${applied.length} applications for you. If it's helping, a quick review in the Chrome Web Store helps other job seekers find it.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="review-yes">Leave a review</button><button class="welcome-skip-link" id="review-no">Not now</button></span></div>` : ''}
       ${offerWider ? `<div class="no-license-banner"><span>${tooFar.length} jobs this week were skipped as not a close enough match. Try a wider match?</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="wider-yes">Try Wider</button><button class="welcome-skip-link" id="wider-no">No thanks</button></span></div>` : ''}
 
       ${submitOffer ? `<div class="card" style="border:1.5px solid #16a34a">
@@ -1141,6 +1146,12 @@ VIEWS.dashboard = async function renderDashboardView() {
     });
     $('#extra-no')?.addEventListener('click', async () => { await store.set('extraNotice', 'done'); renderDashboard(); });
     $('#wider-no')?.addEventListener('click', async () => { await store.patch('settings', { widerOfferOff: true }); renderDashboard(); });
+    $('#review-yes')?.addEventListener('click', async () => { await store.patch('settings', { reviewDone: true }); openTab('https://chromewebstore.google.com/detail/hbfkpomidmgkeadanjcjilpdbcjacjgm/reviews'); renderDashboard(); });
+    $('#review-no')?.addEventListener('click', async () => {
+      const n = (settings.reviewSnoozes || 0) + 1;
+      await store.patch('settings', n >= 2 ? { reviewDone: true, reviewSnoozes: n } : { reviewSnoozes: n, reviewSnoozeUntil: new Date(Date.now() + 14 * 864e5).toISOString() });
+      renderDashboard();
+    });
     $$('.nhs-statement').forEach((b) => b.addEventListener('click', () => { const p = $('#nhs-st-' + b.dataset.i); p.hidden = !p.hidden; b.textContent = p.hidden ? 'Supporting statement' : 'Hide supporting statement'; }));
   } finally { dashBusy = false; if (dashAgain && current === 'dashboard') { dashAgain = false; renderDashboardView(); } else dashAgain = false; }
 };
