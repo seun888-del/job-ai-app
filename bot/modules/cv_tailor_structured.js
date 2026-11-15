@@ -135,12 +135,15 @@ ${String(corpus).slice(0, 6000)}`;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const raw = (await llmChat(prompt + retryNote, 30000)) || '';
-      const para = raw.replace(/^\s*(summary|profile)\s*[:\-]\s*/i, '').replace(/\s*\n+\s*/g, ' ').replace(/^["']+|["']+$/g, '').trim();
+      const para = matchCVCapitals(raw.replace(/^\s*(summary|profile)\s*[:\-]\s*/i, '').replace(/\s*\n+\s*/g, ' ').replace(/^["']+|["']+$/g, '').trim(), corpus);
       const words = para.split(/\s+/).length;
       // A sentence naming two of their employers is mixing facts from different jobs.
       const mixed = (para.match(/[^.!?]+[.!?]*/g) || []).find((sen) => employers.filter((c) => c && c.length > 2 && sen.toLowerCase().includes(c.toLowerCase())).length > 1);
       const borrowed = borrowedAdvertWords(para, jdExcerpt, corpus + ' ' + jobTitle);
-      const why = mixed ? 'mixes two jobs in one sentence' : words < 45 || words > 110 ? `${words} words` : REFUSAL_RE.test(para.slice(0, 120)) ? 'refusal' : introducesNewFacts(corpus, para) ? `new claim (${newFactsIn(corpus, para).join(', ')})` : borrowed.length ? `advert wording (${borrowed.join(', ')})` : '';
+      // One or two stray advert words ("skilled") get a retry; the last attempt may keep them.
+      // Three or more is the summary being written from the advert, never accepted.
+      const tooMuchAdvert = borrowed.length >= 3 || (borrowed.length && attempt < 2);
+      const why = mixed ? 'mixes two jobs in one sentence' : words < 45 || words > 110 ? `${words} words` : REFUSAL_RE.test(para.slice(0, 120)) ? 'refusal' : introducesNewFacts(corpus, para) ? `new claim (${newFactsIn(corpus, para).join(', ')})` : tooMuchAdvert ? `advert wording (${borrowed.join(', ')})` : '';
       if (!why) return para;
       console.log(`  [Tailor] Summary rewrite rejected: ${why}`);
       if (borrowed.length) retryNote = `\n\nYour last attempt copied these words from the advert that the CV never uses: ${borrowed.join(', ')}. Do not use them. Use the CV's own words.`;
@@ -182,7 +185,8 @@ function significantTokens(text) {
   // numbers / metrics, ignoring ordinals (1st, 2nd, 3rd …)
   for (const raw of (t.match(/\d[\d,]*\.?\d*%?(?:st|nd|rd|th)?/gi) || [])) {
     if (ORDINAL_RE.test(raw)) continue;
-    out.add(raw.replace(/,/g, '').toLowerCase());
+    // "3,000." at the end of a sentence is the number 3000, not "3000."
+    out.add(raw.replace(/,/g, '').replace(/[.,]+$/, '').toLowerCase());
   }
   // identifiers: ALL-CAPS (2+), CamelCase, digit-containing
   for (const tok of (t.match(/\b([A-Z]{2,}|[A-Z][a-z]+(?:[A-Z][A-Za-z]*)+|[A-Za-z]*\d[A-Za-z0-9+]*)\b/g) || [])) {
@@ -228,6 +232,20 @@ function midSentenceNames(text) {
     });
   }
   return out;
+}
+
+// The AI often writes a name the CV has with different capitals ("MacOS" for "macOS",
+// "Servicenow" for "ServiceNow"). That's the same claim, so put the CV's spelling back
+// instead of rejecting the rewrite. Only for names the CV writes with a capital somewhere:
+// "Teams" for a CV that only says "teams" is a product claim and stays rejected.
+function matchCVCapitals(text, corpus) {
+  const forms = new Map();
+  // Only names with a capital inside the word (macOS, ServiceNow, iOS, AICPA): a capital
+  // first letter alone may just be the start of a sentence.
+  for (const w of String(corpus).match(/[A-Za-z][A-Za-z0-9+#]*/g) || []) {
+    if (/[A-Z]/.test(w.slice(1)) && !forms.has(w.toLowerCase())) forms.set(w.toLowerCase(), w);
+  }
+  return String(text).replace(/[A-Za-z][A-Za-z0-9+#]*/g, (w) => forms.get(w.toLowerCase()) || w);
 }
 
 // The tools, numbers, names and claims in `reworded` that the original text doesn't support.
@@ -345,7 +363,7 @@ function bulletCorpus(orig, matched) {
 }
 
 // Why a reworded bullet isn't safe to use, or '' when it is.
-function unsafeRewrite(orig, rw, matched, jd = '') {
+function unsafeRewrite(orig, rw, matched, jd = '', cvCorpus = '') {
   if (!rw) return 'missing';
   const ow = orig.split(/\s+/).length, rwW = rw.split(/\s+/).length;
   if (rwW > Math.max(ow + 6, Math.round(ow * 1.3))) return 'longer';
@@ -361,7 +379,8 @@ function unsafeRewrite(orig, rw, matched, jd = '') {
   if (pasted) return `pasted advert phrase (${pasted})`;
   const added = newFactsIn(bulletCorpus(orig, matched), rw);
   if (added.length) return `new claim (${added.join(', ')})`;
-  const borrowed = jd ? borrowedAdvertWords(rw, jd, bulletCorpus(orig, matched)) : [];
+  // Words from anywhere in their CV are theirs; only words the whole CV never uses count as borrowed.
+  const borrowed = jd ? borrowedAdvertWords(rw, jd, bulletCorpus(orig, matched) + '  ' + cvCorpus) : [];
   return borrowed.length ? `advert wording (${borrowed.join(', ')})` : '';
 }
 
@@ -404,7 +423,8 @@ Return exactly ${ordered.length} lines, one per bullet, each starting with "- ".
     // result or adds anything the bullet didn't say is replaced by the original bullet.
     const reverted = [];
     const result = ordered.map((orig, i) => {
-      const why = unsafeRewrite(orig, lines[i], kw.matched, jdExcerpt);
+      if (lines[i]) lines[i] = matchCVCapitals(lines[i], bulletCorpus(orig, kw.matched));
+      const why = unsafeRewrite(orig, lines[i], kw.matched, jdExcerpt, kw.cvCorpus || '');
       if (!why) return lines[i];
       reverted.push(why); return orig;
     });
@@ -562,6 +582,7 @@ async function tailorStructured(cv, jobTitle, jdText, missingKeywords = [], cvFu
     cv.subtitle || '',
     kw.corpus || '',
   ].join('  ');
+  kw.cvCorpus = corpus;
   out.profile = await tailorProfile(cv.profile, jobTitle, jd, corpus, kw.line || '', out.experience.map((j) => String(j.company || '').split(/[,(|]/)[0].trim()));
   console.log(`  [Tailor] Summary ${out.profile === cv.profile ? 'kept original' : 'rewritten to JD'}`);
 
@@ -591,4 +612,4 @@ function structuredText(t) {
   ].filter(Boolean).join('\n');
 }
 
-module.exports = { tailorStructured, structuredText, _test: { borrowedAdvertWords, houseStyle, headlineFromJobTitle, unsafeRewrite, rankBullets, introducesNewFacts, isWeavable, significantTokens, originalIndex, midSentenceNames, hasPhrase, CLAIM_PHRASES } };
+module.exports = { tailorStructured, structuredText, _test: { borrowedAdvertWords, matchCVCapitals, houseStyle, headlineFromJobTitle, unsafeRewrite, rankBullets, introducesNewFacts, isWeavable, significantTokens, originalIndex, midSentenceNames, hasPhrase, CLAIM_PHRASES } };
