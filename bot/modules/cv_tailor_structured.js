@@ -112,7 +112,7 @@ CURRENT SUMMARY:
 ${profile}
 ${kwLine}
 Write a NEW summary of 3 or 4 sentences, 60 to 90 words in total (about four lines on the page), that a recruiter for THIS job can take in at a glance:
-1. Who they are for this role: their job title or specialism, years of experience and core area, in the advert's words where those words are true of them.
+1. Who they are for this role: their job title or specialism, years of experience and core area, in the CV's own words.
 2. Their most relevant achievement for this job, from the CV below, with a real result or number if the CV gives one. Keep each result tied to what actually produced it in the CV.
 3. The scope of their experience that this advert values: the kind of organisations, users, systems or scale from the CV.
 4. Optionally, the strengths from the CV this advert asks for most. Not a list of every tool.
@@ -126,20 +126,24 @@ Absolute rules:
 - One achievement per sentence, and do not name employers in the summary (the work history shows them).
 - Each result stays with the job and the work that produced it: never put facts from two different jobs in one sentence ("supported X at one job, cutting Y by 35% at another" is wrong).
 - Keep the CV's own verbs and seniority: supporting or administering users is not managing people. Never upgrade "supported" to "managed" or "led".
+- Do not copy the advert's wording. Describe the candidate only in words their CV uses (plus the terms listed above, if any). The advert decides WHICH parts of the CV to lead with, never the words: if the advert says "white-glove support for executives" and the CV doesn't, don't say it.
 Return ONLY the summary as a single paragraph — no label, no quotes, no commentary.
 
 THE CANDIDATE'S CV (the only source of facts):
 ${String(corpus).slice(0, 6000)}`;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let retryNote = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const raw = (await llmChat(prompt, 30000)) || '';
+      const raw = (await llmChat(prompt + retryNote, 30000)) || '';
       const para = raw.replace(/^\s*(summary|profile)\s*[:\-]\s*/i, '').replace(/\s*\n+\s*/g, ' ').replace(/^["']+|["']+$/g, '').trim();
       const words = para.split(/\s+/).length;
       // A sentence naming two of their employers is mixing facts from different jobs.
       const mixed = (para.match(/[^.!?]+[.!?]*/g) || []).find((sen) => employers.filter((c) => c && c.length > 2 && sen.toLowerCase().includes(c.toLowerCase())).length > 1);
-      const why = mixed ? 'mixes two jobs in one sentence' : words < 45 || words > 110 ? `${words} words` : REFUSAL_RE.test(para.slice(0, 120)) ? 'refusal' : introducesNewFacts(corpus, para) ? `new claim (${newFactsIn(corpus, para).join(', ')})` : '';
+      const borrowed = borrowedAdvertWords(para, jdExcerpt, corpus + ' ' + jobTitle);
+      const why = mixed ? 'mixes two jobs in one sentence' : words < 45 || words > 110 ? `${words} words` : REFUSAL_RE.test(para.slice(0, 120)) ? 'refusal' : introducesNewFacts(corpus, para) ? `new claim (${newFactsIn(corpus, para).join(', ')})` : borrowed.length ? `advert wording (${borrowed.join(', ')})` : '';
       if (!why) return para;
       console.log(`  [Tailor] Summary rewrite rejected: ${why}`);
+      if (borrowed.length) retryNote = `\n\nYour last attempt copied these words from the advert that the CV never uses: ${borrowed.join(', ')}. Do not use them. Use the CV's own words.`;
     } catch (_) {}
   }
   return shortProfile(profile);
@@ -237,6 +241,39 @@ function newFactsIn(originalCorpus, reworded) {
 }
 function introducesNewFacts(originalCorpus, reworded) { return newFactsIn(originalCorpus, reworded).length > 0; }
 
+// ── Borrowed advert wording ──────────────────────────────────────────────────
+// A rewrite may only describe the person in their own CV's words. A word that is in the
+// advert but nowhere in the CV ("white-glove", "executive", "responsive") was copied from
+// the advert, even when it isn't a tool or a number, and reads as a claim they never made.
+// Words the scorer matched to the CV (kw.corpus) and the job title are allowed.
+const stemWord = (w) => {
+  w = String(w).toLowerCase();
+  for (const s of ['ations', 'ation', 'ments', 'ment', 'ings', 'ing', 'ers', 'er', 'ies', 'es', 'ed', 'ly', 's']) {
+    if (w.length - s.length >= 4 && w.endsWith(s)) return s === 'ies' ? w.slice(0, -3) + 'y' : w.slice(0, -s.length);
+  }
+  return w;
+};
+function stemSet(text) {
+  const set = new Set();
+  for (const tok of String(text).toLowerCase().match(/[a-z][a-z'-]*[a-z]/g) || []) {
+    set.add(stemWord(tok));
+    for (const part of tok.split('-')) if (part) set.add(stemWord(part));
+  }
+  return set;
+}
+// Joining words carry no claim, wherever they came from.
+const JOINING_WORDS = new Set('while whilst through throughout between among about without along alongside towards since until where whether which while both well'.split(' '));
+function borrowedAdvertWords(rewrite, advert, ownWords) {
+  const jd = stemSet(advert), own = stemSet(ownWords), out = [];
+  for (const tok of new Set(String(rewrite).toLowerCase().match(/[a-z][a-z'-]*[a-z]/g) || [])) {
+    if (tok.length < 4 || JD_STOPWORDS.has(tok) || JOINING_WORDS.has(tok)) continue;
+    const parts = tok.includes('-') ? [tok, ...tok.split('-')] : [tok];
+    if (parts.every((p) => p.length < 4 || own.has(stemWord(p)))) continue;
+    if (parts.some((p) => p.length >= 4 && jd.has(stemWord(p)) && !own.has(stemWord(p)))) out.push(tok);
+  }
+  return out;
+}
+
 // ── JD keyword biasing ───────────────────────────────────────────────────────
 // Common words that carry no signal when matching a bullet to a job advert.
 const JD_STOPWORDS = new Set(
@@ -308,7 +345,7 @@ function bulletCorpus(orig, matched) {
 }
 
 // Why a reworded bullet isn't safe to use, or '' when it is.
-function unsafeRewrite(orig, rw, matched) {
+function unsafeRewrite(orig, rw, matched, jd = '') {
   if (!rw) return 'missing';
   const ow = orig.split(/\s+/).length, rwW = rw.split(/\s+/).length;
   if (rwW > Math.max(ow + 6, Math.round(ow * 1.3))) return 'longer';
@@ -323,7 +360,9 @@ function unsafeRewrite(orig, rw, matched) {
   const pasted = (matched || []).flatMap((k) => [k.term, ...(k.alts || [])]).find((f) => f && f.split(/\s+/).length > 3 && hasPhrase(rw, f, 'i') && !hasPhrase(orig, f, 'i'));
   if (pasted) return `pasted advert phrase (${pasted})`;
   const added = newFactsIn(bulletCorpus(orig, matched), rw);
-  return added.length ? `new claim (${added.join(', ')})` : '';
+  if (added.length) return `new claim (${added.join(', ')})`;
+  const borrowed = jd ? borrowedAdvertWords(rw, jd, bulletCorpus(orig, matched)) : [];
+  return borrowed.length ? `advert wording (${borrowed.join(', ')})` : '';
 }
 
 async function selectAndRewordBullets(role, jdExcerpt, roleIndex = 0, kw = {}) {
@@ -348,6 +387,7 @@ For each bullet, in order, return exactly one line:
 - Otherwise make the smallest edit that helps: swap a word for the advert's word when it means exactly the same thing the bullet already says (e.g. "tickets" -> "incidents"), or move the part that matters most to this job to the front.
 - Keep every bullet to at most two lines, about 30 words. If it is longer, tighten it: cut filler words and repetition, but keep every tool, number and result it has. Never make it vaguer.
 - Never add a tool, system, skill, sector, number or claim the bullet itself doesn't state, even if the candidate has it elsewhere.
+- Don't copy the advert's descriptive words into a bullet ("white-glove", "executive", "fast-paced"). Only the listed terms may be swapped in.
 - Past tense for past roles; plain, natural English; no buzzwords.
 
 ${CLICHE_BAN}
@@ -364,7 +404,7 @@ Return exactly ${ordered.length} lines, one per bullet, each starting with "- ".
     // result or adds anything the bullet didn't say is replaced by the original bullet.
     const reverted = [];
     const result = ordered.map((orig, i) => {
-      const why = unsafeRewrite(orig, lines[i], kw.matched);
+      const why = unsafeRewrite(orig, lines[i], kw.matched, jdExcerpt);
       if (!why) return lines[i];
       reverted.push(why); return orig;
     });
@@ -551,4 +591,4 @@ function structuredText(t) {
   ].filter(Boolean).join('\n');
 }
 
-module.exports = { tailorStructured, structuredText, _test: { houseStyle, headlineFromJobTitle, unsafeRewrite, rankBullets, introducesNewFacts, isWeavable, significantTokens, originalIndex, midSentenceNames, hasPhrase, CLAIM_PHRASES } };
+module.exports = { tailorStructured, structuredText, _test: { borrowedAdvertWords, houseStyle, headlineFromJobTitle, unsafeRewrite, rankBullets, introducesNewFacts, isWeavable, significantTokens, originalIndex, midSentenceNames, hasPhrase, CLAIM_PHRASES } };
