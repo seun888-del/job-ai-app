@@ -2287,7 +2287,7 @@ async function initOnboarding() {
     ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" id="w-setup-box" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
       <div id="ws-n" style="font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted,#4a453b)">Step 1 of 4</div>
       <div id="ws-email">
-        <strong style="display:block;margin-top:4px">Start your free 7-day trial</strong>
+        <strong style="display:block;margin-top:4px">Get your first 10 applications free</strong>
         <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin:4px 0 10px">No card needed. We'll email you a 6-digit code.</span>
         <div style="display:flex;gap:8px"><input id="w-email" type="email" autocomplete="email" placeholder="you@email.com" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Email me a code</button></div>
         <p style="margin:8px 0 0;font-size:13px"><a href="#" id="w-havecode" class="tracker-link">Already have a code?</a></p>
