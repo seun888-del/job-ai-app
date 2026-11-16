@@ -60,14 +60,14 @@ ${cvExcerpt}
 SILENT PRE-WORK (do not output):
 1. What are the 2–3 most important requirements in the JD?
 2. Which specific experience or achievement from the CV best proves each one?
-3. What does the JD reveal about this company or role that makes it specific — a challenge they mention, a team they describe, a tool they emphasise?
+3. What does the JD reveal about the day-to-day work (a challenge they mention, a team they describe, a tool they emphasise)?
 
 ─────────────────────────────────────────────
 OUTPUT — 4 paragraphs, no headings, no labels, no sign-off, no "Dear Hiring Manager":
 
-PARAGRAPH 1 — HOOK (2 sentences):
-Sentence 1: name the role and company in a confident, specific opening — NOT "I am writing to apply". Lead with the candidate's most relevant strength or achievement connected to the role's #1 requirement.
-Sentence 2: say one concrete thing about why this specific role or company — pulled from what the JD actually says (a challenge, a mission, who they serve) — not generic enthusiasm. Do not tie the candidate to any tool or skill here that the CV does not show.
+PARAGRAPH 1 — OPENING (2 sentences):
+Sentence 1: say plainly which role the candidate is applying for, and at which company if the advert names one, in the form "I'm applying for the [job title] role at [company]." No flattery or praise of the company.
+Sentence 2: the candidate's most relevant strength for the role's #1 requirement, as a full sentence starting with "I", in the form "I have [N] years of [field] experience, most recently [what they do now]." Do not tie the candidate to any tool or skill here that the CV does not show.
 
 PARAGRAPH 2 — MATCH (3 sentences):
 Take the 3 most important JD requirements THAT THE CV GIVES EVIDENCE FOR (skip any the CV does not show, even if the JD calls them essential). For each, write one plain sentence about what the candidate has actually done that covers it, the way a person would say it ("I manage user access in Active Directory every day"). Never use the formula "Your need for X is matched by my Y" or "Your requirement for X is met by". No vague claims.
@@ -82,13 +82,14 @@ Genuine, specific enthusiasm for this role. End with a clear ask for the intervi
 HARD RULES:
 - 230 words maximum total
 - Never use em dashes (—) or en dashes (–) anywhere. Use commas or full stops instead; for a range write "to". They read as AI-written.
-- Every sentence must be specific to THIS job. Cut anything that could appear in any other cover letter
-- BANNED openers: "I am writing to", "I would like to apply", "I am interested in", "With X years", "As a", "I am excited to", "I am passionate"
+- After the opening sentence, every sentence must be specific to THIS job. Cut anything that could appear in any other cover letter
+- BANNED openers: "I am writing to", "I am interested in", "As a", "I am excited to", "I am passionate"
+- Every sentence is a complete sentence with a subject, written in the first person. Never start a sentence with a bare phrase like "[N] years of [field] experience..." or "Leading the [team] at..."; write "I have [N] years of [field] experience..." instead
 - BANNED words: "passionate", "team player", "results-driven", "hard-working", "go-getter", "leveraging", "spearheading", "seamlessly", "proactive", "dynamic", "fast learner", "hit the ground running", "self-motivated"
 - Only name tools, systems, software, qualifications, certificates and licences that the CV itself names. If the JD asks for one the CV does not name, leave it out completely: do not claim it, imply it, or say the candidate is "familiar with" or "comfortable with" it
 - Do NOT invent experience not in the CV. Only give years of experience as the candidate's total; never claim a number of years with one tool, system or industry unless the CV states it
 - Use each achievement or number once only; never repeat the same one
-- Write like a confident person, not a sales script. BANNED phrases: "aligns perfectly", "directly aligns", "perfect fit", "precise fit", "is matched by", "is met by", "This proves", "This demonstrates", "your directive", "I am drawn to", "addresses the core"
+- Write like a confident person, not a sales script. No praise of the company or its mission. BANNED phrases: "aligns perfectly", "directly aligns", "perfect fit", "precise fit", "is matched by", "is met by", "This proves", "This demonstrates", "your directive", "I am drawn to", "addresses the core"
 - Plain everyday English. Every sentence starts with a capital letter
 - Do NOT mention salary
 - Return ONLY the 4 paragraph body — nothing else`;
