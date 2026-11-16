@@ -514,7 +514,7 @@ async function applyToJob(page, job, resumePath) {
   // if the upload control wasn't found/driven, the base CV would be submitted.)
   if (!uploadOk) {
     console.log('  [Reed] ⚠️  Could not attach the tailored CV (upload control not found) — skipping so the base CV is NOT submitted.');
-    console.log('  [[JOBBOT_NOTIFY]] Could not attach your tailored CV on Reed — skipped this job instead of applying with your base CV. If it persists, reconnect your Reed account.');
+    console.log('  [[JOBBOT_NOTIFY]] Reed would not take your tailored CV just now, so nothing was sent with your old CV. Job-AI will try this job again next round.');
     return 'cv_not_attached';
   }
 

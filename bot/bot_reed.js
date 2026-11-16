@@ -153,8 +153,10 @@ async function drainReadyCVs(context, reedPage) {
         queue.update(job.jobId, { status: 'skipped', reason: 'External application site' });
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'External application site');
       } else if (applied === 'cv_not_attached') {
-        // Never submit the base CV: skip when the tailored CV couldn't be attached.
-        queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
+        // Never submit the base CV. Reed's upload often fails for a moment: try again on later
+        // rounds (3 tries) before skipping.
+        const tries = ((job.extra && job.extra.attachTries) || 0) + 1;
+        queue.update(job.jobId, tries < 3 ? { status: 'cv_ready', reason: '', extra: { ...(job.extra || {}), attachTries: tries } } : { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)', extra: { ...(job.extra || {}), attachTries: tries } });
         logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
         console.log(`  [Reed Agent] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
         const _cb = queue.recordUploadFailure('reed');
@@ -298,8 +300,10 @@ async function phase2_applyReadyCVs(context, reedPage) {
         }
 
         if (applied === 'cv_not_attached') {
-          // Never submit the base CV: skip when the tailored CV couldn't be attached.
-          queue.update(job.jobId, { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)' });
+          // Never submit the base CV. Reed's upload often fails for a moment: try again on later
+          // rounds (3 tries) before skipping.
+          const tries = ((job.extra && job.extra.attachTries) || 0) + 1;
+          queue.update(job.jobId, tries < 3 ? { status: 'cv_ready', reason: '', extra: { ...(job.extra || {}), attachTries: tries } } : { status: 'skipped', reason: 'Tailored CV not attached (reconnect account?)', extra: { ...(job.extra || {}), attachTries: tries } });
           logger.log(job.title, job.company, job.url, job.cvName, job.cvScore, 'SKIPPED', 'Tailored CV not attached');
           console.log(`  [Reed Agent] ⚠️ Skipped (tailored CV not attached, base NOT sent): ${job.title}`);
           const _cb = queue.recordUploadFailure('reed');

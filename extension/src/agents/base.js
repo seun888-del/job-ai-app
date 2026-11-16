@@ -186,7 +186,13 @@ export class SiteAgent {
     if (r === true) { await store.updateJob(job.jobId, { status: 'applied', appliedAt: new Date().toISOString() }); this.log(`✓ Applied: ${job.title}`); }
     else if (r === null) await store.updateJob(job.jobId, { status: 'skipped', reason: 'Already applied' });
     else if (r === 'external') await store.updateJob(job.jobId, { status: 'skipped', reason: 'Applies on an external site' });
-    else if (r === 'cv_not_attached') await store.updateJob(job.jobId, { status: 'skipped', reason: 'Tailored CV could not be attached' });
+    else if (r === 'cv_not_attached') {
+      // The site's CV upload often fails for a moment (Reed's "Something went wrong with your CV
+      // update"). Try again on later rounds before giving up; the base CV is never sent.
+      const tries = (job.attachTries || 0) + 1;
+      if (tries < 3) { await store.updateJob(job.jobId, { status: 'cv_ready', attachTries: tries, reason: '' }); this.log(`Could not attach your tailored CV for ${job.title}. Trying again next round.`); }
+      else await store.updateJob(job.jobId, { status: 'skipped', attachTries: tries, reason: 'Tailored CV could not be attached' });
+    }
     else if (r && r.error) { await store.updateJob(job.jobId, { status: 'apply_failed', reason: r.error.slice(0, 140) }); this.log(`Could not apply: ${job.title} (${r.error.slice(0, 80)})`); }
     else if (typeof r === 'string') await store.updateJob(job.jobId, { status: 'skipped', reason: r });
     else { await store.updateJob(job.jobId, { status: 'apply_failed', reason: 'Form could not be completed' }); this.log(`✗ Could not complete: ${job.title}`); }
