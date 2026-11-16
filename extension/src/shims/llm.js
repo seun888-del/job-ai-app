@@ -54,7 +54,8 @@ async function checkLicense(k) {
   const r = await fetch(`${BACKEND}/v1/license`, { headers: headers(k), signal: AbortSignal.timeout(15000) });
   let body = {}; try { body = await r.json(); } catch (_) {}
   // Only the fields the extension needs (the email and key the server echoes are not kept).
-  return { ok: r.ok, http: r.status, error: body.error || '', licenseStatus: body.status || '', expires_at: body.expires_at || null };
+  return { ok: r.ok, http: r.status, error: body.error || '', licenseStatus: body.status || '', expires_at: body.expires_at || null,
+    trial_apps: body.trial_apps || null, trial_apps_sent: Number.isFinite(body.trial_apps_sent) ? body.trial_apps_sent : null };
 }
 
 // "Ask Job-AI" support chat: same endpoint and payload as the app (question + a PII-free

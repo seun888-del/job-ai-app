@@ -147,7 +147,7 @@ async function recheckLicence() {
   if (!l.key) return false;
   try {
     const r = await checkLicense(l.key);
-    if (r.ok) await store.patch('license', { status: r.licenseStatus || 'active', expiresAt: r.expires_at, checkedAt: Date.now() });
+    if (r.ok) await store.patch('license', { status: r.licenseStatus || 'active', expiresAt: r.expires_at, trialApps: r.trial_apps, trialAppsSent: r.trial_apps_sent, checkedAt: Date.now() });
     else if (r.http === 401 || r.http === 403) await store.patch('license', { status: r.error === 'device_trial_used' ? 'device_trial_used' : 'expired', checkedAt: Date.now() });
   } catch (_) { /* offline: fall back to the last known status and expiry */ }
   return licenceActive(await store.get('license'));
@@ -925,12 +925,13 @@ VIEWS.dashboard = async function renderDashboardView() {
         </div>
       </div>
 
-      ${hasLicence ? (trialLeft !== null && trialLeft <= 3 ? `<div class="no-license-banner"><span>Your free trial ends ${trialLeft <= 1 ? 'today' : `in ${trialLeft} days`}.${applied.length ? ` Job-AI has sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you so far.` : ''} Keep your agents applying${uk ? ', first month half price' : ''}.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>` : '')
+      ${hasLicence ? (license.status === 'trial' && license.trialApps ? `<div class="no-license-banner"><span>Free trial: <strong>${Math.max(0, license.trialApps - (license.trialAppsSent || 0))} of ${license.trialApps}</strong> free applications left${trialLeft !== null && trialLeft <= 1 ? ', ends today' : ''}. Keep your agents applying${uk ? ', first month half price' : ''}.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>`
+        : trialLeft !== null && trialLeft <= 3 ? `<div class="no-license-banner"><span>Your free trial ends ${trialLeft <= 1 ? 'today' : `in ${trialLeft} days`}.${applied.length ? ` Job-AI has sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you so far.` : ''} Keep your agents applying${uk ? ', first month half price' : ''}.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>` : '')
         : ended ? `<div class="card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
           <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${applied.length ? `Job-AI sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you` : 'Your free trial has ended'}</h3>
           <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan and they start again straight away, up to 25 a day.${uk ? ' Your first month is half price.' : ''}</p></div>
           <button class="primary" id="keep-jobai">Keep Job-AI</button></div>`
-        : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Free for 24 hours, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
+        : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Your first 10 applications are free, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
       ${extraNotice ? `<div class="no-license-banner"><span><strong>New:</strong> Job-AI can now also apply on ${extraForRegion(region).map(([, l]) => l).join(us ? ', ' : ' and ').replace(/, ([^,]*)$/, ' and $1')} if you have an account there. It still applies on employers' own websites as well.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="extra-yes">Turn on</button><button class="welcome-skip-link" id="extra-no">No thanks</button></span></div>` : ''}
       ${askReview ? `<div class="no-license-banner"><span>Job-AI has sent ${applied.length} applications for you. If it's helping, a quick review in the Chrome Web Store helps other job seekers find it.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="review-yes">Leave a review</button><button class="welcome-skip-link" id="review-no">Not now</button></span></div>` : ''}
@@ -1907,7 +1908,7 @@ VIEWS.license = async function renderLicense() {
     <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence. The same key works in the desktop app.' : 'Set up Job-AI to start your free trial, or add the key from your Job-AI welcome email.'}</p></div>
     ${active ? '' : `<div class="card" id="trial-card">
       <h3 style="margin:0 0 6px">Set up Job-AI</h3>
-      <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. Free for 24 hours, no card needed. At the end you get a 6-digit code to type here.</p>
+      <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. Your first 10 applications are free, no card needed. At the end you get a 6-digit code to type here.</p>
       <div class="ext-inline" style="margin-top:12px"><button class="primary" id="tr-setup">Set up Job-AI (2 minutes)</button></div>
       <div class="field" style="max-width:220px;margin-top:16px"><label>Got your code? Type it here</label><input id="tr-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
       <div class="ext-inline"><button class="secondary" id="tr-go">Connect</button><span class="status-msg" id="tr-st"></span></div>
@@ -1959,7 +1960,7 @@ VIEWS.license = async function renderLicense() {
     try {
       const r = await checkLicense(k);
       if (!r.ok) { setSt('#lic-st', r.http === 401 ? 'That key was not recognised.' : r.error === 'device_trial_used' ? 'This device has already used a free trial.' : /expired|inactive/.test(r.error) ? 'That licence has ended. Renew it to carry on.' : 'Could not check the key (' + r.http + ').', true); return; }
-      await store.set('license', { key: k, status: r.licenseStatus || 'active', expiresAt: r.expires_at, checkedAt: Date.now() });
+      await store.set('license', { key: k, status: r.licenseStatus || 'active', expiresAt: r.expires_at, trialApps: r.trial_apps, trialAppsSent: r.trial_apps_sent, checkedAt: Date.now() });
       checkSteps();
       $('#lic').value = '';
       globalThis.__jobaiLicense = k;
@@ -2077,7 +2078,7 @@ async function claimPhoneSetup(raw, say) {
       got.push('CV');
     }
     const lic = await checkLicense(r.key).catch(() => ({ ok: false, http: 0 }));
-    if (lic.ok) await store.set('license', { key: r.key, status: lic.licenseStatus || 'active', expiresAt: lic.expires_at, checkedAt: Date.now() });
+    if (lic.ok) await store.set('license', { key: r.key, status: lic.licenseStatus || 'active', expiresAt: lic.expires_at, trialApps: lic.trial_apps, trialAppsSent: lic.trial_apps_sent, checkedAt: Date.now() });
     globalThis.__jobaiLicense = lic.ok ? r.key : globalThis.__jobaiLicense;
     await loadConfig(); checkSteps();
     if (!lic.ok) { say((got.length ? `Your ${got.join(' and ')} came in, but ` : '') + (lic.error === 'device_trial_used' ? 'this computer has already used a free trial.' : 'the licence could not be activated.'), true); return false; }
