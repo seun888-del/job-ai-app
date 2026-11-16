@@ -21,6 +21,7 @@ const titleMatch = require('./modules/title_match');
 const jb = require('./modules/jobbank');
 const { sendMail } = require('./modules/gmail_send');
 const { cleanJobBankJD } = require('./modules/jobbank_jd');
+const { applyEmail } = require('./modules/apply_email');
 
 const SOURCE = 'jobbank';
 // Test mode: JOBBOT_JOBBANK_TEST_TO=<your own address> sends every application THERE instead of
@@ -94,14 +95,8 @@ function recentlyEmailed() {
 
 function emailText(job, letter) {
   const A = cfg.APPLICANT;
-  const name = [A.firstName, A.lastName].filter(Boolean).join(' ');
-  let body = String(letter || '').trim();
-  if (!body) body = `I would like to apply for the ${job.title} position${job.company ? ` at ${job.company}` : ''} advertised on Job Bank. My resume is attached.\n\nThank you for your time.`;
-  // An email reads as a letter: greeting first, then a sign-off with name and contact details.
-  if (!/^\s*(dear|hello|hi)\b/i.test(body)) body = `Dear Hiring Manager,\n\n${body}`;
-  body = body.replace(/\n+\s*(kind regards|best regards|regards|sincerely|yours sincerely|yours faithfully),?[\s\S]*$/i, '').trim();
-  const contact = [A.phone, process.env.JOBBOT_GMAIL_USER].filter(Boolean).join('\n');
-  return `${body}\n\nKind regards,\n${name}${contact ? `\n${contact}` : ''}\n\nMy resume is attached.`;
+  return applyEmail({ title: job.title, company: job.company, coverLetter: letter, name: [A.firstName, A.lastName].filter(Boolean).join(' '),
+    phone: A.phone, from: process.env.JOBBOT_GMAIL_USER, region: 'ca', board: 'Job Bank' });
 }
 
 async function phase2(until) {
@@ -125,7 +120,7 @@ async function phase2(until) {
       const subject = `Application for ${job.title}${ex.number ? ` (Job Bank #${ex.number})` : ''}${how.reference ? ` - Ref ${how.reference}` : ''}${name ? ` - ${name}` : ''}`.replace(/ - /g, ', ');
       if (TEST_TO && testSent >= 3) { queue.update(job.jobId, { status: 'cv_ready' }); log('Test mode: 3 test emails sent, stopping here.'); await DELAY(Math.max(0, until - Date.now())); return; }
       try {
-        await sendMail({ to: TEST_TO || how.email, fromName: name, subject: TEST_TO ? `[TEST, would go to ${how.email}] ${subject}` : subject, text: emailText(job, job.coverLetter),
+        await sendMail({ to: TEST_TO || how.email, fromName: name, subject: TEST_TO ? `[TEST, would go to ${how.email}] ${subject}` : subject, text: await emailText(job, job.coverLetter),
           attachments: [{ path: job.cvPath, filename: `${name || 'Resume'} Resume.pdf`.replace(/[\\/:*?"<>|]/g, '') }] });
         if (TEST_TO) {
           testSent++; tested.add(job.jobId);

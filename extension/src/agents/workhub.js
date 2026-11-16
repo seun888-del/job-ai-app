@@ -9,6 +9,7 @@ import { sendGmail, gmailStatus } from '../lib/gmail.js';
 
 const wh = require('../../../bot/modules/workhub');
 const titleMatch = require('../../../bot/modules/title_match');
+const { applyEmail } = require('../../../bot/modules/apply_email');
 const fs = require('fs');
 const SOURCE = 'workhub';
 export const WORKHUB_ORIGINS = ['https://www.jobs.service.gov.uk/*'];
@@ -82,14 +83,8 @@ export class WorkHubAgent extends SiteAgent {
 
   emailText(job, from = '') {
     const A = cfg.APPLICANT;
-    const name = [A.firstName, A.lastName].filter(Boolean).join(' ');
-    let body = String(job.coverLetter || '').trim();
-    if (!body) body = `I would like to apply for the ${job.title} role${job.company ? ` with ${job.company}` : ''} advertised on Find a Job.\n\nThank you for your time.`;
-    // An email reads as a letter: greeting first, then a sign-off with name and contact details.
-    if (!/^\s*(dear|hello|hi)\b/i.test(body)) body = `Dear Hiring Manager,\n\n${body}`;
-    body = body.replace(/\n+\s*(kind regards|best regards|regards|sincerely|yours sincerely|yours faithfully),?[\s\S]*$/i, '').trim();
-    const contact = [A.phone, from].filter(Boolean).join('\n');
-    return `${body}\n\nKind regards,\n${name}${contact ? `\n${contact}` : ''}\n\nMy CV is attached.`;
+    return applyEmail({ title: job.title, company: job.company, coverLetter: job.coverLetter, name: [A.firstName, A.lastName].filter(Boolean).join(' '),
+      phone: A.phone, from, region: 'uk', board: 'the UK government job site' });
   }
 
   async applyReady() {
@@ -110,7 +105,7 @@ export class WorkHubAgent extends SiteAgent {
       await store.updateJob(job.jobId, { status: 'applying' });
       this.log(`Emailing: ${job.title} @ ${job.company}`);
       try {
-        await sendGmail({ to: how.email, fromName: name, subject, text: this.emailText(job, (await gmailStatus()).email),
+        await sendGmail({ to: how.email, fromName: name, subject, text: await this.emailText(job, (await gmailStatus()).email),
           attachments: [{ filename: `${name || 'My'} CV.pdf`.replace(/[\\/:*?"<>|]/g, ''), bytes, contentType: 'application/pdf' }] });
         await store.updateJob(job.jobId, { applyEmail: how.email, reason: 'Emailed from your Gmail' });
         emailed.add(how.email);
