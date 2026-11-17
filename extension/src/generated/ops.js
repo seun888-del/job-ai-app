@@ -943,7 +943,44 @@ module.exports = {
     }
     return null;
   },
-  "f22aee89f5050": (lim) => {
+  "f159156ebd4b9": ({ lim, term }) => {
+    const words = term.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !/^(and|the|for|with)$/.test(w));
+    const col = document.querySelector('[data-testid="lazy-column"]');
+    const divider = col ? [...col.children].find((d) => /may not be exact matches/i.test(d.innerText || '')) : null;
+    const seen = new Set(); const out = [];
+    for (const c of document.querySelectorAll('[componentkey^="job-card-component-ref-"]')) {
+      const jobId = (c.getAttribute('componentkey').match(/(\d{6,})/) || [])[1];
+      if (!jobId || seen.has(jobId)) continue;
+      seen.add(jobId);
+      const lines = [];
+      for (let l of (c.innerText || '').split('\n')) {
+        l = l.trim().replace(/^Selected,\s*/i, '').replace(/\s*\((Verified job|with verification)\)$/i, '').trim();
+        if (l && l !== lines[lines.length - 1] && l !== '·') lines.push(l);
+      }
+      if (!lines.length) continue;
+      const locLine = lines.find((l) => /\((Remote|Hybrid|On-site)\)\s*$/i.test(l)) || '';
+      const wt = (locLine.match(/\((Remote|Hybrid|On-site)\)\s*$/i) || [])[1];
+      const loose = divider && (divider.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING);
+      const title = lines[0];
+      if (loose && !words.some((w) => title.toLowerCase().includes(w))) continue;
+      out.push({ title, company: lines[1] && lines[1] !== locLine ? lines[1] : 'Unknown', url: `https://www.linkedin.com/jobs/view/${jobId}/`, jobId,
+        workType: wt ? wt.toLowerCase().replace('on-site', 'onsite') : undefined });
+      if (out.length >= lim) break;
+    }
+    return out;
+  },
+  "f041d9b57329f": () => !!document.querySelector('[componentkey^="job-card-component-ref-"]') || /\/jobs\/search-results\//.test(location.pathname),
+  "f8ad3568f81fd": () => {
+    const card = document.querySelector('[componentkey^="job-card-component-ref-"]');
+    let el = card && card.parentElement;
+    while (el && el !== document.body) {
+      const s = getComputedStyle(el);
+      if (/auto|scroll/.test(s.overflowY) && el.scrollHeight > el.clientHeight + 20) { el.scrollTop += 1600; return true; }
+      el = el.parentElement;
+    }
+    window.scrollBy(0, 1600); return false;
+  },
+  "f19e157127546": (lim) => {
     // Use job view links as the primary anchor — /jobs/view/NNN is stable across UI changes.
     // LinkedIn class names change too frequently to rely on as primary selectors.
     const seen = new Set();
@@ -980,7 +1017,12 @@ module.exports = {
       return { title, company, url: fullUrl, jobId };
     }).filter(j => j.url && j.jobId);
   },
-  "f45fc8cfbdf8e": () => {
+  "fb46822fd98eb": () => !!document.querySelector('a[href*="/jobs/view/"]'),
+  "fba94431d43d1": () => {
+          const b = [...document.querySelectorAll('button')].find((x) => /^next$/i.test((x.getAttribute('aria-label') || x.innerText || '').trim()) && !x.disabled);
+          if (!b) return false; b.click(); return true;
+        },
+  "f90da7e0009f3": () => {
     const t = (document.body?.innerText || '').toLowerCase();
     const memberNav = document.querySelector(
       '[class*="global-nav__me"], img.global-nav__me-photo, [data-control-name="nav.settings"]'
@@ -989,7 +1031,7 @@ module.exports = {
       t.includes('join now') && t.includes('new to linkedin');
     return !memberNav && wallText;
   },
-  "fdd269361fbcf": () => {
+  "f0d1b18b25f08": () => {
     const descSelectors = [
       '.jobs-description__content',
       '.jobs-box__html-content',
@@ -1007,20 +1049,20 @@ module.exports = {
     return main ? main.innerText.trim().substring(0, 10000) : document.body.innerText.trim().substring(0, 10000);
   },
   "f2da1c73619c4": () => window.scrollBy(0, 600),
-  "f33898b137fce": () => {
+  "f9b60939dce07": () => {
       return Array.from(document.querySelectorAll('button, a, [role="button"]')).some(el => {
         const t = (el.innerText || el.textContent || '').toLowerCase();
         return t.includes('easy apply');
       });
     },
   "f8d4436f1b7e7": () => window.scrollBy(0, 300),
-  "feb45ebfe2225": () => {
+  "f81e9a2a1078a": () => {
     const bodyText = (document.body.innerText || '').toLowerCase();
     return bodyText.includes('application submitted') ||
            bodyText.includes('you applied') ||
            bodyText.includes('applied on ');
   },
-  "f4ddf802d5755": () => {
+  "f88519d236793": () => {
       const el = Array.from(document.querySelectorAll('*')).find(e => {
         const label = (e.getAttribute('aria-label') || '').toLowerCase();
         const text = (e.innerText || e.textContent || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -1029,39 +1071,39 @@ module.exports = {
       if (el) { el.scrollIntoView({ behavior: 'instant', block: 'center' }); el.click(); return true; }
       return false;
     },
-  "f673a49ab3e3d": () => {
+  "f8c0065108817": () => {
       if (document.querySelector('input[type=file]')) return true;
-      const modal = document.querySelector('.jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
+      const modal = document.querySelector('dialog[open], .jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
       const t = (modal?.innerText || '').toLowerCase();
       return /resume|\bcv\b/.test(t) && /(upload|change|select|attach|choose)/.test(t);
     },
-  "f539aeb895939": () => {
+  "f037b6b99a267": () => {
           const opt = document.querySelector(
             '[role="listbox"] [role="option"], .basic-typeahead__triggered-content li, [class*="typeahead"] li'
           );
           return !!(opt && opt.offsetParent !== null);
         },
-  "fd474c6a3a1ab": ({ base, needle }) => {
+  "f3c96d8fc2047": ({ base, needle }) => {
       for (const inp of document.querySelectorAll('input[type="file"]')) {
         for (const f of inp.files || []) if (f.name === base) return true;
       }
-      const modal = document.querySelector('.jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
+      const modal = document.querySelector('dialog[open], .jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
       return ((modal || document.body).innerText || '').includes(needle);
     },
-  "f16ff2aabb594": el => {
+  "f843243108b4c": el => {
         const container = el.closest('.jobs-easy-apply-form-element, [class*="form-element"], .fb-dash-form-element, [data-test-form-builder-dropdown]')
                        || el.parentElement?.parentElement;
         if (!container) return '';
         const lab = container.querySelector('label, legend, .jobs-easy-apply-form-element__label');
         return (lab ? lab.innerText : '').trim();
       },
-  "f36b2e2869213": () => {
+  "fde72e50a4503": () => {
         const opts = Array.from(document.querySelectorAll(
           '[role="option"]:not([aria-disabled="true"]), [data-test-text-selectable-option], li[class*="listbox__item"]'
         )).filter(el => el.offsetParent !== null);
         return opts.map(o => ({ text: (o.innerText || o.textContent || '').trim().toLowerCase() }));
       },
-  "f088f66778bbe": (targetText) => {
+  "f4d6a0c425d4b": (targetText) => {
           const opts = Array.from(document.querySelectorAll(
             '[role="option"]:not([aria-disabled="true"]), [data-test-text-selectable-option], li[class*="listbox__item"]'
           )).filter(el => el.offsetParent !== null);
@@ -1069,7 +1111,7 @@ module.exports = {
           if (opt) { opt.click(); return true; }
           return false;
         },
-  "f0f75321547c1": el => {
+  "f7a81e1505a4a": el => {
         const lab = document.querySelector(`label[for="${el.id}"]`)
                  || el.closest('label')
                  || el.parentElement?.querySelector('label');
@@ -1077,7 +1119,7 @@ module.exports = {
       },
   "f0fb0bc7dee40": el => !el.querySelector('fieldset, [role="radiogroup"]'),
   "f20a95cb17f42": el => (el.textContent || ''),
-  "f1dc33a317cee": el => {
+  "f753866c8f55a": el => {
           const clean = s => (s || '').replace(/\s+/g, ' ').trim();
           // ARIA radio: its own label is aria-label or its visible text.
           if (el.getAttribute('role') === 'radio') {
@@ -1088,9 +1130,18 @@ module.exports = {
                       el.closest('label') ||
                       el.parentElement?.querySelector('label') ||
                       el.nextElementSibling;
-          return clean(el.getAttribute('aria-label') || (lab ? (lab.innerText || lab.textContent) : '')).toLowerCase();
+          // The newer form puts the QUESTION in every radio's aria-label and the option text
+          // ("Yes") in a sibling, with an empty <label for>. So: real label text first, then
+          // the text of the wrapper that holds only this radio, and aria-label last.
+          const labText = clean(lab ? (lab.innerText || lab.textContent) : '');
+          if (labText) return labText.toLowerCase();
+          let p = el.parentElement, own = '';
+          for (let i = 0; p && i < 5 && p.querySelectorAll('input[type="radio"]').length === 1; i++, p = p.parentElement) {
+            const t = clean(p.innerText || p.textContent); if (t) { own = t; break; }
+          }
+          return clean(own || el.getAttribute('aria-label')).toLowerCase();
         },
-  "fee9c7998dbe9": el => {
+  "f709b53077093": el => {
         const clean = s => (s || '').replace(/\s+/g, ' ').trim();
         const meaningful = (t) => {
           const c = clean(t);
@@ -1104,6 +1155,9 @@ module.exports = {
           const m = meaningful(txt); if (m) return m;
         }
         const al = meaningful(el.getAttribute('aria-label')); if (al) return al;
+        // Newer form: every radio in the group has the question as its aria-label.
+        const rl = [...el.querySelectorAll('input[type="radio"]')].map((r) => clean(r.getAttribute('aria-label')));
+        if (rl.length > 1 && rl[0] && rl.every((x) => x === rl[0])) { const m = meaningful(rl[0]); if (m) return m; }
         // (b) known label classes (older DOM).
         const container = el.closest(
           '.jobs-easy-apply-form-element, .fb-dash-form-element, [data-test-form-builder-radio-button-form-component], [class*="form-element"]'
@@ -1140,7 +1194,7 @@ module.exports = {
         return '';
       },
   "f8ba7f35f17ab": el => (el.outerHTML || '').replace(/\s+/g, ' ').slice(0, 320),
-  "f7ef10a8a9f30": el => {
+  "f6ed27f98927e": el => {
           if (el.getAttribute('role') === 'radio') {
             if (el.getAttribute('aria-checked') === 'true') return true;
             const inp = el.querySelector('input[type="radio"]');
@@ -1148,7 +1202,7 @@ module.exports = {
           }
           return !!el.checked;
         },
-  "f491324115b65": el => {
+  "ff98a6176c4f7": el => {
                 const widget = el.getAttribute('role') === 'radio'
                   ? el
                   : ((el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label') || el);
@@ -1161,28 +1215,32 @@ module.exports = {
                   inp.dispatchEvent(new Event('change', { bubbles: true }));
                 }
               },
-  "f0d9df4b94fa7": el =>
+  "fc8c39e176862": el =>
               ((el.closest('[role="radio"]') || el).outerHTML || '').replace(/\s+/g, ' ').slice(0, 400),
-  "f406e73c18b98": el => {
+  "f99ac8ac99ae4": el => {
         const id = el.id;
         const lab = id ? document.querySelector(`label[for="${id}"]`) : null;
-        return (lab ? lab.innerText : el.closest('.jobs-easy-apply-form-element')?.querySelector('label')?.innerText || '').trim();
+        const t = (lab && lab.innerText.trim()) || el.closest('.jobs-easy-apply-form-element')?.querySelector('label')?.innerText || '';
+        return (t.trim() || el.getAttribute('aria-label') || '').trim();
       },
-  "ff2d90550d207": el =>
+  "ffe200d6ddf90": el =>
         Array.from(el.options).map(o => ({ value: o.value, text: o.text.toLowerCase().trim() })),
   "f6c2c6090614c": el => { el.value = ''; },
-  "fa8c5b8051268": (el, val) => {
+  "f7ee87964aa1e": (el, val) => {
         el.value = val;
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
       },
-  "fd1777f992c7a": el => {
+  "ff28219fb6921": el => {
         const id = el.id;
-        // Try label[for] association first
+        // Try label[for] association first (skip empty labels: the newer form has them)
         if (id) {
           const lab = document.querySelector(`label[for="${id}"]`);
-          if (lab) return lab.innerText.toLowerCase();
+          if (lab && lab.innerText.trim()) return lab.innerText.toLowerCase();
         }
+        // Newer form: the question is only in the input's aria-label.
+        const al = (el.getAttribute('aria-label') || '').trim();
+        if (al.length > 3) return al.toLowerCase();
         // Walk up through multiple LinkedIn form container patterns
         const containers = [
           '.jobs-easy-apply-form-element',
@@ -1209,15 +1267,16 @@ module.exports = {
         }
         return '';
       },
-  "f11dddeac9b92": el => {
+  "f87ba583fd4a9": el => {
         const formEl = el.closest('.jobs-easy-apply-form-element, [class*="form-element"]');
         const labelEl = formEl
           ? (formEl.querySelector('label, .jobs-easy-apply-form-element__label, legend') || {})
           : (document.querySelector(`label[for="${el.id}"]`) || {});
-        return { required: el.required, label: (labelEl.innerText || '').trim() };
+        const label = (labelEl.innerText || '').trim() || (el.getAttribute('aria-label') || '').trim();
+        return { required: el.required || el.getAttribute('aria-required') === 'true', label };
       },
-  "f34a959700723": () =>
-    Array.from(document.querySelectorAll(
+  "f3d743b5c07dd": () => {
+    const old = Array.from(document.querySelectorAll(
       '.artdeco-inline-feedback--error, .fb-dash-form-element__error-field, [class*="inline-feedback--error"]'
     ))
       .filter(el => el.offsetParent !== null)
@@ -1225,9 +1284,24 @@ module.exports = {
         const formEl = el.closest('.jobs-easy-apply-form-element, [class*="form-element"], .fb-dash-form-element');
         const lab = formEl?.querySelector('label, legend');
         return lab ? lab.innerText.trim() : '(unknown field)';
-      })
-      .filter((v, i, a) => a.indexOf(v) === i),
-  "fbfbe61cc8089": () => !/\/(login|checkpoint|uas|authwall|signup)/i.test(location.pathname) &&
+      });
+    // Newer form (<dialog open>, no classes): plain error text under the field. Name the
+    // field from the nearest input's aria-label.
+    const dg = document.querySelector('dialog[open]');
+    const neu = !dg ? [] : Array.from(dg.querySelectorAll('p, span, div'))
+      .filter(e => e.children.length === 0 && (e.offsetParent || e.getClientRects().length) &&
+        /^(this field is required|invalid input|please enter|enter a (valid|whole|decimal)|please make a selection|make a selection)/i.test((e.innerText || '').trim()))
+      .map(e => {
+        let p = e.parentElement;
+        for (let i = 0; p && p !== dg && i < 6; i++, p = p.parentElement) {
+          const f = p.querySelector('input[aria-label], select[aria-label], textarea[aria-label], fieldset input[type=radio][aria-label]');
+          if (f) return f.getAttribute('aria-label').trim();
+        }
+        return (e.innerText || '').trim();
+      });
+    return [...old, ...neu].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
+  },
+  "f358d62007bb5": () => !/\/(login|checkpoint|uas|authwall|signup)/i.test(location.pathname) &&
   location.pathname !== '/' && (/^\/feed/.test(location.pathname) || !!document.querySelector('[class*="global-nav"], [class*="feed-identity"]')),
   "fd77c2b6bc343": () => {
       const text = (document.body.innerText || '').toLowerCase();
@@ -1455,8 +1529,6 @@ module.exports = {
         const lab = id ? document.querySelector(`label[for="${id}"]`) : null;
         return (lab ? lab.innerText : '').toLowerCase();
       },
-  "ffe200d6ddf90": el =>
-        Array.from(el.options).map(o => ({ value: o.value, text: o.text.toLowerCase().trim() })),
   "f726433653f07": () => {
     const btn = Array.from(document.querySelectorAll('button, input[type="submit"]')).find(el => {
       if (el.disabled) return false;
