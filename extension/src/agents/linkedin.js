@@ -28,6 +28,8 @@ export class LinkedInAgent extends SiteAgent {
         if (await store.hasJob(job.jobId)) continue;
         let details = null;
         try { details = await linkedin.getJobDescription(this.page, job); } catch (_) { continue; }
+        // The search card states Remote/Hybrid/On-site, which beats guessing from the text.
+        if (details && job.workType) details.workType = job.workType;
         await this.queueIfWanted(job, details);
         await sleep(2000 + Math.random() * 2000);
       }

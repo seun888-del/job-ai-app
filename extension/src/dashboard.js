@@ -2531,7 +2531,7 @@ async function remoteStatus() {
   const recent = all.filter((j) => ['applied', 'apply_failed', 'ready', 'ready_to_submit'].includes(j.status))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 12)
     .map((j) => ({ title: j.title || '', company: j.company || '', source: SRC[j.source] || '', status: j.status === 'applied' ? 'applied' : j.status === 'apply_failed' ? 'failed' : 'waiting', at: j.appliedAt || j.updatedAt || '', ...(j.status === 'apply_failed' && j.reason ? { reason: String(j.reason).slice(0, 140) } : {}), ...((j.status === 'applied' && cfg.movePay(j)) || {}) }));
-  const skipReasons = {}; for (const j of all) if (j.status === 'skipped' && j.reason) { const r = String(j.reason).replace(/\(\d+%\)|\d+%/g, '').trim().slice(0, 80); skipReasons[r] = (skipReasons[r] || 0) + 1; }
+  const skipReasons = {}; for (const j of all) if (j.status === 'skipped' && j.reason) { const r = String(j.reason).replace(/\s*\([^)]*\d[^)]*\)\s*$/, '').replace(/\d+%/g, '').trim().slice(0, 80); skipReasons[r] = (skipReasons[r] || 0) + 1; }
   const blocked = !licenceActive(g.license) ? (g.license.key ? 'Your Job-AI access has ended. Subscribe to keep applying.' : 'Activate Job-AI in Chrome first.')
     : !(g.cv && g.cv.text) ? 'Add your CV in Job-AI first.' : applied >= cap ? `Today's limit of ${cap} applications is reached. Agents carry on tomorrow.` : '';
   return {

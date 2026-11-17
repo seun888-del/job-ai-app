@@ -66,9 +66,57 @@ async function searchJobs(page, searchTerm, limit = 10) {
   const jtMap = { permanent: 'F', contract: 'C%2CT', any: 'F%2CC%2CT' };
   const jtParam = `&f_JT=${jtMap[cfg.CONTRACT_TYPE] || 'F%2CC%2CT'}`;
   const location = encodeURIComponent(cfg.LOCATION || 'United Kingdom');
-  const url = `https://www.linkedin.com/jobs/search/?keywords=${encoded}&location=${location}&f_WT=2%2C3&f_AL=true${jtParam}${tprParam}&sortBy=DD`;
+  // LinkedIn's newer AI search (/jobs/search-results/) keeps only ONE work-type filter and
+  // silently drops the rest (remote+hybrid became remote only, which finds almost nothing),
+  // so search each wanted work type on its own and merge.
+  const WT = { remote: '2', hybrid: '3', onsite: '1' };
+  const wanted = (cfg.WORK_TYPE_PRIORITY && cfg.WORK_TYPE_PRIORITY.length ? cfg.WORK_TYPE_PRIORITY : ['remote', 'hybrid']).filter((w) => WT[w]);
+  const urlFor = (w) => `https://www.linkedin.com/jobs/search/?keywords=${encoded}&location=${location}&f_WT=${WT[w]}&f_AL=true${jtParam}${tprParam}&sortBy=DD`;
+  let url = urlFor(wanted[0] || 'remote');
 
-  console.log(`\n  [LinkedIn] Searching: "${searchTerm}" (remote+hybrid, Easy Apply)`);
+  console.log(`\n  [LinkedIn] Searching: "${searchTerm}" (${wanted.join('+')}, Easy Apply)`);
+
+  // The new search page: job cards carry componentkey="job-card-component-ref-<id>" and no
+  // /jobs/view/ links; results load in a scrolling column. Cards after LinkedIn's "may not be
+  // exact matches" note are loose matches, kept only if the title shares a word with the search.
+  const scrapeNewCards = () => page.evaluate(({ lim, term }) => {
+    const words = term.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !/^(and|the|for|with)$/.test(w));
+    const col = document.querySelector('[data-testid="lazy-column"]');
+    const divider = col ? [...col.children].find((d) => /may not be exact matches/i.test(d.innerText || '')) : null;
+    const seen = new Set(); const out = [];
+    for (const c of document.querySelectorAll('[componentkey^="job-card-component-ref-"]')) {
+      const jobId = (c.getAttribute('componentkey').match(/(\d{6,})/) || [])[1];
+      if (!jobId || seen.has(jobId)) continue;
+      seen.add(jobId);
+      const lines = [];
+      for (let l of (c.innerText || '').split('\n')) {
+        l = l.trim().replace(/^Selected,\s*/i, '').replace(/\s*\((Verified job|with verification)\)$/i, '').trim();
+        if (l && l !== lines[lines.length - 1] && l !== '·') lines.push(l);
+      }
+      if (!lines.length) continue;
+      const locLine = lines.find((l) => /\((Remote|Hybrid|On-site)\)\s*$/i.test(l)) || '';
+      const wt = (locLine.match(/\((Remote|Hybrid|On-site)\)\s*$/i) || [])[1];
+      const loose = divider && (divider.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING);
+      const title = lines[0];
+      if (loose && !words.some((w) => title.toLowerCase().includes(w))) continue;
+      out.push({ title, company: lines[1] && lines[1] !== locLine ? lines[1] : 'Unknown', url: `https://www.linkedin.com/jobs/view/${jobId}/`, jobId,
+        workType: wt ? wt.toLowerCase().replace('on-site', 'onsite') : undefined });
+      if (out.length >= lim) break;
+    }
+    return out;
+  }, { lim: limit, term: searchTerm });
+  const isNewSearch = () => page.evaluate(() => !!document.querySelector('[componentkey^="job-card-component-ref-"]') || /\/jobs\/search-results\//.test(location.pathname)).catch(() => false);
+  // Scroll the results column (not the window) so more cards load.
+  const scrollResults = () => page.evaluate(() => {
+    const card = document.querySelector('[componentkey^="job-card-component-ref-"]');
+    let el = card && card.parentElement;
+    while (el && el !== document.body) {
+      const s = getComputedStyle(el);
+      if (/auto|scroll/.test(s.overflowY) && el.scrollHeight > el.clientHeight + 20) { el.scrollTop += 1600; return true; }
+      el = el.parentElement;
+    }
+    window.scrollBy(0, 1600); return false;
+  }).catch(() => false);
 
   // Scrape the job cards off the current page. Kept as a local helper so we can
   // run it again after a session re-assert without duplicating the selectors.
@@ -115,14 +163,56 @@ async function searchJobs(page, searchTerm, limit = 10) {
   // never arrives inside 60s — that made every search time out AND collide with
   // the next one ("interrupted by another navigation"). The job cards are in the
   // DOM well before `load`, so this returns in a few seconds and actually scrapes.
-  const loadAndScrape = async () => {
+  const loadOne = async () => {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await DELAY(3000);
+    // The new search page redirects and renders its cards a moment later.
+    for (let i = 0; i < 6 && !(await isNewSearch()) && !(await page.evaluate(() => !!document.querySelector('a[href*="/jobs/view/"]')).catch(() => false)); i++) await DELAY(1000);
+    if (await isNewSearch()) {
+      // 25 cards a page, rendered as the column scrolls; then a "Next" page button.
+      const all = []; const seen = new Set();
+      for (let pg = 0; pg < 3 && all.length < limit; pg++) {
+        let prev = -1, same = 0;
+        for (let i = 0; i < 10 && same < 2; i++) {
+          const got = await scrapeNewCards().catch(() => []);
+          for (const j of got) if (!seen.has(j.jobId)) { seen.add(j.jobId); all.push(j); }
+          if (all.length >= limit) break;
+          same = all.length === prev ? same + 1 : 0; prev = all.length;
+          await scrollResults(); await DELAY(1500);
+        }
+        if (all.length >= limit) break;
+        const next = await page.evaluate(() => {
+          const b = [...document.querySelectorAll('button')].find((x) => /^next$/i.test((x.getAttribute('aria-label') || x.innerText || '').trim()) && !x.disabled);
+          if (!b) return false; b.click(); return true;
+        }).catch(() => false);
+        if (!next) break;
+        await DELAY(3000);
+      }
+      return all.slice(0, limit);
+    }
     for (let i = 0; i < 3; i++) {
       await page.evaluate(() => window.scrollBy(0, 800)).catch(() => {});
       await DELAY(800);
     }
     return scrapeCards();
+  };
+  // One search per wanted work type, merged without duplicates.
+  const loadAndScrape = async () => {
+    const all = []; const seen = new Set();
+    for (const w of wanted.length ? wanted : ['remote']) {
+      url = urlFor(w);
+      const got = await loadOne();
+      for (const j of got) {
+        if (seen.has(j.jobId)) continue;
+        seen.add(j.jobId);
+        // The card says Remote/Hybrid/On-site; skip work types the user doesn't want before
+        // opening the job page.
+        if (j.workType && !wanted.includes(j.workType)) continue;
+        all.push(j);
+      }
+      if (all.length >= limit) break;
+    }
+    return all.slice(0, limit);
   };
 
   // A direct deep-link to /jobs/search sometimes renders LinkedIn's signed-OUT
@@ -333,12 +423,15 @@ async function applyToJob(page, job, resumePath) {
     stepCount++;
     await DELAY(3000);
 
-    const modalVisible = await page.$('.jobs-easy-apply-modal, [class*="easy-apply-modal"], [aria-label*="Easy Apply"]');
+    // LinkedIn's newer apply form is a plain <dialog open> with no easy-apply classes.
+    const modalVisible = await page.$('dialog[open], .jobs-easy-apply-modal, [class*="easy-apply-modal"], [aria-label*="Easy Apply"]');
     if (!modalVisible) { console.log('  [LinkedIn] Modal closed.'); break; }
 
     await page.screenshot({ path: path.join(SSDIR, `apply_0${stepCount}_step.png`), timeout: 5000 }).catch(() => {});
     await fillContactFields(page);
-    const uploaded = await uploadResume(page, resumePath);
+    // Upload once: the new form leaves its file input in the page, so uploading on every
+    // step would attach the CV again and again.
+    const uploaded = !cvUploaded && await uploadResume(page, resumePath);
     if (uploaded) { cvUploaded = true; console.log('  [LinkedIn] Resume uploaded.'); }
     // Track whether this application involves a résumé step — Easy Apply otherwise
     // reuses the profile CV, so we must upload our tailored file to a résumé step.
@@ -385,7 +478,7 @@ async function resumeStepPresent(page) {
   try {
     return await page.evaluate(() => {
       if (document.querySelector('input[type=file]')) return true;
-      const modal = document.querySelector('.jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
+      const modal = document.querySelector('dialog[open], .jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
       const t = (modal?.innerText || '').toLowerCase();
       return /resume|\bcv\b/.test(t) && /(upload|change|select|attach|choose)/.test(t);
     });
@@ -537,7 +630,7 @@ async function verifyCvUploaded(page, resumePath) {
       for (const inp of document.querySelectorAll('input[type="file"]')) {
         for (const f of inp.files || []) if (f.name === base) return true;
       }
-      const modal = document.querySelector('.jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
+      const modal = document.querySelector('dialog[open], .jobs-easy-apply-modal, [class*="easy-apply-modal"], [role="dialog"]');
       return ((modal || document.body).innerText || '').includes(needle);
     }, { base, needle }, { timeout: 10000 });
     return true;
@@ -603,7 +696,7 @@ async function uploadResume(page, resumePath) {
 async function answerScreeningQuestions(page, job) {
   // Scope all filling to inside the modal — prevents the bot accidentally filling
   // the LinkedIn search bar or other page-level inputs behind the overlay.
-  const modal = await page.$('.jobs-easy-apply-modal, [data-test-modal], [role="dialog"]') || page;
+  const modal = await page.$('dialog[open], .jobs-easy-apply-modal, [data-test-modal], [role="dialog"]') || page;
   await _answerRadios(modal, job);
   await _answerCustomDropdowns(modal, job);
   await _answerSelects(modal, job);
@@ -874,7 +967,16 @@ async function _answerRadios(page, job) {
                       el.closest('label') ||
                       el.parentElement?.querySelector('label') ||
                       el.nextElementSibling;
-          return clean(el.getAttribute('aria-label') || (lab ? (lab.innerText || lab.textContent) : '')).toLowerCase();
+          // The newer form puts the QUESTION in every radio's aria-label and the option text
+          // ("Yes") in a sibling, with an empty <label for>. So: real label text first, then
+          // the text of the wrapper that holds only this radio, and aria-label last.
+          const labText = clean(lab ? (lab.innerText || lab.textContent) : '');
+          if (labText) return labText.toLowerCase();
+          let p = el.parentElement, own = '';
+          for (let i = 0; p && i < 5 && p.querySelectorAll('input[type="radio"]').length === 1; i++, p = p.parentElement) {
+            const t = clean(p.innerText || p.textContent); if (t) { own = t; break; }
+          }
+          return clean(own || el.getAttribute('aria-label')).toLowerCase();
         }).catch(() => '');
         options.push({ radio, label: labelText, aria: ariaMode });
       }
@@ -915,6 +1017,9 @@ async function _answerRadios(page, job) {
           const m = meaningful(txt); if (m) return m;
         }
         const al = meaningful(el.getAttribute('aria-label')); if (al) return al;
+        // Newer form: every radio in the group has the question as its aria-label.
+        const rl = [...el.querySelectorAll('input[type="radio"]')].map((r) => clean(r.getAttribute('aria-label')));
+        if (rl.length > 1 && rl[0] && rl.every((x) => x === rl[0])) { const m = meaningful(rl[0]); if (m) return m; }
         // (b) known label classes (older DOM).
         const container = el.closest(
           '.jobs-easy-apply-form-element, .fb-dash-form-element, [data-test-form-builder-radio-button-form-component], [class*="form-element"]'
@@ -1130,7 +1235,8 @@ async function _answerSelects(page, job) {
       const question = await sel.evaluate(el => {
         const id = el.id;
         const lab = id ? document.querySelector(`label[for="${id}"]`) : null;
-        return (lab ? lab.innerText : el.closest('.jobs-easy-apply-form-element')?.querySelector('label')?.innerText || '').trim();
+        const t = (lab && lab.innerText.trim()) || el.closest('.jobs-easy-apply-form-element')?.querySelector('label')?.innerText || '';
+        return (t.trim() || el.getAttribute('aria-label') || '').trim();
       });
       const opts = await sel.evaluate(el =>
         Array.from(el.options).map(o => ({ value: o.value, text: o.text.toLowerCase().trim() }))
@@ -1183,11 +1289,14 @@ async function _answerTextInputs(page, job) {
       if (current && (type !== 'number' || Number(current) !== 0)) continue;
       const question = await inp.evaluate(el => {
         const id = el.id;
-        // Try label[for] association first
+        // Try label[for] association first (skip empty labels: the newer form has them)
         if (id) {
           const lab = document.querySelector(`label[for="${id}"]`);
-          if (lab) return lab.innerText.toLowerCase();
+          if (lab && lab.innerText.trim()) return lab.innerText.toLowerCase();
         }
+        // Newer form: the question is only in the input's aria-label.
+        const al = (el.getAttribute('aria-label') || '').trim();
+        if (al.length > 3) return al.toLowerCase();
         // Walk up through multiple LinkedIn form container patterns
         const containers = [
           '.jobs-easy-apply-form-element',
@@ -1281,7 +1390,8 @@ async function _answerTextareas(page, job) {
         const labelEl = formEl
           ? (formEl.querySelector('label, .jobs-easy-apply-form-element__label, legend') || {})
           : (document.querySelector(`label[for="${el.id}"]`) || {});
-        return { required: el.required, label: (labelEl.innerText || '').trim() };
+        const label = (labelEl.innerText || '').trim() || (el.getAttribute('aria-label') || '').trim();
+        return { required: el.required || el.getAttribute('aria-required') === 'true', label };
       });
       if (!ctx.required && !ctx.label) continue;
       // Cover letters use the pre-generated tailored letter; everything else
@@ -1308,6 +1418,7 @@ async function _answerTextareas(page, job) {
 
 async function trySubmit(page, job) {
   const submitSelectors = [
+    'dialog[open] button:has-text("Submit application")',
     'button[aria-label="Submit application"]',
     'button:has-text("Submit application")',
     'footer button:has-text("Submit")',
@@ -1328,8 +1439,8 @@ async function trySubmit(page, job) {
 
 // Extract labels of currently visible form validation errors
 async function getVisibleErrorFields(page) {
-  return page.evaluate(() =>
-    Array.from(document.querySelectorAll(
+  return page.evaluate(() => {
+    const old = Array.from(document.querySelectorAll(
       '.artdeco-inline-feedback--error, .fb-dash-form-element__error-field, [class*="inline-feedback--error"]'
     ))
       .filter(el => el.offsetParent !== null)
@@ -1337,13 +1448,31 @@ async function getVisibleErrorFields(page) {
         const formEl = el.closest('.jobs-easy-apply-form-element, [class*="form-element"], .fb-dash-form-element');
         const lab = formEl?.querySelector('label, legend');
         return lab ? lab.innerText.trim() : '(unknown field)';
-      })
-      .filter((v, i, a) => a.indexOf(v) === i) // deduplicate
-  ).catch(() => []);
+      });
+    // Newer form (<dialog open>, no classes): plain error text under the field. Name the
+    // field from the nearest input's aria-label.
+    const dg = document.querySelector('dialog[open]');
+    const neu = !dg ? [] : Array.from(dg.querySelectorAll('p, span, div'))
+      .filter(e => e.children.length === 0 && (e.offsetParent || e.getClientRects().length) &&
+        /^(this field is required|invalid input|please enter|enter a (valid|whole|decimal)|please make a selection|make a selection)/i.test((e.innerText || '').trim()))
+      .map(e => {
+        let p = e.parentElement;
+        for (let i = 0; p && p !== dg && i < 6; i++, p = p.parentElement) {
+          const f = p.querySelector('input[aria-label], select[aria-label], textarea[aria-label], fieldset input[type=radio][aria-label]');
+          if (f) return f.getAttribute('aria-label').trim();
+        }
+        return (e.innerText || '').trim();
+      });
+    return [...old, ...neu].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
+  }).catch(() => []);
 }
 
 async function tryNext(page, job) {
+  // The apply dialog's own buttons first: on the newer page a "Next" behind the dialog
+  // (job carousel) comes earlier in the document than the dialog's.
   const nextSelectors = [
+    'dialog[open] button:has-text("Next")',
+    'dialog[open] button:has-text("Review")',
     'button[aria-label="Continue to next step"]',
     'button:has-text("Next")',
     'button:has-text("Review")',
@@ -1386,6 +1515,7 @@ async function tryNext(page, job) {
 async function dismissModal(page) {
   // Try dismiss button first
   const dismissSelectors = [
+    'dialog[open] button[aria-label="Dismiss"]',
     '[aria-label="Dismiss"]',
     'button[aria-label="Discard"]',
     'button:has-text("Discard")',
