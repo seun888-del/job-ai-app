@@ -824,7 +824,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       trac: !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length),
     };
     const base = hasLicence && setupDone.cvs;
-    const canRun = { trac: uk && base && setupDone.trac, reed: uk && base && setupDone.search, linkedin: base && setupDone.search, indeed: us && base && setupDone.search, dice: us && base && setupDone.search, wellfound: us && base && setupDone.search, ats: base && setupDone.search, jobbank: regionOf(settings) === 'ca' && base && setupDone.search, workhub: regionOf(settings) === 'uk' && base && setupDone.search, usajobs: us && base && setupDone.search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
+    const canRun = { trac: uk && base && setupDone.trac && !settings.nhsOff, reed: uk && base && setupDone.search, linkedin: base && setupDone.search, indeed: us && base && setupDone.search, dice: us && base && setupDone.search, wellfound: us && base && setupDone.search, ats: base && setupDone.search, jobbank: regionOf(settings) === 'ca' && base && setupDone.search, workhub: regionOf(settings) === 'uk' && base && setupDone.search, usajobs: us && base && setupDone.search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
     for (const k of RETIRED) canRun[k] = false;
     const running = anyRunning();
     const hour = new Date().getHours();
@@ -832,7 +832,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     const apps = [...needs, ...ready].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
     // "Submit for me" switches: NHS is off by default, company sites on by default.
     // NHS is opt-in: asked once at setup. Anyone who already gave Trac details keeps it.
-    const wantsNhs = !!settings.wantsNhs || setupDone.trac;
+    const wantsNhs = !settings.nhsOff && (!!settings.wantsNhs || setupDone.trac);
     const nhsNav = $('#nav-setup [data-view="trac-details"]');
     if (nhsNav) nhsNav.style.display = !uk || !wantsNhs ? 'none' : '';
     // Federal jobs: chosen at setup by USA users, like NHS in the UK.
@@ -1762,8 +1762,10 @@ VIEWS.cvs = async function renderCVs() {
 
 // ── Setup: Search preferences ────────────────────────────────────────────────
 VIEWS.search = async function renderSearch() {
-  const { profile, settings } = await loadConfig();
+  const { profile, settings, trac } = await loadConfig();
   const sched = settings.schedule || {};
+  const tracDone = !!((trac?.employment || []).length && (trac?.references || []).length && (trac?.searchTerms || []).length);
+  const nhsOn = !settings.nhsOff && (!!settings.wantsNhs || tracDone);
   content.innerHTML = `
     <div class="page-header"><h2>Search Preferences</h2><p>Used by the agents to find jobs that fit.</p></div>
     <div class="card"><div class="tracd-grid">
@@ -1787,7 +1789,7 @@ VIEWS.search = async function renderSearch() {
     </div>
     <div class="card"><h3>Extra job sites</h3>
       <p class="muted" style="margin-top:0">Job-AI already applies on employers' own websites with no accounts. If you also want it to apply on these sites, tick them below. Each one <strong>needs your own account on that site</strong>, signed in in this Chrome. Job-AI never sees your password.</p>
-      <div class="tracd-sectors">${extraForRegion(regionOf(settings)).map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="s-extra" value="${k}" ${(settings.extraSites || {})[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      <div class="tracd-sectors">${extraForRegion(regionOf(settings)).map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="s-extra" value="${k}" ${(settings.extraSites || {})[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}${regionOf(settings) === 'uk' ? `<label class="sector-chip"><input type="checkbox" id="s-nhs" ${nhsOn ? 'checked' : ''}><span>NHS jobs (Trac)</span></label>` : ''}</div>
       <p class="muted" style="margin:8px 0 0;font-size:13px">Once ticked, the site gets its own agent card on the Dashboard with a Sign in button. ${extraForRegion(regionOf(settings)).some(([k]) => k === 'linkedin') ? 'LinkedIn can limit accounts it thinks are automated, so use it at your own risk and keep your daily limit low.' : ''}</p>
     </div>
     <div class="card"><h3>Review before applying</h3>
@@ -1806,7 +1808,14 @@ VIEWS.search = async function renderSearch() {
     for (const [k] of EXTRA_SITES) if (!extraSites[k] && agents[k] && agents[k].running) agents[k].stop();
     await store.patch('settings', { extraSites, dailyCap: Number($('#s-cap').value), reviewBeforeApply: $('#s-review').checked,
       schedule: { enabled: $('#s-sched').checked, start: Number($('#s-from').value), end: Number($('#s-to').value), days: $$('.s-day:checked').map((c) => c.value) } });
+    const nhsBox = $('#s-nhs');
+    if (nhsBox && nhsBox.checked !== nhsOn) {
+      await store.patch('settings', { wantsNhs: nhsBox.checked, nhsOff: !nhsBox.checked });
+      if (!nhsBox.checked && agents.trac.running) agents.trac.stop();
+    }
     await loadConfig();
+    // NHS needs its details page filled in before the agent can run.
+    if (nhsBox && nhsBox.checked && !nhsOn && !tracDone) { navigate('trac-details'); return; }
     setSt('#s-save-st', '✓ Saved.');
   });
 };
@@ -2518,7 +2527,7 @@ async function remoteGate() {
   const search = !!((profile.searchTerms || []).length);
   const tracOk = !!((trac.employment || []).length && (trac.references || []).length && (trac.searchTerms || []).length);
   const us = isUS(settings), uk = regionOf(settings) === 'uk';
-  const canRun = { trac: uk && base && tracOk, reed: uk && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, wellfound: us && base && search, ats: base && search, jobbank: regionOf(settings) === 'ca' && base && search, workhub: regionOf(settings) === 'uk' && base && search, usajobs: us && base && search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
+  const canRun = { trac: uk && base && tracOk && !settings.nhsOff, reed: uk && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, wellfound: us && base && search, ats: base && search, jobbank: regionOf(settings) === 'ca' && base && search, workhub: regionOf(settings) === 'uk' && base && search, usajobs: us && base && search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
   for (const k of RETIRED) canRun[k] = false;
   const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
   return { license, cv, canRun, enabled };
