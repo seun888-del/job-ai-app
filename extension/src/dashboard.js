@@ -931,7 +931,7 @@ VIEWS.dashboard = async function renderDashboardView() {
           <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${applied.length ? `Job-AI sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you` : 'Your free trial has ended'}</h3>
           <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan and they start again straight away, up to 25 a day.${uk ? ' Your first month is half price.' : ''}</p></div>
           <button class="primary" id="keep-jobai">Keep Job-AI</button></div>`
-        : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. Your first 10 applications are free, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
+        : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. 24 hours free, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
       ${extraNotice ? `<div class="no-license-banner"><span><strong>New:</strong> Job-AI can now also apply on ${extraForRegion(region).map(([, l]) => l).join(us ? ', ' : ' and ').replace(/, ([^,]*)$/, ' and $1')} if you have an account there. It still applies on employers' own websites as well.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="extra-yes">Turn on</button><button class="welcome-skip-link" id="extra-no">No thanks</button></span></div>` : ''}
       ${askReview ? `<div class="no-license-banner"><span>Job-AI has sent ${applied.length} applications for you. If it's helping, a quick review in the Chrome Web Store helps other job seekers find it.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="review-yes">Leave a review</button><button class="welcome-skip-link" id="review-no">Not now</button></span></div>` : ''}
@@ -1917,7 +1917,7 @@ VIEWS.license = async function renderLicense() {
     <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence. The same key works in the desktop app.' : 'Set up Job-AI to start your free trial, or add the key from your Job-AI welcome email.'}</p></div>
     ${active ? '' : `<div class="card" id="trial-card">
       <h3 style="margin:0 0 6px">Set up Job-AI</h3>
-      <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. Your first 10 applications are free, no card needed. At the end you get a 6-digit code to type here.</p>
+      <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. 24 hours free, no card needed. At the end you get a 6-digit code to type here.</p>
       <div class="ext-inline" style="margin-top:12px"><button class="primary" id="tr-setup">Set up Job-AI (2 minutes)</button></div>
       <div class="field" style="max-width:220px;margin-top:16px"><label>Got your code? Type it here</label><input id="tr-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
       <div class="ext-inline"><button class="secondary" id="tr-go">Connect</button><span class="status-msg" id="tr-st"></span></div>
@@ -2296,7 +2296,7 @@ async function initOnboarding() {
     ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" id="w-setup-box" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
       <div id="ws-n" style="font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted,#4a453b)">Step 1 of 4</div>
       <div id="ws-email">
-        <strong style="display:block;margin-top:4px">Get your first 10 applications free</strong>
+        <strong style="display:block;margin-top:4px">Try it free for 24 hours</strong>
         <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin:4px 0 10px">No card needed. We'll email you a 6-digit code.</span>
         <div style="display:flex;gap:8px"><input id="w-email" type="email" autocomplete="email" placeholder="you@email.com" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Email me a code</button></div>
         <p style="margin:8px 0 0;font-size:13px"><a href="#" id="w-havecode" class="tracker-link">Already have a code?</a></p>
