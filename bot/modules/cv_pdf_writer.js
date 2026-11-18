@@ -123,7 +123,9 @@ function preprocessLines(lines) {
 // File properties a recruiter or ATS sees: the candidate's name, like a CV they saved
 // themselves, instead of the PDF library's name.
 function setCvInfo(doc, name) {
-  const n = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  // Name only: stop at contact details (email, phone, link, "|") that share the line.
+  const n = String(name || '').split(/\s*[|•,]\s*|\s+(?=\S*@|\+?\d|https?:|www\.|linkedin)/i)[0]
+    .replace(/\s+/g, ' ').trim().slice(0, 60);
   doc.info.Producer = '';
   doc.info.Creator = '';
   if (n) { doc.info.Title = `${n} CV`; doc.info.Author = n; }
