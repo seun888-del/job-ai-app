@@ -927,11 +927,15 @@ VIEWS.dashboard = async function renderDashboardView() {
 
       ${hasLicence ? (license.status === 'trial' && license.trialApps ? `<div class="no-license-banner"><span>Free trial: <strong>${Math.max(0, license.trialApps - (license.trialAppsSent || 0))} of ${license.trialApps}</strong> free applications left${trialLeft !== null && trialLeft <= 1 ? ', ends today' : ''}. Keep your agents applying${uk ? ', first month half price' : ''}.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>`
         : trialLeft !== null && trialLeft <= 3 ? `<div class="no-license-banner"><span>Your free trial ends ${trialLeft <= 1 ? 'today' : `in ${trialLeft} days`}.${applied.length ? ` Job-AI has sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you so far.` : ''} Keep your agents applying${uk ? ', first month half price' : ''}.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>` : '')
+        : license.status === 'setup' ? `<div class="card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+          <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">Job-AI is set up and ready</h3>
+          <p class="card-hint" style="margin:0">Pick a plan and your agents start applying straight away, up to 25 a day.${uk ? ' Your first month is half price.' : ''} Cancel any time.</p></div>
+          <button class="primary" id="keep-jobai">Pick a plan</button></div>`
         : ended ? `<div class="card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
           <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${applied.length ? `Job-AI sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you` : 'Your free trial has ended'}</h3>
           <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan and they start again straight away, up to 25 a day.${uk ? ' Your first month is half price.' : ''}</p></div>
           <button class="primary" id="keep-jobai">Keep Job-AI</button></div>`
-        : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. 24 hours free, no card needed.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
+        : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. It takes a few minutes.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
       ${extraNotice ? `<div class="no-license-banner"><span><strong>New:</strong> Job-AI can now also apply on ${extraForRegion(region).map(([, l]) => l).join(us ? ', ' : ' and ').replace(/, ([^,]*)$/, ' and $1')} if you have an account there. It still applies on employers' own websites as well.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="extra-yes">Turn on</button><button class="welcome-skip-link" id="extra-no">No thanks</button></span></div>` : ''}
       ${askReview ? `<div class="no-license-banner"><span>Job-AI has sent ${applied.length} applications for you. If it's helping, a quick review in the Chrome Web Store helps other job seekers find it.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="review-yes">Leave a review</button><button class="welcome-skip-link" id="review-no">Not now</button></span></div>` : ''}
@@ -1132,7 +1136,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       VIEWS.dashboard();
     });
     $('#so-no')?.addEventListener('click', async () => { await store.patch('settings', { submitOfferHiddenAt: new Date().toISOString() }); VIEWS.dashboard(); });
-    $('#keep-jobai')?.addEventListener('click', () => openTab(`https://tryjobai.com/pricing?lk=${encodeURIComponent(license.key)}&utm_source=extension&utm_campaign=${ended ? 'trial_ended' : 'trial_ending'}`));
+    $('#keep-jobai')?.addEventListener('click', () => openTab(`https://tryjobai.com/pricing?lk=${encodeURIComponent(license.key)}&utm_source=extension&utm_campaign=${license.status === 'setup' ? 'after_setup' : ended ? 'trial_ended' : 'trial_ending'}`));
     $('#wider-yes')?.addEventListener('click', async () => {
       // Wider from now on, and this week's close misses get checked again.
       await store.patch('profile', { matchLevel: 'wide', minScore: null });
@@ -1617,7 +1621,7 @@ VIEWS.tailor = async function renderTailor() {
     let jd = $('#tl-jd').value.trim(), url = '';
     if (!cvs.length) { setSt('#tl-st', `Add your ${word} first: Setup, then CVs.`, true); return; }
     const l = await tailorLeft();
-    if (!l.active) { setSt('#tl-st', 'Tailoring needs an active free trial or plan. See the License page.', true); return; }
+    if (!l.active) { setSt('#tl-st', 'Tailoring needs a plan. See the License page.', true); return; }
     if (!l.left) { setSt('#tl-st', ''); tailorShowLimit(l, word); return; }
     if (!title) { setSt('#tl-st', 'Add the job title.', true); $('#tl-title').focus(); return; }
     if (/^https?:\/\/\S+$/i.test(jd)) {
@@ -1914,10 +1918,10 @@ VIEWS.license = async function renderLicense() {
   const active = licenceActive(license);
   // The saved key is never written back into the page; only its last 4 characters are shown.
   content.innerHTML = `
-    <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence. The same key works in the desktop app.' : 'Set up Job-AI to start your free trial, or add the key from your Job-AI welcome email.'}</p></div>
+    <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence. The same key works in the desktop app.' : 'Set up Job-AI, or add the key from your Job-AI welcome email.'}</p></div>
     ${active ? '' : `<div class="card" id="trial-card">
       <h3 style="margin:0 0 6px">Set up Job-AI</h3>
-      <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. 24 hours free, no card needed. At the end you get a 6-digit code to type here.</p>
+      <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. At the end you get a 6-digit code to type here.</p>
       <div class="ext-inline" style="margin-top:12px"><button class="primary" id="tr-setup">Set up Job-AI (2 minutes)</button></div>
       <div class="field" style="max-width:220px;margin-top:16px"><label>Got your code? Type it here</label><input id="tr-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
       <div class="ext-inline"><button class="secondary" id="tr-go">Connect</button><span class="status-msg" id="tr-st"></span></div>
@@ -1933,7 +1937,7 @@ VIEWS.license = async function renderLicense() {
       <button class="primary" id="lic-keep">Choose a plan</button></div>` : ''}
     <div class="card">${active ? '' : '<h3 style="margin:0 0 6px">Already have a key?</h3>'}
       ${license.key ? `<div class="stat-row"><span class="stat-label">Key</span><span class="stat-value">•••• ${esc(license.key.slice(-4))}</span></div>
-      <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value">${active ? (license.status === 'trial' ? 'Free trial' : 'Active') : license.status === 'device_trial_used' ? 'Trial already used on this device' : 'Not active'}</span></div>
+      <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value">${active ? (license.status === 'trial' ? 'Free trial' : 'Active') : license.status === 'device_trial_used' ? 'Trial already used on this device' : license.status === 'setup' ? 'Set up, no plan yet' : 'Not active'}</span></div>
       ${license.expiresAt ? `<div class="stat-row"><span class="stat-label">${active ? 'Renews / ends' : 'Ended'}</span><span class="stat-value">${esc(new Date(license.expiresAt).toLocaleDateString('en-GB'))}</span></div>` : ''}` : ''}
       <div class="field" style="max-width:460px;margin-top:12px"><label>${license.key ? 'Replace key' : 'License key'}</label><input id="lic" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key"></div>
       <div class="ext-inline"><button class="primary" id="lic-save">Activate</button>${license.key ? '<button class="secondary" id="lic-remove">Remove key</button>' : ''}<span class="status-msg" id="lic-st"></span></div>
@@ -2091,7 +2095,7 @@ async function claimPhoneSetup(raw, say) {
     globalThis.__jobaiLicense = lic.ok ? r.key : globalThis.__jobaiLicense;
     await loadConfig(); checkSteps();
     if (!lic.ok) { say((got.length ? `Your ${got.join(' and ')} came in, but ` : '') + (lic.error === 'device_trial_used' ? 'this computer has already used a free trial.' : 'the licence could not be activated.'), true); return false; }
-    say(`✓ Done. Licence active${got.length ? ', and your ' + got.join(' and ') + ' are in' : ''}.`);
+    say(lic.licenseStatus === 'setup' ? `✓ Done${got.length ? '. Your ' + got.join(' and ') + ' are in' : ''}. Finish setting up, then pick a plan to start applying.` : `✓ Done. Licence active${got.length ? ', and your ' + got.join(' and ') + ' are in' : ''}.`);
     return true;
   }
 }
@@ -2296,8 +2300,8 @@ async function initOnboarding() {
     ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" id="w-setup-box" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
       <div id="ws-n" style="font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted,#4a453b)">Step 1 of 4</div>
       <div id="ws-email">
-        <strong style="display:block;margin-top:4px">Try it free for 24 hours</strong>
-        <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin:4px 0 10px">No card needed. We'll email you a 6-digit code.</span>
+        <strong style="display:block;margin-top:4px">Start with your email</strong>
+        <span style="display:block;font-size:13.5px;color:var(--text-muted,#4a453b);margin:4px 0 10px">We'll email you a 6-digit code.</span>
         <div style="display:flex;gap:8px"><input id="w-email" type="email" autocomplete="email" placeholder="you@email.com" aria-label="Your email" style="flex:1;min-width:0"><button class="primary" id="w-send" style="white-space:nowrap">Email me a code</button></div>
         <p style="margin:8px 0 0;font-size:13px"><a href="#" id="w-havecode" class="tracker-link">Already have a code?</a></p>
       </div>
