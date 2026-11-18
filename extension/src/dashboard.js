@@ -842,13 +842,13 @@ VIEWS.dashboard = async function renderDashboardView() {
     const submitOn = { trac: !!(settings.autoSubmit && settings.autoSubmit.trac), ats: !(settings.autoSubmit && settings.autoSubmit.ats === false) };
     // Finished NHS applications piling up with Submit for me off: offer to turn it on (also for
     // people already running Job-AI, not just at setup). Hidden for 3 days on "I'll do it".
-    const submitOffer = uk && !submitOn.trac && ready.length >= 2 && Date.parse(settings.submitOfferHiddenAt || 0) < Date.now() - 3 * 864e5;
+    const submitOffer = uk && !submitOn.trac && ready.length + needs.length >= 2 && Date.parse(settings.submitOfferHiddenAt || 0) < Date.now() - 3 * 864e5;
     // NHS drafts that stopped on a question only the user can answer: say what is missing and
     // take them straight there (the "Submit for me" card above only covers finished ones).
     const draftMiss = {};
     for (const j of needs) for (const m of String(j.reason || '').replace(/^Draft saved on Trac\.?\s*Needs you:\s*/i, '').replace(/ This form asks about AI use.*$/, '').replace(/\.$/, '').split(';')) { const k = m.trim(); if (k && k !== 'check the draft') draftMiss[k] = (draftMiss[k] || 0) + 1; }
     const topMiss = Object.entries(draftMiss).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
-    const draftOffer = uk && needs.length >= 2 && Date.parse(settings.draftOfferHiddenAt || 0) < Date.now() - 2 * 864e5;
+    const draftOffer = uk && !submitOffer && needs.length >= 2 && Date.parse(settings.draftOfferHiddenAt || 0) < Date.now() - 2 * 864e5;
     const SUBMIT_HINT = {
       trac: (on) => on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.',
       ats: (on) => on ? 'Sends them for you. Any it can\'t send on its own, it skips and moves on to the next job.' : 'Off: each one waits under Ready to send for you to check and submit.',
@@ -948,13 +948,13 @@ VIEWS.dashboard = async function renderDashboardView() {
       ${offerWider ? `<div class="no-license-banner"><span>${tooFar.length} jobs this week were skipped as not a close enough match. Try a wider match?</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="wider-yes">Try Wider</button><button class="welcome-skip-link" id="wider-no">No thanks</button></span></div>` : ''}
 
       ${submitOffer ? `<div class="card" style="border:1.5px solid #16a34a">
-        <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${ready.length} NHS applications are finished and waiting</h3>
-        <p class="card-hint" style="margin:0 0 12px">Each one is complete on Trac, but the employer only gets it once Submit is pressed. Turn on Submit for me and Job-AI will submit these for you, plus any others it finishes from now on. Applications that ask about AI use, or still need an answer from you, are always left for you.</p>
+        <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${ready.length + needs.length} NHS applications are waiting to be submitted</h3>
+        <p class="card-hint" style="margin:0 0 12px">${ready.length ? `${ready.length} ${ready.length === 1 ? 'is' : 'are'} complete on Trac. ` : ''}The employer only gets an application once Submit is pressed. Turn on Submit for me and Job-AI submits these for you, plus every one it finishes from now on.${needs.length ? ` ${needs.length} still need an answer from you: add it once in your NHS details and Job-AI finishes and submits them on its next round.` : ''} Applications that ask about AI use are always left for you.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="so-yes" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Submit them for me</button><button class="secondary" id="so-no" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">I'll submit them myself</button></div></div>` : ''}
       ${draftOffer ? `<div class="card" style="border:1.5px solid #d97706">
         <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${needs.length} NHS applications need one more answer from you</h3>
-        <p class="card-hint" style="margin:0 0 12px">Job-AI filled in everything it could and saved each one as a draft on Trac. ${topMiss.length ? `Most of them still need: <strong>${esc(topMiss.join(', '))}</strong>. ` : ''}Open one, add the missing answer, then press Submit. Nothing reaches the employer until you do.</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="do-show" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Show me the first one</button><button class="secondary" id="do-list" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">See them all</button><button class="welcome-skip-link" id="do-no">Later</button></div></div>` : ''}
+        <p class="card-hint" style="margin:0 0 12px">Job-AI filled in everything it could and saved each one as a draft on Trac. ${topMiss.length ? `Most of them still need: <strong>${esc(topMiss.join(', '))}</strong>. ` : ''}${submitOn.trac ? 'Add the missing answers once in your NHS details and Job-AI finishes and submits them all on its next round.' : 'Add the missing answers once in your NHS details and Job-AI finishes them on its next round, then you press Submit.'}</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="do-fix" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Add the missing answers</button><button class="secondary" id="do-show" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Open the first one on Trac</button><button class="secondary" id="do-list" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">See them all</button><button class="welcome-skip-link" id="do-no">Later</button></div></div>` : ''}
       ${filterHintHtml(fh)}
       ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
@@ -1146,6 +1146,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       VIEWS.dashboard();
     });
     $('#do-show')?.addEventListener('click', () => { const first = needs.slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0]; openTab(/^https:\/\/apps\.trac\.jobs\//.test((first && first.draftUrl) || '') ? first.draftUrl : TRAC_LIST); });
+    $('#do-fix')?.addEventListener('click', () => navigate('trac-details'));
     $('#do-list')?.addEventListener('click', () => $('#nhs-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     $('#do-no')?.addEventListener('click', async () => { await store.patch('settings', { draftOfferHiddenAt: new Date().toISOString() }); VIEWS.dashboard(); });
     $('#so-no')?.addEventListener('click', async () => { await store.patch('settings', { submitOfferHiddenAt: new Date().toISOString() }); VIEWS.dashboard(); });
@@ -2352,6 +2353,7 @@ async function initOnboarding() {
         <div class="field" style="margin-bottom:10px"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="wc-wt" value="${v}"><span>${l}</span></label>`).join('')}</div></div>        <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
         <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-licence" style="width:16px;height:16px;margin:0"> <span>I have a full driving licence</span></label>
         <label id="wc-nhs-row" style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-nhs" style="width:16px;height:16px;margin:0"> <span>Also apply for NHS jobs (needs a Trac account)</span></label>
+        <label id="wc-nhssub-row" style="font-size:13.5px;display:none;gap:8px;align-items:center;margin:-8px 0 14px 24px;cursor:pointer"><input type="checkbox" id="wc-nhssub" checked style="width:16px;height:16px;margin:0"> <span>Submit finished NHS applications for me (ones that need your answer always wait for you)</span></label>
         <label id="wc-mail-row" style="font-size:13.5px;display:none;gap:8px;align-items:flex-start;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-mail" style="width:16px;height:16px;margin:2px 0 0;flex:0 0 16px"> <span id="wc-mail-l">Also apply by email from my Gmail</span></label>
         <label id="wc-fed-row" style="font-size:13.5px;display:none;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-fed" style="width:16px;height:16px;margin:0"> <span>Also apply for federal government jobs (needs a USAJOBS account)</span></label>
         <div id="wc-fed-q" style="display:none;grid-template-columns:1fr 1fr;gap:0 10px;margin:-4px 0 12px">
@@ -2404,6 +2406,8 @@ async function initOnboarding() {
       const wt = (P.workTypePriority || []).length ? P.workTypePriority : ['remote', 'hybrid', 'onsite'];
       $$('.wc-wt').forEach((c) => { c.checked = wt.includes(c.value); });      $('#wc-licence').checked = !!P.drivingLicence;
       $('#wc-nhs').checked = !!st.wantsNhs;
+      // On by default for a new NHS set-up; someone who already set NHS up sees their current choice.
+      $('#wc-nhssub').checked = st.wantsNhs ? !!(st.autoSubmit && st.autoSubmit.trac) : true;
       const mailKeyOf = (r) => (r === 'uk' ? 'workhub' : r === 'ca' ? 'jobbank' : '');
       const mailOn = (r) => (st.extraSites || {})[mailKeyOf(r)] !== false;
       const F = st.federal || {};
@@ -2430,6 +2434,7 @@ async function initOnboarding() {
         $('#wc-postcode-l').textContent = us ? 'ZIP code' : ca ? 'Postal code' : 'Postcode';
         $('#wc-salary-l').textContent = `Lowest salary (${us ? '$' : ca ? 'CA$' : '£'} a year)`;
         $('#wc-nhs-row').style.display = r === 'uk' ? 'flex' : 'none';
+        $('#wc-nhssub-row').style.display = r === 'uk' && $('#wc-nhs').checked ? 'flex' : 'none';
         $('#wc-mail-row').style.display = mailKeyOf(r) ? 'flex' : 'none';
         $('#wc-mail').checked = mailOn(r);
         $('#wc-mail-l').textContent = ca ? 'Also apply by email to Job Bank jobs, sent from my Gmail (Job-AI can only send, never read)' : 'Also email my CV to recruiters (Recruiter Agent), sent from my Gmail (Job-AI can only send, never read)';
@@ -2439,6 +2444,7 @@ async function initOnboarding() {
         $$('.wc-clear').forEach((e) => { e.style.display = r === 'uk' ? '' : 'none'; });
       };
       $('#wc-region').onchange = where; where();
+      $('#wc-nhs').onchange = () => { $('#wc-nhssub-row').style.display = $('#wc-region').value === 'uk' && $('#wc-nhs').checked ? 'flex' : 'none'; };
       step('ws-check');
     };
     const go = async () => {
@@ -2490,7 +2496,8 @@ async function initOnboarding() {
       });
       await setRegion(region);
       const nhs = region === 'uk' && $('#wc-nhs').checked;
-      await store.patch('settings', { wantsNhs: nhs, wantsFederal: fedOn, ...(fedOn ? { federal: { ...((await store.get('settings')).federal || {}), usCitizen: $('#wc-fed-cit').value, hoursPerWeek: Math.min(80, Math.max(1, parseInt($('#wc-fed-hrs').value, 10) || 40)) } } : {}) });
+      const nhsSubmit = nhs && $('#wc-nhssub').checked;
+      await store.patch('settings', { wantsNhs: nhs, ...(nhs ? { autoSubmit: { ...((await store.get('settings')).autoSubmit || {}), trac: nhsSubmit } } : {}), wantsFederal: fedOn, ...(fedOn ? { federal: { ...((await store.get('settings')).federal || {}), usCitizen: $('#wc-fed-cit').value, hoursPerWeek: Math.min(80, Math.max(1, parseInt($('#wc-fed-hrs').value, 10) || 40)) } } : {}) });
       if (nhs) {
         // Start their Trac details from what they just checked. Only fills blanks.
         const t = { ...((await store.get('trac')) || {}) };
