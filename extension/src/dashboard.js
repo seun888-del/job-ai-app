@@ -843,6 +843,12 @@ VIEWS.dashboard = async function renderDashboardView() {
     // Finished NHS applications piling up with Submit for me off: offer to turn it on (also for
     // people already running Job-AI, not just at setup). Hidden for 3 days on "I'll do it".
     const submitOffer = uk && !submitOn.trac && ready.length >= 2 && Date.parse(settings.submitOfferHiddenAt || 0) < Date.now() - 3 * 864e5;
+    // NHS drafts that stopped on a question only the user can answer: say what is missing and
+    // take them straight there (the "Submit for me" card above only covers finished ones).
+    const draftMiss = {};
+    for (const j of needs) for (const m of String(j.reason || '').replace(/^Draft saved on Trac\.?\s*Needs you:\s*/i, '').replace(/ This form asks about AI use.*$/, '').replace(/\.$/, '').split(';')) { const k = m.trim(); if (k && k !== 'check the draft') draftMiss[k] = (draftMiss[k] || 0) + 1; }
+    const topMiss = Object.entries(draftMiss).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+    const draftOffer = uk && needs.length >= 2 && Date.parse(settings.draftOfferHiddenAt || 0) < Date.now() - 2 * 864e5;
     const SUBMIT_HINT = {
       trac: (on) => on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.',
       ats: (on) => on ? 'Sends them for you. Any it can\'t send on its own, it skips and moves on to the next job.' : 'Off: each one waits under Ready to send for you to check and submit.',
@@ -945,6 +951,10 @@ VIEWS.dashboard = async function renderDashboardView() {
         <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${ready.length} NHS applications are finished and waiting</h3>
         <p class="card-hint" style="margin:0 0 12px">Each one is complete on Trac, but the employer only gets it once Submit is pressed. Turn on Submit for me and Job-AI will submit these for you, plus any others it finishes from now on. Applications that ask about AI use, or still need an answer from you, are always left for you.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="so-yes" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Submit them for me</button><button class="secondary" id="so-no" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">I'll submit them myself</button></div></div>` : ''}
+      ${draftOffer ? `<div class="card" style="border:1.5px solid #d97706">
+        <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${needs.length} NHS applications need one more answer from you</h3>
+        <p class="card-hint" style="margin:0 0 12px">Job-AI filled in everything it could and saved each one as a draft on Trac. ${topMiss.length ? `Most of them still need: <strong>${esc(topMiss.join(', '))}</strong>. ` : ''}Open one, add the missing answer, then press Submit. Nothing reaches the employer until you do.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="do-show" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Show me the first one</button><button class="secondary" id="do-list" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">See them all</button><button class="welcome-skip-link" id="do-no">Later</button></div></div>` : ''}
       ${filterHintHtml(fh)}
       ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
@@ -994,7 +1004,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         ${fedReady.map((a) => `<div class="nhs-app"><div class="nhs-app-main"><div class="nhs-app-title">${esc(a.title)}</div><div class="nhs-app-meta">${esc([a.company, a.location, a.grade, a.pay, a.closes ? 'closes ' + new Date(a.closes + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''].filter(Boolean).join(' · '))}</div>${/^Before you upload|clearance/.test(a.reason || '') ? `<div class="nhs-app-missing">${esc(String(a.reason).replace(/^Federal resume ready\. Apply on USAJOBS\.\s*/, ''))}</div>` : ''}</div><span class="badge ${(a.cvScore || 0) >= 60 ? 'badge-success' : 'badge-muted'}">${(a.cvScore || 0) >= 60 ? 'Strong match' : 'Worth a look'}</span><div class="nhs-app-actions"><button class="secondary fed-help" data-id="${esc(a.jobId)}">Help me answer</button><button class="secondary fed-dl" data-id="${esc(a.jobId)}">Download resume</button><button class="primary fed-open" data-url="${esc(safeUrl(a.url) || '')}">Apply on USAJOBS</button><button class="secondary fed-done" data-id="${esc(a.jobId)}">I applied</button><button class="secondary skip-send" data-id="${esc(a.jobId)}">Skip</button></div></div>`).join('')}
       </div>` : ''}
 
-      ${apps.length ? `<div class="card card-wide nhs-apps-card">
+      ${apps.length ? `<div class="card card-wide nhs-apps-card" id="nhs-list">
         <h3 style="margin:0 0 4px">NHS applications</h3>
         <p class="nhs-apps-hint">Opens on Trac in a normal tab. Sign in there if asked.</p>
         ${apps.map((a, i) => appRow(a, i)).join('')}
@@ -1135,6 +1145,9 @@ VIEWS.dashboard = async function renderDashboardView() {
       store.log('Submit for me is on for NHS: finished applications are submitted on the next round.');
       VIEWS.dashboard();
     });
+    $('#do-show')?.addEventListener('click', () => { const first = needs.slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0]; openTab(/^https:\/\/apps\.trac\.jobs\//.test((first && first.draftUrl) || '') ? first.draftUrl : TRAC_LIST); });
+    $('#do-list')?.addEventListener('click', () => $('#nhs-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    $('#do-no')?.addEventListener('click', async () => { await store.patch('settings', { draftOfferHiddenAt: new Date().toISOString() }); VIEWS.dashboard(); });
     $('#so-no')?.addEventListener('click', async () => { await store.patch('settings', { submitOfferHiddenAt: new Date().toISOString() }); VIEWS.dashboard(); });
     $('#keep-jobai')?.addEventListener('click', () => openTab(`https://tryjobai.com/pricing?lk=${encodeURIComponent(license.key)}&utm_source=extension&utm_campaign=${license.status === 'setup' ? 'after_setup' : ended ? 'trial_ended' : 'trial_ending'}`));
     $('#wider-yes')?.addEventListener('click', async () => {
@@ -2534,7 +2547,7 @@ async function remoteGate() {
   const canRun = { trac: uk && base && tracOk && !settings.nhsOff, reed: uk && base && search, linkedin: base && search, indeed: us && base && search, dice: us && base && search, wellfound: us && base && search, ats: base && search, jobbank: regionOf(settings) === 'ca' && base && search, workhub: regionOf(settings) === 'uk' && base && search, usajobs: us && base && search && !!settings.wantsFederal && !!(settings.federal || {}).usCitizen };
   for (const k of RETIRED) canRun[k] = false;
   const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
-  return { license, cv, canRun, enabled };
+  return { license, cv, canRun, enabled, settings };
 }
 async function remoteStatus() {
   const g = await remoteGate();
@@ -2555,6 +2568,14 @@ async function remoteStatus() {
     failed: all.filter((j) => j.status === 'apply_failed').length,
     needs_you: all.filter((j) => ['ready', 'ready_to_submit', 'awaiting_review'].includes(j.status) || (j.status === 'skipped' && /^Draft saved on Trac/.test(j.reason || ''))).length,
     recent, blocked,
+    nhs: (() => {
+      const t = all.filter((j) => j.source === 'trac');
+      const drafts = t.filter((j) => j.status === 'skipped' && /^Draft saved on Trac/.test(j.reason || ''));
+      const miss = {};
+      for (const j of drafts) for (const m of String(j.reason || '').replace(/^Draft saved on Trac\.?\s*Needs you:\s*/i, '').replace(/ This form asks about AI use.*$/, '').replace(/\.$/, '').split(';')) { const k = m.trim().slice(0, 60); if (k) miss[k] = (miss[k] || 0) + 1; }
+      return { ready: t.filter((j) => j.status === 'ready_to_submit').length, drafts: drafts.length, submit_for_me: !!(g.settings && g.settings.autoSubmit && g.settings.autoSubmit.trac),
+        missing: Object.entries(miss).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([item, count]) => ({ item, count })) };
+    })(),
     skipped: all.filter((j) => j.status === 'skipped').length,
     skip_reasons: Object.entries(skipReasons).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([reason, count]) => ({ reason, count })),
   };
