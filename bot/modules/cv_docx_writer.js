@@ -182,7 +182,11 @@ async function writeDocx(cvText, outputPath) {
     }
   }
 
+  const who = String(name || '').trim();
   const doc = new Document({
+    creator: who || 'Candidate',
+    lastModifiedBy: who || 'Candidate',
+    title: who ? `${who} CV` : 'CV',
     sections: [{
       properties: {
         page: {

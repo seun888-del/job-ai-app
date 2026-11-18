@@ -120,6 +120,15 @@ function preprocessLines(lines) {
   return out;
 }
 
+// File properties a recruiter or ATS sees: the candidate's name, like a CV they saved
+// themselves, instead of the PDF library's name.
+function setCvInfo(doc, name) {
+  const n = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  doc.info.Producer = '';
+  doc.info.Creator = '';
+  if (n) { doc.info.Title = `${n} CV`; doc.info.Author = n; }
+}
+
 function drawRule(doc, left, right) {
   const y = doc.y;
   doc.moveTo(left, y).lineTo(right, y).lineWidth(0.5).stroke(RULE);
@@ -159,6 +168,7 @@ function writePDF(cvText, outputPath, options = {}) {
     const rawNameLine = nonEmpty[0] ? nonEmpty[0].trim() : '';
     const nameLine   = options.overrideName || rawNameLine;
     const subLine    = nonEmpty[1] ? nonEmpty[1].trim() : '';
+    setCvInfo(doc, nameLine);
 
     // Find contact line and trim any profile text that bled in during PDF extraction.
     // E.g. "London | 07359... | email@... | linkedin.com/in/x Results-driven IT..." → strip after URL end.
@@ -386,6 +396,7 @@ function writeStructuredPDF(cv, outputPath, options = {}) {
 
     // ── Header ───────────────────────────────────────────────────────────────
     const name = (options.overrideName || cv.name || '').trim();
+    setCvInfo(doc, name);
     doc.font(FONT_BOLD).fontSize(22).fillColor(BLACK).text(name, { align: 'center' });
     doc.moveDown(0.1);
     if (cv.subtitle) {

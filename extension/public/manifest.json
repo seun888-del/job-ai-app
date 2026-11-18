@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Job-AI: AI Auto Apply to Jobs, Tailored Resume & CV",
   "short_name": "Job-AI",
-  "version": "0.5.86",
+  "version": "0.5.87",
   "description": "AI auto apply for job applications. Finds jobs that fit your resume or CV, tailors it to each job and fills in the form. UK and US.",
   "icons": {
     "16": "icons/icon16.png",
@@ -29,7 +29,10 @@
     "power",
     "identity"
   ],
-  "optional_host_permissions": ["https://www.jobbank.gc.ca/*", "https://www.jobs.service.gov.uk/*"],
+  "optional_host_permissions": [
+    "https://www.jobbank.gc.ca/*",
+    "https://www.jobs.service.gov.uk/*"
+  ],
   "host_permissions": [
     "https://api.tryjobai.com/*",
     "https://www.healthjobsuk.com/*",
