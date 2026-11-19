@@ -93,3 +93,5 @@ h1, h2 { font-family: 'Bricolage', var(--font-sans); }
 .w-car-dots button { width: 22px; height: 8px; border-radius: 999px; border: 1.5px solid var(--text); background: var(--surface); padding: 0; cursor: pointer; transition: width .25s, background .25s; }
 .w-car-dots button[aria-current="true"] { width: 36px; background: var(--primary); border-color: var(--primary); }
 @media (prefers-reduced-motion: reduce) { .w-car-slide, .w-car-dots button { transition: none; } }
+textarea { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 10px 12px; font: inherit; background: var(--surface); color: var(--text); }
+textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
