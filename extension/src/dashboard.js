@@ -1712,7 +1712,7 @@ VIEWS.personal = async function renderPersonal() {
       <div class="field"><label>Notice period</label><select id="p-avail">${[['immediately', 'Immediately'], ['1week', '1 week'], ['2weeks', '2 weeks'], ['1month', '1 month'], ['3months', '3 months']].map(([v, l]) => `<option value="${v}" ${(P.availability || 'immediately') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       ${f('salaryExpectation', 'Minimum salary (£ a year)', 'text', 'e.g. 28000')}
     </div>
-    <div class="tracd-sectors" style="margin-top:12px">${[['requiresSponsorship', 'I need visa sponsorship'], ['seekSponsorship', 'Only apply to jobs that offer sponsorship'], ['willingToRelocate', 'Willing to relocate'], ['drivingLicence', 'I have a driving licence']].map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="p-flag" data-k="${k}" ${P[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
+    <div class="tracd-sectors" style="margin-top:12px">${[['requiresSponsorship', 'I need visa sponsorship'], ['seekSponsorship', 'Only apply to jobs that offer sponsorship'], ['willingToRelocate', 'Willing to relocate'], ['openToLowerLevel', 'Open to lower-level roles'], ['drivingLicence', 'I have a driving licence']].map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="p-flag" data-k="${k}" ${P[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
     <div class="card"><h3>Security clearance</h3><p class="muted">Some UK employers, often government suppliers, ask these. Left blank, those jobs are skipped.</p><div class="tracd-grid">
       ${CLEARANCE.map(([k, l, o]) => `<div class="field"><label>${l}</label><select class="p-sel" data-k="${k}">${o.map(([v, t]) => `<option value="${v}" ${(P[k] || '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`).join('')}
     </div></div>
@@ -2077,7 +2077,7 @@ async function claimPhoneSetup(raw, say) {
         const cap = { male: 'Male', female: 'Female', nonbinary: 'Non-binary', white: 'White', mixed: 'Mixed', asian: 'Asian', black: 'Black', arab: 'Arab', other: 'Other', no: 'No', yes: 'Yes' };
         Object.assign(out, {
           rightToWorkCountries: P.rightToWorkCountries || 'United Kingdom', requiresSponsorship: !!P.requiresSponsorship, availability: P.availability || 'immediately',
-          salaryExpectation: P.salaryExpectation || '', drivingLicence: !!P.drivingLicence, willingToRelocate: !!P.willingToRelocate,
+          salaryExpectation: P.salaryExpectation || '', drivingLicence: !!P.drivingLicence, willingToRelocate: !!P.willingToRelocate, openToLowerLevel: !!P.openToLowerLevel,
           eeoGender: cap[P.eeoGender] || '', eeoEthnicity: cap[P.eeoEthnicity] || '', eeoDisability: cap[P.eeoDisability] || '',
         });
       }

@@ -28,14 +28,14 @@ function boostCVText(cvText, keywords) {
 function preFilter(job) {
   const move = cfg.moveCheck(job);
   if (move) return move;
-  const { experienceLevel, employmentType = [], salaryExpectation, country } = cfg.APPLICANT;
+  const { experienceLevel, openToLowerLevel, employmentType = [], salaryExpectation, country } = cfg.APPLICANT;
   const title = (job.title || '').toLowerCase();
   const desc = String(job.description || '').slice(0, 1500);
   if (experienceLevel) {
     const senior = /\b(senior|lead|principal|head of|director|vp|vice president|chief|cto|ceo|coo|staff engineer)\b/i.test(title);
     const junior = /\b(junior|entry.?level|graduate|trainee|apprentice|intern)\b/i.test(title);
     if (['entry', 'junior'].includes(experienceLevel) && senior) return `Senior-level role (you target ${experienceLevel})`;
-    if (['senior', 'lead', 'director', 'executive'].includes(experienceLevel) && junior) return `Junior-level role (you target ${experienceLevel})`;
+    if (!openToLowerLevel && ['senior', 'lead', 'director', 'executive'].includes(experienceLevel) && junior) return `Junior-level role (you target ${experienceLevel})`;
   }
   if (employmentType.length) {
     const ctxt = (title + ' ' + desc.slice(0, 500)).toLowerCase();

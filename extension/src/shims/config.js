@@ -59,6 +59,7 @@ const cfg = {
       // The "Find jobs in" switch decides the country, like the app (Canada is its own region).
       country: ({ uk: 'United Kingdom', us: 'United States', ca: 'Canada' })[settings && settings.region] || profile.country || 'United Kingdom',
       experienceLevel: profile.experienceLevel || '',
+      openToLowerLevel: !!profile.openToLowerLevel,
       employmentType: Array.isArray(profile.employmentType) && profile.employmentType.length ? profile.employmentType : ['full_time'],
       availability: profile.availability || 'immediately',
       willingToRelocate: !!profile.willingToRelocate,
