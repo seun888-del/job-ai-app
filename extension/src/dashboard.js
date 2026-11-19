@@ -208,8 +208,8 @@ const RETIRED = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound', 'job
 // Agents that apply by email from the user's own Gmail (one shared Gmail connection), and the
 // site each one needs to reach (asked for only when the user turns it on).
 const EMAIL_AGENTS = {
-  jobbank: { origins: JOBBANK_ORIGINS, name: 'Job Bank Agent', who: 'employers on Job Bank', site: 'Job Bank', doc: 'resume', blurb: 'Applies by email to jobs on Job Bank, the Government of Canada job board, sent from your own Gmail. No Job Bank account needed.' },
-  workhub: { origins: WORKHUB_ORIGINS, name: 'Recruiter Agent', who: 'recruiters', site: 'the UK government job site', doc: 'CV', blurb: "Emails your tailored CV and cover letter to recruiters advertising on Find a Job, the UK government job site. Sent from your own Gmail, no account needed." },
+  jobbank: { origins: JOBBANK_ORIGINS, name: 'Job Bank Agent', who: 'employers on Job Bank', site: 'Job Bank', doc: 'resume', blurb: 'Emails your resume to Job Bank jobs from your Gmail. No Job Bank account needed.' },
+  workhub: { origins: WORKHUB_ORIGINS, name: 'Recruiter Agent', who: 'recruiters', site: 'the UK government job site', doc: 'CV', blurb: "Emails your tailored CV to recruiters on Find a Job. Sent from your Gmail." },
 };
 async function emailAgentState(key) {
   const perm = await chrome.permissions.contains({ origins: EMAIL_AGENTS[key].origins }).catch(() => false);
@@ -256,7 +256,7 @@ function filterHintHtml(fh) {
   const list = fh.rows.map((r) => `${r.n} ${r.label}`).join(', ');
   return `<div class="card filter-hint-card" style="border:1.5px solid var(--accent, #2563eb)">
     <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">Your settings skipped ${fh.total} jobs${fh.sent ? ' this week' : ''}</h3>
-    <p class="card-hint" style="margin:0 0 12px">${fh.sent ? 'Applications are going out, but your settings are ruling out a lot of jobs.' : 'Nothing has been sent yet.'} Skipped: ${list}. If you would take any of these, allow them and Job-AI checks those jobs again.</p>
+    <p class="card-hint" style="margin:0 0 12px">${fh.sent ? 'Applications are going out, but your settings are ruling out a lot of jobs.' : 'Nothing has been sent yet.'} Skipped: ${list}. Would you take any? Allow them and it checks again.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${fh.rows.map((r) => `<button class="primary fh-fix" data-fix="${r.key}" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">${r.button}</button>`).join('')}<button class="secondary" id="fh-hide" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Keep my settings</button></div></div>`;
 }
 async function widenFilter(key) {
@@ -460,16 +460,16 @@ async function regionSitesPrompt(region, { newOnly = false } = {}) {
   const sites = extraForRegion(region).filter(([k]) => !newOnly || k === emailKey).sort((a, b) => (b[0] === emailKey) - (a[0] === emailKey));
   const rows = [
     ...sites.map(([k, l]) => [k, l, EMAIL_AGENTS[k]
-      ? `${EMAIL_AGENTS[k].blurb} ${gm.gmail ? `Sends from ${gm.email}.` : "You connect Gmail next: Job-AI can only send, it can't read your email."}`
+      ? `${EMAIL_AGENTS[k].blurb} ${gm.gmail ? `Sends from ${gm.email}.` : 'Connect Gmail next. It can send, never read.'}`
       : `Needs your own ${l} account.${k === 'linkedin' ? ' LinkedIn can limit accounts it thinks are automated, so keep your daily limit low.' : ''}`, EMAIL_AGENTS[k] ? on[k] !== false : !!on[k]]),
-    ...(newOnly ? [] : us ? [['federal', 'Federal government jobs', 'Needs a USAJOBS account (you sign in with Login.gov). Job-AI writes the resume, you apply there yourself.', !!settings.wantsFederal]]
+    ...(newOnly ? [] : us ? [['federal', 'Federal government jobs', 'Needs a USAJOBS account. Job-AI writes the resume, you apply.', !!settings.wantsFederal]]
       : ca ? [] : [['nhs', 'NHS jobs', 'Needs a Trac account.', !!settings.wantsNhs]]),
   ];
   const o = document.createElement('div'); o.id = 'region-prompt';
   o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
   o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:520px;width:100%;max-height:86vh;overflow:auto;border-radius:12px;padding:22px 24px">
     <h3 style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">${newOnly ? `New: ${EMAIL_AGENTS[emailKey].name}` : `More job sites in ${us ? 'the USA' : ca ? 'Canada' : 'the UK'}`}</h3>
-    <p style="margin:0 0 14px;color:var(--text-muted,#4a453b);font-size:14px">${newOnly ? '' : "Job-AI applies on employers' own websites for you. "}${newOnly ? `Job-AI can now also email your CV and cover letter to ${EMAIL_AGENTS[emailKey].who}, as well as applying on employers' websites.` : emailKey ? 'It can also apply through these. Tick any you want.' : 'It can also use these if you have an account there. Tick any you want.'}</p>
+    <p style="margin:0 0 14px;color:var(--text-muted,#4a453b);font-size:14px">${newOnly ? '' : "Job-AI applies on employers' own websites for you. "}${newOnly ? `Job-AI can now also email your CV to ${EMAIL_AGENTS[emailKey].who}.` : emailKey ? 'It can also apply through these. Tick any you want.' : 'It can also use these if you have an account there. Tick any you want.'}</p>
     ${rows.map(([k, l, note, c]) => `<label style="display:flex;gap:10px;align-items:flex-start;margin:0 0 12px;cursor:pointer"><input type="checkbox" class="rp-site" value="${k}" ${c ? 'checked' : ''} style="flex:0 0 16px;width:16px;height:16px;min-width:16px;max-width:16px;margin:3px 0 0;padding:0;accent-color:var(--primary,#3b82f6)"><span><strong>${esc(l)}</strong><br><small style="color:var(--text-muted,#4a453b)">${esc(note)}</small></span></label>`).join('')}
     <div id="rp-fed" style="display:none;grid-template-columns:1fr 1fr;gap:0 10px;margin:-4px 0 10px 26px">
       <div class="field" style="margin-bottom:8px"><label for="rp-cit">Are you a U.S. citizen?</label><select id="rp-cit"><option value="">Choose</option><option value="yes" ${F.usCitizen === 'yes' ? 'selected' : ''}>Yes</option><option value="no" ${F.usCitizen === 'no' ? 'selected' : ''}>No</option></select></div>
@@ -706,11 +706,11 @@ $$('#nav .tab, #nav-setup .setup-item').forEach((b) => b.addEventListener('click
   // Section bar on long forms: one word per section, jumps there, underline follows as you scroll.
   const SECTION_WORDS = { 'Fill this in from your CV': 'From your CV', 'About you': 'About you', 'Application answers': 'Answers', 'Security clearance': 'Clearance', 'Equality monitoring': 'Equality',
     'Agent schedule': 'Schedule', 'Extra job sites': 'Extra sites', 'Review before applying': 'Review', 'Select sector': 'Sector', 'NHS search terms': 'Search terms', 'Personal details': 'Personal',
-    'Gaps in employment': 'Gaps', 'Education & qualifications': 'Education', 'Declarations & monitoring': 'Declarations' };
+    'Gaps in employment': 'Gaps', 'Employment history': 'Jobs', 'References': 'References', 'Education & qualifications': 'Education', 'Declarations & monitoring': 'Declarations' };
   const sectionBar = () => {
     if (!['personal', 'search', 'trac-details'].includes(current) || content.querySelector('.sec-bar')) return;
     const cards = [...content.querySelectorAll(':scope > .card, :scope > form > .card, :scope > div > .card')].filter((c) => c.offsetParent);
-    const secs = cards.map((c, i) => { const h = c.querySelector('h3'); const t = h ? h.textContent.trim() : (i === 0 && current === 'search' ? 'Search' : ''); if (!t) return null; return [c, SECTION_WORDS[t] || (/upload/i.test(t) ? 'Upload' : t.length > 16 ? t.slice(0, 14) + '…' : t)]; }).filter(Boolean);
+    const secs = cards.map((c, i) => { const h = c.querySelector('h3'); const t = h ? h.textContent.trim().replace(/\s*\(.*\)\s*$/, '') : (i === 0 && current === 'search' ? 'Search' : ''); if (!t) return null; return [c, SECTION_WORDS[t] || (/upload/i.test(t) ? 'Upload' : t.length > 16 ? t.slice(0, 14) + '…' : t)]; }).filter(Boolean);
     if (secs.length < 3) return;
     const bar = document.createElement('nav'); bar.className = 'sec-bar'; bar.setAttribute('aria-label', 'Sections on this page');
     let lock = null;
@@ -918,8 +918,8 @@ VIEWS.dashboard = async function renderDashboardView() {
     const topMiss = Object.entries(draftMiss).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
     const draftOffer = uk && !submitOffer && needs.length >= 2 && Date.parse(settings.draftOfferHiddenAt || 0) < Date.now() - 2 * 864e5;
     const SUBMIT_HINT = {
-      trac: (on) => on ? 'Complete applications are submitted automatically.' : 'Off: you check each application and press Submit on Trac.',
-      ats: (on) => on ? 'Sends them for you. Any it can\'t send on its own, it skips and moves on to the next job.' : 'Off: each one waits under Ready to send for you to check and submit.',
+      trac: (on) => on ? 'Submits complete applications for you.' : 'Off: you press Submit on Trac.',
+      ats: (on) => on ? 'Sends them for you. Skips any it can\'t finish.' : 'Off: each one waits for you to check.',
     };
     // Which agents "Start applying" runs (tick box on each card, like the app). All ticked by default.
     const enabled = (k) => !settings.enabled || settings.enabled[k] !== false;
@@ -951,9 +951,9 @@ VIEWS.dashboard = async function renderDashboardView() {
     const card = ([key, label, url, signLabel]) => {
       const on = agents[key].running;
       const es = emailState[key];
-      const toggle = EMAIL_AGENTS[key] ? `<div class="agent-submit-toggle" style="display:block"><small>${EMAIL_AGENTS[key].blurb} Job-AI can only send email, it can't read yours.</small>
+      const toggle = EMAIL_AGENTS[key] ? `<div class="agent-submit-toggle" style="display:block"><small>${EMAIL_AGENTS[key].blurb} It can send, never read.</small>
           ${es.perm && es.gmail ? `<div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="color:var(--success, #15803d);font-weight:600">✓ Sends from ${esc(es.email)}</span><button class="welcome-skip-link jb-disconnect" data-key="${key}">Disconnect</button><span class="status-msg" id="jb-st-${key}"></span></div>`
-            : `<div style="margin-top:8px"><button class="btn-connect jb-connect" data-key="${key}">Connect Gmail</button><span class="status-msg" id="jb-st-${key}"></span></div>`}</div>` : key === 'usajobs' ? `<div class="agent-submit-toggle" style="display:block"><small>Writes a 2-page federal resume for each job. You apply on USAJOBS with your own account.</small></div>` : key === 'ats' ? `<div class="agent-submit-toggle" style="display:block">
+            : `<div style="margin-top:8px"><button class="btn-connect jb-connect" data-key="${key}">Connect Gmail</button><span class="status-msg" id="jb-st-${key}"></span></div>`}</div>` : key === 'usajobs' ? `<div class="agent-submit-toggle" style="display:block"><small>Writes a federal resume for each job. You apply on USAJOBS.</small></div>` : key === 'ats' ? `<div class="agent-submit-toggle" style="display:block">
           <strong style="display:block;margin-bottom:6px">Jobs that need a person</strong>
           ${ATS_MODES.map(([v, t, hint]) => `<label style="display:flex;gap:8px;align-items:flex-start;margin:0 0 6px;cursor:pointer;font-weight:400">
             <input type="radio" name="ats-mode" class="ats-mode" value="${v}" ${atsMode === v ? 'checked' : ''} style="width:auto;margin-top:3px">
@@ -983,7 +983,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       <div class="dash-head">
         <div>
           <h2 class="dash-greeting">Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}${name ? ', ' + esc(name) : ''}</h2>
-          <p class="dash-sub">${running && !applied.length ? 'Working on your first application. It usually goes out within a few minutes. Keep this tab open.' : running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Monitor agent activity and track your application progress.'}</p>
+          <p class="dash-sub">${running && !applied.length ? 'Sending your first application. Keep this tab open.' : running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Track your agents and applications.'}</p>
           <div class="region-row"><span class="region-label">Find jobs in:</span>
             <div class="region-switch" role="group" aria-label="Find jobs in">
               <button class="region-opt${uk ? ' active' : ''}" data-region="uk">UK</button>
@@ -1004,11 +1004,11 @@ VIEWS.dashboard = async function renderDashboardView() {
         : trialLeft !== null && trialLeft <= 3 ? `<div class="no-license-banner"><span>Your free trial ends ${trialLeft <= 1 ? 'today' : `in ${trialLeft} days`}.${applied.length ? ` Job-AI has sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you so far.` : ''} Keep your agents applying${uk ? ', first month half price' : ''}.</span><button class="no-license-cta" id="keep-jobai">Subscribe now →</button></div>` : '')
         : license.status === 'setup' ? `<div class="card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
           <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">Job-AI is set up and ready</h3>
-          <p class="card-hint" style="margin:0">Pick a plan and your agents start applying straight away, up to 25 a day.${uk ? ' Your first month is half price.' : ''} Cancel any time.</p></div>
+          <p class="card-hint" style="margin:0">Pick a plan and your agents start straight away. Up to 25 a day.${uk ? ' Your first month is half price.' : ''} Cancel any time.</p></div>
           <button class="primary" id="keep-jobai">Pick a plan</button></div>`
         : ended ? `<div class="card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
           <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${applied.length ? `Job-AI sent ${applied.length} application${applied.length === 1 ? '' : 's'} for you` : 'Your free trial has ended'}</h3>
-          <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan and they start again straight away, up to 25 a day.${uk ? ' Your first month is half price.' : ''}</p></div>
+          <p class="card-hint" style="margin:0">${applied.length ? 'Your free trial has ended, so your agents have stopped.' : 'Your agents have stopped.'} Pick a plan to start again. Up to 25 a day.${uk ? ' Your first month is half price.' : ''}</p></div>
           <button class="primary" id="keep-jobai">Keep Job-AI</button></div>`
         : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. It takes a few minutes.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
@@ -1018,16 +1018,16 @@ VIEWS.dashboard = async function renderDashboardView() {
 
       ${submitOffer ? `<div class="card" style="border:1.5px solid #16a34a">
         <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${ready.length + needs.length} NHS applications are waiting to be submitted</h3>
-        <p class="card-hint" style="margin:0 0 12px">${ready.length ? `${ready.length} ${ready.length === 1 ? 'is' : 'are'} complete on Trac. ` : ''}The employer only gets an application once Submit is pressed. Turn on Submit for me and Job-AI submits these for you, plus every one it finishes from now on.${needs.length ? ` ${needs.length} still need an answer from you: add it once in your NHS details and Job-AI finishes and submits them on its next round.` : ''} Applications that ask about AI use are always left for you.</p>
+        <p class="card-hint" style="margin:0 0 12px">${ready.length ? `${ready.length} ${ready.length === 1 ? 'is' : 'are'} complete on Trac. ` : ''}Employers only get them once Submit is pressed. Turn on Submit for me and Job-AI does it for you.${needs.length ? ` ${needs.length} need an answer from you first.` : ''} Forms asking about AI use are always left for you.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="so-yes" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Submit them for me</button><button class="secondary" id="so-no" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">I'll submit them myself</button></div></div>` : ''}
       ${draftOffer ? `<div class="card draft-offer-card" style="border:1.5px solid #d97706">
         <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${needs.length} NHS applications need one more answer from you</h3>
-        <p class="card-hint" style="margin:0 0 12px">Job-AI filled in everything it could and saved each one as a draft on Trac. ${topMiss.length ? `Most of them still need: <strong>${esc(topMiss.join(', '))}</strong>. ` : ''}${submitOn.trac ? 'Add the missing answers once in your NHS details and Job-AI finishes and submits them all on its next round.' : 'Add the missing answers once in your NHS details and Job-AI finishes them on its next round, then you press Submit.'}</p>
+        <p class="card-hint" style="margin:0 0 12px">Job-AI filled in everything it could and saved each one as a draft on Trac. ${topMiss.length ? `Most of them still need: <strong>${esc(topMiss.join(', '))}</strong>. ` : ''}${submitOn.trac ? 'Add the missing answers once and Job-AI finishes and submits them.' : 'Add the missing answers once and Job-AI finishes them. Then you press Submit.'}</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="do-fix" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Add the missing answers</button><button class="secondary" id="do-show" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Open the first one on Trac</button><button class="secondary" id="do-list" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">See them all</button><button class="welcome-skip-link" id="do-no">Later</button></div></div>` : ''}
       ${filterHintHtml(fh)}
       ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
-        <p class="card-hint" style="margin:0">Press start and Job-AI tailors your CV and sends your first application, usually within a few minutes.</p></div>
+        <p class="card-hint" style="margin:0">Press start. Your first application usually goes out in minutes.</p></div>
         <button class="primary" id="fw-start">▶ Send my first application</button>
       </div>` : ''}
 
@@ -1063,13 +1063,13 @@ VIEWS.dashboard = async function renderDashboardView() {
 
       ${waiting.length ? `<div class="card card-wide nhs-apps-card">
         <h3 style="margin:0 0 4px">Ready to send (${waiting.length})</h3>
-        <p class="nhs-apps-hint">These need you for one step. Most are already filled in: press Open, do that step, then press Submit.</p>
+        <p class="nhs-apps-hint">Each needs one step from you. Open it, do the step, press Submit.</p>
         ${waiting.map((a) => { const why = String(a.reason || '').split(' Ready for you:')[0]; return `<div class="nhs-app"><div class="nhs-app-main"><div class="nhs-app-title">${esc(a.title)}</div><div class="nhs-app-meta">${esc(a.company || '')}</div>${why && !/^(Ready for you:|Filled in\.)/.test(why) ? `<div class="nhs-app-missing">${esc(why)}</div>` : ''}</div><span class="badge badge-success">Ready to send</span><div class="nhs-app-actions"><button class="primary fill-open" data-id="${esc(a.jobId)}" data-label="${a.heldTabId ? 'Open' : 'Fill and open'}">${a.heldTabId ? 'Open' : 'Fill and open'}</button><button class="secondary mark-sent" data-id="${esc(a.jobId)}">I sent it</button><button class="secondary skip-send" data-id="${esc(a.jobId)}">Skip</button></div></div>`; }).join('')}
       </div>` : ''}
 
       ${fedReady.length ? `<div class="card card-wide nhs-apps-card">
         <h3 style="margin:0 0 4px">Federal jobs ready (${fedReady.length})</h3>
-        <p class="nhs-apps-hint">Each has a federal resume made for it. Download the resume, press Apply on USAJOBS, upload it there and answer the questions. Job-AI never applies for you here.</p>
+        <p class="nhs-apps-hint">Each has its own federal resume. Download it, apply on USAJOBS and answer the questions there.</p>
         ${fedReady.map((a) => `<div class="nhs-app"><div class="nhs-app-main"><div class="nhs-app-title">${esc(a.title)}</div><div class="nhs-app-meta">${esc([a.company, a.location, a.grade, a.pay, a.closes ? 'closes ' + new Date(a.closes + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''].filter(Boolean).join(' · '))}</div>${/^Before you upload|clearance/.test(a.reason || '') ? `<div class="nhs-app-missing">${esc(String(a.reason).replace(/^Federal resume ready\. Apply on USAJOBS\.\s*/, ''))}</div>` : ''}</div><span class="badge ${(a.cvScore || 0) >= 60 ? 'badge-success' : 'badge-muted'}">${(a.cvScore || 0) >= 60 ? 'Strong match' : 'Worth a look'}</span><div class="nhs-app-actions"><button class="secondary fed-help" data-id="${esc(a.jobId)}">Help me answer</button><button class="secondary fed-dl" data-id="${esc(a.jobId)}">Download resume</button><button class="primary fed-open" data-url="${esc(safeUrl(a.url) || '')}">Apply on USAJOBS</button><button class="secondary fed-done" data-id="${esc(a.jobId)}">I applied</button><button class="secondary skip-send" data-id="${esc(a.jobId)}">Skip</button></div></div>`).join('')}
       </div>` : ''}
 
@@ -1188,7 +1188,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     }));
     $$('.auto').forEach((el) => el.addEventListener('change', async (e) => {
       const on = e.target.checked; const key = e.target.dataset.bot;
-      if (on && key === 'trac' && !confirm('Let the NHS agent submit applications for you?\n\nIt only submits when every section on Trac is complete, and never forms that ask about AI use.')) { e.target.checked = false; return; }
+      if (on && key === 'trac' && !confirm('Let the NHS agent submit for you?\n\nOnly complete forms, and never ones that ask about AI use.')) { e.target.checked = false; return; }
       const s = await store.get('settings');
       s.autoSubmit = { ...(s.autoSubmit || {}), [key]: on };
       await store.set('settings', s); renderDashboard();
@@ -1271,7 +1271,7 @@ function recentHtml(all, clearedAt) {
       <td><span class="badge ${c}" title="${esc(j.reason || '')}">${esc(l)}</span></td><td class="cv-name-cell">${esc(j.cvName || '-')}</td>
       <td>${esc(j.appliedAt || j.updatedAt ? new Date(j.appliedAt || j.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '')}</td>
       <td class="row-actions">${docButtons(j)}</td></tr>`; }).join('')}</tbody></table></div>`
-    : '<div class="empty-state">No applications yet. Each one shows here with the CV and cover letter that were sent.</div>'}</div>`;
+    : '<div class="empty-state">No applications yet. Each one shows here with its CV and cover letter.</div>'}</div>`;
 }
 // "Help me answer" panel for a federal job's questionnaire (same as the desktop app).
 // The questionnaire preview for a federal job: its own link, or built from the USA Staffing
@@ -1297,7 +1297,7 @@ function federalHelpPanel({ title, previewUrl, openUrl, suggest, load }) {
       <textarea id="fh-text" rows="7" placeholder="Paste the questionnaire questions here" style="width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:10px 12px;border:1px solid var(--border-strong,#d8d2c4);border-radius:8px;resize:vertical"></textarea>
       <div style="display:flex;gap:10px;align-items:center;margin:10px 0 4px"><button class="primary" id="fh-go" style="margin:0">Suggest answers</button><span id="fh-st" style="font-size:13px;color:var(--text-muted,#4a453b)"></span><a href="#" id="fh-show" style="display:none;font-size:13px;margin-left:auto">See the questions</a></div>
       <div id="fh-out"></div>
-      <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:14px 0 0">Check and edit every answer before you paste it in. You certify your answers to a federal agency, so only send what is true. Job-AI never fills in or submits the questionnaire.</p>
+      <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:14px 0 0">Check every answer before you paste it in. You certify these to a federal agency, so only send what is true.</p>
     </div></div>`;
   document.body.appendChild(o);
   const $o = (s) => o.querySelector(s);
@@ -1500,20 +1500,20 @@ VIEWS.analytics = async function renderAnalytics() {
 
 // ── Help & FAQs (the app's, for the extension) ──
 const FAQS = [
-  ['How do I get started?', 'Open Setup (top right) and fill in Personal Details, CVs, Search Preferences and License. Set up on your phone? Then it is already done: type the 6-digit code on the License page. Next, press Start applying. The "How to start applying" checklist on the Dashboard shows anything still missing.'],
+  ['How do I get started?', 'Open Setup (top right) and fill in Personal details, CVs, Search preferences and License. Set up on your phone? Just type your 6-digit code on the License page. Then press Start applying.'],
   ['Where does Job-AI apply?', 'On employers\' own career websites, through the Company Sites agent. In the UK the NHS (Trac) agent also applies to NHS jobs. Each has its own agent card on the Dashboard.'],
-  ['Can Job-AI tailor my CV for a job I found myself?', 'Yes. Open the Tailor tab and paste the job advert, or a link to it. Job-AI rewrites your CV around what the advert asks for and writes a cover letter, using only what is really on your CV. Download them and apply, then press "I applied" to add the job to your Tracker. You can tailor 3 on a free trial and 15 a week on a plan.'],
+  ['Can Job-AI tailor my CV for a job I found myself?', 'Yes. Paste the advert, or a link, into the Tailor tab. You get a tailored CV and cover letter using only what is on your CV. Apply, then press "I applied" to track it. 3 on a free trial, 15 a week on a plan.'],
   ['Do I need job site accounts?', 'No. Company Sites applies straight on each employer\'s website, so there is nothing to sign in to. The only sign in is NHS Trac, in the UK, if you use the NHS agent.'],
-  ['What do the agents do?', 'Each agent finds jobs that match your job titles, skips jobs that do not fit, tailors your CV and cover letter to each job that does, and applies. They work in their own minimised Chrome windows, so leave those windows alone and keep this Job-AI tab open.'],
-  ['Why are some jobs showing as skipped?', 'Jobs are skipped when they do not fit what you asked for: the wrong work type or level, below your salary, an external application site, or a CV match under 45% (or under your own minimum if you set one). The Activity tab and the Tracker show the reason for each one.'],
+  ['What do the agents do?', 'Each agent finds matching jobs, skips poor fits, tailors your CV and applies. They work in their own minimised Chrome windows, so leave those alone and keep this tab open.'],
+  ['Why are some jobs showing as skipped?', 'When a job does not fit: wrong work type or level, under your salary, an outside application site, or a weak CV match. The Tracker shows the reason for each.'],
   ['The agent says "Not signed in". What do I do?', 'Your session for that site has ended. Click the Sign in button on that agent card, sign in, and the agent carries on by itself.'],
   ['How do I add more CVs?', 'Open Setup, then CVs, and use "Add another CV". With more than one, the agents use the best fit for each job.'],
-  ['What is the minimum match score?', 'How closely your CV must match a job before Job-AI applies. Leave it empty (Any) and it applies to every job that fits your CV, like the desktop app. Set a number in Search Preferences to be pickier.'],
-  ['The agents are running but no jobs are being found. Why?', 'Every matching job may already have been handled. Add more job titles in Search Preferences, widen the work types, or allow older job postings.'],
-  ['Can Job-AI apply on Reed, LinkedIn or other job sites?', 'Yes, if you have an account there. Open Search Preferences and tick the sites under Extra job sites (Reed and LinkedIn in the UK, LinkedIn, Dice and Wellfound in the USA). Each one then gets an agent card on the Dashboard: press its Sign in button, sign in as normal in this Chrome, and it applies through your account. LinkedIn can limit accounts it thinks are automated, so keep your daily limit low there.'],
-  ['Can I check each application before it is sent?', 'Yes. Turn on "Review before applying" in Search Preferences. Each tailored CV and cover letter then waits on the Dashboard for you to approve or skip.'],
-  ['Can I control Job-AI from my phone?', 'Yes. Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.'],
-  ['Is my data stored online?', 'Your details, CVs and job list stay in this Chrome on this device. To let you control Job-AI from your phone, a short summary (job titles, companies, stages) is kept on our server. Your passwords are never seen or stored.'],
+  ['What is the minimum match score?', 'How closely your CV must match before it applies. Leave it on Any, or set a number in Search preferences to be pickier.'],
+  ['The agents are running but no jobs are being found. Why?', 'It may have handled every match. Add more job titles, widen work types or allow older postings.'],
+  ['Can Job-AI apply on Reed, LinkedIn or other job sites?', 'Yes, if you have an account. Tick the site under Extra job sites in Search preferences, then press Sign in on its agent card. Keep the LinkedIn daily limit low, as it can limit automated accounts.'],
+  ['Can I check each application before it is sent?', 'Yes. Turn on "Review before applying" in Search preferences. Each one then waits for you to approve or skip.'],
+  ['Can I control Job-AI from my phone?', 'Yes. Open tryjobai.com/app on your phone to control your agents and get a ping for each application.'],
+  ['Is my data stored online?', 'Your details, CVs and jobs stay in this Chrome. For phone control, a short summary (job titles, companies, stages) is kept on our server. We never see your passwords.'],
   ['How do I cancel or manage my subscription?', 'Open the License page and click "Manage or cancel subscription". That opens Stripe\'s secure page.'],
 ];
 VIEWS.help = async function renderHelp() {
@@ -1651,7 +1651,7 @@ const tailorLabel = (q, word) => !q.active ? '' : q.period === 'trial' ? `${q.le
 // Shown when the allowance is used up: trial = subscribe; plan = more on Monday.
 function tailorLimitCard(q, word) {
   if (q.period === 'trial') return `<div class="card"><h3>You've used your ${q.cap} free tailored ${word}s</h3>
-    <p style="margin:0 0 14px">Subscribe to keep going: tailor ${TAILOR_LIMIT.active} ${word}s a week, and your agents keep applying for you every day.</p>
+    <p style="margin:0 0 14px">Subscribe to keep going: ${TAILOR_LIMIT.active} tailored ${word}s a week, plus daily applications.</p>
     <button class="primary" id="tl-upgrade">Subscribe</button></div>`;
   return `<div class="card"><h3>You've used your ${q.cap} for this week</h3>
     <p style="margin:0">You get ${q.cap} more on Monday. Your agents keep applying for you in the meantime.</p></div>`;
@@ -1752,7 +1752,7 @@ async function tailorNewPrompt() {
   o.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:24px';
   o.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#1c1b17);max-width:480px;width:100%;border-radius:12px;padding:22px 24px">
     <h3 style="margin:0 0 6px;font-size:20px;text-transform:none;letter-spacing:-0.01em">New: Tailor any job</h3>
-    <p style="margin:0 0 16px;color:var(--text-muted,#4a453b);font-size:14px">Found a job yourself? Paste the advert into the new Tailor tab. Job-AI rewrites your ${word} for it and writes a cover letter, ready to send.</p>
+    <p style="margin:0 0 16px;color:var(--text-muted,#4a453b);font-size:14px">Found a job yourself? Paste the advert into the Tailor tab for a tailored ${word} and cover letter.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="secondary" id="tp-no" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Not now</button><button class="primary" id="tp-yes" style="margin:0;padding:10px 18px;line-height:1.2;height:auto">Try it</button></div></div>`;
   document.body.appendChild(o);
   const seen = async () => { await store.patch('settings', { featureSeen: { ...(((await store.get('settings')) || {}).featureSeen || {}), tailor: true } }); o.remove(); };
@@ -1796,7 +1796,7 @@ VIEWS.personal = async function renderPersonal() {
       ${f('salaryExpectation', 'Minimum salary (£ a year)', 'text', 'e.g. 28000')}
     </div>
     <div class="tracd-sectors" style="margin-top:12px">${[['requiresSponsorship', 'I need visa sponsorship'], ['seekSponsorship', 'Only apply to jobs that offer sponsorship'], ['willingToRelocate', 'Willing to relocate'], ['openToLowerLevel', 'Open to lower-level roles'], ['drivingLicence', 'I have a driving licence']].map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="p-flag" data-k="${k}" ${P[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>
-    <div class="card"><h3>Security clearance</h3><p class="muted">Some UK employers, often government suppliers, ask these. Left blank, those jobs are skipped.</p><div class="tracd-grid">
+    <div class="card"><h3>Security clearance</h3><p class="muted">Some employers ask these. Left blank, those jobs are skipped.</p><div class="tracd-grid">
       ${CLEARANCE.map(([k, l, o]) => `<div class="field"><label>${l}</label><select class="p-sel" data-k="${k}">${o.map(([v, t]) => `<option value="${v}" ${(P[k] || '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`).join('')}
     </div></div>
     <div class="card"><h3>Equality monitoring</h3><p class="muted">Leave as "Prefer not to say" if you'd rather not share.</p><div class="tracd-grid">
@@ -1821,7 +1821,7 @@ VIEWS.personal = async function renderPersonal() {
 VIEWS.cvs = async function renderCVs() {
   const cvs = await getCvs();
   content.innerHTML = `
-    <div class="page-header"><h2>Your CVs</h2><p>Your CVs are read on this device and never uploaded. Add more than one and the agents use the best fit for each job.</p></div>
+    <div class="page-header"><h2>Your CVs</h2><p>Read on this device, never uploaded. Add a few and the agents pick the best fit.</p></div>
     ${cvs.map((cv, i) => `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
         <div><div class="cv-card-title">${esc(cv.label || 'CV')}</div><div class="cv-card-file">${esc(cv.name || '')}</div></div>
@@ -1889,9 +1889,9 @@ VIEWS.search = async function renderSearch() {
       <div class="field"><label>Active days</label><div class="tracd-sectors">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<label class="sector-chip"><input type="checkbox" class="s-day" value="${d}" ${(sched.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']).includes(d) ? 'checked' : ''}><span>${d}</span></label>`).join('')}</div></div>
     </div>
     <div class="card"><h3>Extra job sites</h3>
-      <p class="muted" style="margin-top:0">Job-AI already applies on employers' own websites with no accounts. If you also want it to apply on these sites, tick them below. Each one <strong>needs your own account on that site</strong>, signed in in this Chrome. Job-AI never sees your password.</p>
+      <p class="muted" style="margin-top:0">Want it on these sites too? Tick them. Each <strong>needs your own account</strong>, signed in in this Chrome. We never see your password.</p>
       <div class="tracd-sectors">${extraForRegion(regionOf(settings)).map(([k, l]) => `<label class="sector-chip"><input type="checkbox" class="s-extra" value="${k}" ${(settings.extraSites || {})[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}${regionOf(settings) === 'uk' ? `<label class="sector-chip"><input type="checkbox" id="s-nhs" ${nhsOn ? 'checked' : ''}><span>NHS jobs (Trac)</span></label>` : ''}</div>
-      <p class="muted" style="margin:8px 0 0;font-size:13px">Once ticked, the site gets its own agent card on the Dashboard with a Sign in button. ${extraForRegion(regionOf(settings)).some(([k]) => k === 'linkedin') ? 'LinkedIn can limit accounts it thinks are automated, so use it at your own risk and keep your daily limit low.' : ''}</p>
+      <p class="muted" style="margin:8px 0 0;font-size:13px">Each gets an agent card with a Sign in button. ${extraForRegion(regionOf(settings)).some(([k]) => k === 'linkedin') ? 'LinkedIn can limit automated accounts, so keep its daily limit low.' : ''}</p>
     </div>
     <div class="card"><h3>Review before applying</h3>
       <label class="checkbox-label" style="align-items:flex-start"><input type="checkbox" id="s-review" ${settings.reviewBeforeApply ? 'checked' : ''}><span>Let me review each tailored CV and cover letter before it applies<br><small class="muted">Each one waits on the Dashboard for you to approve or skip.</small></span></label>
@@ -1966,7 +1966,7 @@ VIEWS.earn = async function renderEarn() {
       <button class="primary" id="mv-save">Save</button> <span class="status-msg" id="mv-st"></span>
     </div>
     <div class="card"><h3>What it found (last 30 days)</h3>
-      ${cfg.MOVE.on ? `<p style="margin-top:0"><strong>${usedN} of ${cfg.MOVE.monthly}</strong> applications used this month.</p>` : '<p class="muted" style="margin-top:0">Turn on Only move for more money and this shows what it applied to, and what it skipped for paying too little.</p>'}
+      ${cfg.MOVE.on ? `<p style="margin-top:0"><strong>${usedN} of ${cfg.MOVE.monthly}</strong> applications used this month.</p>` : '<p class="muted" style="margin-top:0">Turn on Only move for more money to see what it applied to and skipped.</p>'}
       ${held.length ? `<p class="muted">Skipped: ${count(/^Pays under/)} paid too little, ${count(/^No salary shown/)} showed no salary, ${count(/^Your current employer/)} at your employer.</p>` : ''}
       ${sent.length ? `<div style="font-weight:600;margin:10px 0 4px">Applications sent</div>${sent.slice(0, 6).map((j) => `<div style="padding:8px 0;border-top:1px solid var(--border,#e5e2da);font-size:14px"><strong>${esc(String(j.title || '').split('\n')[0])}</strong> <span class="muted">${esc(j.company || '')}, ${esc(String(j.appliedAt || '').slice(0, 10))}</span>${(() => { const r = cfg.movePay(j); return r ? ` <span style="color:#15803d;font-weight:600">${money(r.pay)}, ${r.pay_pct}% more</span>` : ''; })()}</div>`).join('')}` : ''}
     </div>`;
@@ -2018,7 +2018,7 @@ VIEWS.license = async function renderLicense() {
     <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence.' : 'Set up Job-AI, or add the key from your Job-AI welcome email.'}</p></div>
     ${active ? '' : `<div class="card" id="trial-card">
       <h3 style="margin:0 0 6px">Set up Job-AI</h3>
-      <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. At the end you get a 6-digit code to type here.</p>
+      <p class="muted" style="margin:0">Takes 2 minutes. You get a 6-digit code to type here.</p>
       <div class="ext-inline" style="margin-top:12px"><button class="primary" id="tr-setup">Set up Job-AI (2 minutes)</button></div>
       <div class="field" style="max-width:220px;margin-top:16px"><label>Got your code? Type it here</label><input id="tr-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
       <div class="ext-inline"><button class="secondary" id="tr-go">Connect</button><span class="status-msg" id="tr-st"></span></div>
@@ -2027,10 +2027,10 @@ VIEWS.license = async function renderLicense() {
       <div class="ext-inline"><button class="secondary" id="tr-send">Send code</button><span class="status-msg" id="tr-mail-st"></span></div></div>
     </div>`}
     ${active && license.status === 'trial' ? `<div class="card"><h3 style="margin:0 0 6px">Subscribe</h3>
-      <p class="muted" style="margin:0 0 12px">No need to wait for your trial to end. Pick a plan and your key, settings and CV stay the same.${half}</p>
+      <p class="muted" style="margin:0 0 12px">Pick a plan any time. Your settings and CV stay the same.${half}</p>
       <button class="primary" id="lic-keep">Subscribe now</button></div>`
       : !active && license.key && license.status !== 'device_trial_used' ? `<div class="card"><h3 style="margin:0 0 6px">Keep Job-AI</h3>
-      <p class="muted" style="margin:0 0 12px">Your access has ended. Pick a plan and your agents start again with the same key, settings and CV.${half}</p>
+      <p class="muted" style="margin:0 0 12px">Your access has ended. Pick a plan to start again, with everything kept.${half}</p>
       <button class="primary" id="lic-keep">Choose a plan</button></div>` : ''}
     <div class="card">${active ? '' : '<h3 style="margin:0 0 6px">Already have a key?</h3>'}
       ${license.key ? `<div class="stat-row"><span class="stat-label">Key</span><span class="stat-value">•••• ${esc(license.key.slice(-4))}</span></div>
@@ -2044,7 +2044,7 @@ VIEWS.license = async function renderLicense() {
       <div class="ext-inline"><button class="secondary" id="manage-sub">Manage or cancel subscription →</button><span class="status-msg" id="manage-st"></span></div></div>` : ''}
     ${globalThis.__jobaiClient === 'android' || !active ? '' : `<div class="card" id="phone-card">
       <h3 style="margin:0 0 6px">Set up from my phone</h3>
-      <p class="muted">Set up on your phone at tryjobai.com/start? Type the 6-digit code it shows. Your licence, CV and details come straight in.</p>
+      <p class="muted">Set up at tryjobai.com/start? Type your 6-digit code and everything comes straight in.</p>
       <div class="field" style="max-width:220px;margin-top:12px"><label>Code</label><input id="ph-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
       <div class="ext-inline"><button class="primary" id="ph-go">Bring in my setup</button><span class="status-msg" id="ph-st"></span></div>
       <p class="muted" style="margin-top:12px">No code? <a class="tracker-link" href="#" id="ph-mail-show">Email me a code</a></p>
@@ -2244,9 +2244,9 @@ VIEWS['federal-details'] = async function renderFederal() {
   const { settings } = await loadConfig();
   const f = settings.federal || {};
   content.innerHTML = `
-    <div class="page-header"><h2>Federal jobs details</h2><p>Federal government jobs are on USAJOBS. Job-AI finds the ones that fit you and writes a 2-page federal resume for each. Saved on this device only.</p></div>
+    <div class="page-header"><h2>Federal jobs details</h2><p>Job-AI finds USAJOBS jobs that fit and writes a federal resume for each. Saved on this device only.</p></div>
     <div class="card"><h3>Your USAJOBS account</h3>
-      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">You need a USAJOBS account to apply. It is free and you sign in with Login.gov. You press Submit on USAJOBS yourself: Job-AI never applies for you there.</p>
+      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">You need a free USAJOBS account (Login.gov). You press Submit there yourself.</p>
       <label class="checkbox-label" style="margin:0 0 10px"><input type="checkbox" id="fd-on" ${settings.wantsFederal ? 'checked' : ''}><span>Apply for federal government jobs</span></label>
       <button class="secondary" id="fd-acct">Create a USAJOBS account</button></div>
     <div class="card"><h3>Questions for your federal resume</h3>
@@ -2267,11 +2267,11 @@ VIEWS['trac-details'] = async function renderTrac() {
   const { trac } = await loadConfig();
   const d = trac || {};
   content.innerHTML = `
-    <div class="page-header"><h2>NHS / Trac details</h2><p>Fill this in once. The NHS agent uses it for every Trac application. Saved on this device only.</p></div>
+    <div class="page-header"><h2>NHS / Trac details</h2><p>Fill this in once for every Trac application. Saved on this device only.</p></div>
 
     <div class="card" style="border:1px dashed var(--primary);background:var(--primary-soft)">
       <h3 style="margin-top:0">Already have a completed Trac form? Upload it</h3>
-      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">Upload a Trac application PDF you filled in before. We read every answer and fill this page for you, so there is no typing.</p>
+      <p style="color:var(--text-muted);font-size:13px;margin:2px 0 12px">Upload an old Trac application PDF and we fill this page for you.</p>
       <div class="ext-inline"><input type="file" id="imp" accept=".pdf" hidden><button class="primary" id="imp-pick">Upload completed Trac PDF</button><span class="status-msg" id="imp-st"></span></div></div>
 
     <div class="card"><h3>Select sector</h3>
@@ -2338,24 +2338,24 @@ VIEWS['trac-details'] = async function renderTrac() {
 
 // ── Welcome + setup tour (same flow as the app, first open only) ─────────────
 const TOUR_STEPS_SETUP = [
-  { view: 'cvs', title: 'Step 1: Upload your CV', tip: 'Start here. We read your CV and fill in your name, contact details, experience and the job titles to search for. Upload it as a Word document (.docx) for the best results. PDF also works. Before each application, the AI rewrites your summary and bullet points to match that specific job.', action: 'Click "Add CV" and choose your CV. It is read on this device and never uploaded.' },
-  { view: 'personal', title: 'Step 2: Check your details', tip: 'Your name, email, phone, location and right to work status are used to fill in application forms automatically. The more complete this page is, the fewer forms the agents leave blank.', action: 'If you uploaded your CV, most of this is already filled in. Check it, complete anything missing and click Save.' },
-  { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want to apply for, for example "IT Support Analyst". The agents use these terms to find jobs on company career sites. Have a Reed or LinkedIn account? You can also tick it under Extra job sites.', action: 'Add at least one job title, set your work type, then click Save.' },
-  { view: 'license', title: 'Step 4: Activate your license', tip: 'Enter the license key from your welcome email. The AI that tailors your CV runs on our cloud, so there is nothing extra to install.', action: 'Paste your license key into the box and click Activate.' },
-  { view: 'dashboard', title: 'Step 5: Your agents', tip: 'The Company Sites agent finds jobs on employers\' own career pages and applies there directly, so there are no job site accounts to sign in to.', action: 'Leave Company Sites ticked. In the UK you also see the NHS (Trac) agent: keep it ticked if you want NHS jobs.' },
-  { view: 'tailor', title: 'Found a job yourself? Tailor it', tip: 'Paste any job advert, or a link to it, into the Tailor tab. Job-AI rewrites your CV around what that advert asks for and writes a cover letter, using only what is really on your CV.', action: 'Download the CV, copy the letter and apply. Then press "I applied" to add it to your Tracker.' },
-  { view: 'earn', title: 'Earn more: check your pay', tip: 'See what jobs like yours pay near you right now. Happy where you are? Turn on "Only move for more money" and Job-AI only applies to a few jobs a month that pay well above your salary.', action: 'Add your job title and salary, then press Check my pay.' },
-  { view: 'dashboard', title: 'All set: start applying', tip: 'Click Start applying and each agent opens its own minimised Chrome window and works inside it: searching, tailoring your CV and applying to matching jobs.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
-  { view: 'trac-details', title: 'NHS jobs: the Trac Agent', tip: 'NHS jobs use a separate system called Trac with much longer forms, so the NHS agent has its own page: employment history, references, education and the monitoring questions.', action: 'Open "NHS / Trac details" and fill it in once, or click "Upload completed Trac PDF" to fill it from an old application. Then sign in to Trac with the button on the NHS agent card.' },
+  { view: 'cvs', title: 'Step 1: Upload your CV', tip: 'Start here. We read your CV and fill in your details and job titles. Word (.docx) works best, PDF works too.', action: 'Click "Add CV" and choose your CV. It is read on this device and never uploaded.' },
+  { view: 'personal', title: 'Step 2: Check your details', tip: 'Used to fill in application forms. The more you complete, the fewer forms get skipped.', action: 'Most of it is filled in from your CV. Check it and click Save.' },
+  { view: 'search', title: 'Step 3: Search preferences', tip: 'Add the job titles you want, like "IT Support Analyst". Have a Reed or LinkedIn account? Tick it under Extra job sites.', action: 'Add at least one job title, set your work type, then click Save.' },
+  { view: 'license', title: 'Step 4: Activate your license', tip: 'Enter the license key from your welcome email. Nothing else to install.', action: 'Paste your license key into the box and click Activate.' },
+  { view: 'dashboard', title: 'Step 5: Your agents', tip: 'The Company Sites agent applies on employers\' own career pages. No accounts needed.', action: 'Leave Company Sites ticked. Want NHS jobs? Keep the NHS (Trac) agent ticked too.' },
+  { view: 'tailor', title: 'Found a job yourself? Tailor it', tip: 'Paste any advert, or a link, into Tailor. You get a tailored CV and cover letter, using only what is on your CV.', action: 'Download the CV, copy the letter and apply. Then press "I applied" to add it to your Tracker.' },
+  { view: 'earn', title: 'Earn more: check your pay', tip: 'See what jobs like yours pay near you. Happy where you are? Turn on "Only move for more money".', action: 'Add your job title and salary, then press Check my pay.' },
+  { view: 'dashboard', title: 'All set: start applying', tip: 'Press Start applying. Each agent works in its own minimised Chrome window.', action: 'Leave those windows alone and keep this tab open. Closing it stops the agents.' },
+  { view: 'trac-details', title: 'NHS jobs: the Trac Agent', tip: 'NHS jobs use Trac, which has longer forms, so the NHS agent has its own page.', action: 'Fill in "NHS / Trac details" once, or upload an old Trac PDF. Then sign in to Trac from the NHS agent card.' },
 ];
 // After a phone setup the pages are already filled in, so this tour is about using Job-AI.
 const USE_TOUR = (nhs) => [
-  { view: 'dashboard', title: 'Start applying', tip: 'The Company Sites agent finds jobs on employers\' own websites, tailors your CV to each one and applies there. There are no job site accounts to sign in to. Press Start applying and it works in its own minimised Chrome window.', action: 'Leave those windows alone and keep this Job-AI tab open. It is pinned so you do not close it by mistake. Closing it stops the agents.' },
-  { view: 'tracker', title: 'See every application', tip: 'The Tracker lists every job your agents found and what happened to it, with the reason for anything they skipped.', action: 'Check it any time. Anything that needs you shows at the top of the Dashboard.' },
-  { view: 'tailor', title: 'Found a job yourself? Tailor it', tip: 'Paste any job advert, or a link to it, into the Tailor tab. Job-AI rewrites your CV around what that advert asks for and writes a cover letter, using only what is really on your CV.', action: 'Download the CV, copy the letter and apply. Then press "I applied" to add it to your Tracker.' },
-  { view: 'earn', title: 'Earn more: check your pay', tip: 'See what jobs like yours pay near you right now. Happy where you are? Turn on "Only move for more money" and Job-AI only applies to a few jobs a month that pay well above your salary.', action: 'Add your job title and salary, then press Check my pay.' },
-  ...(nhs ? [{ view: 'trac-details', title: 'NHS jobs', tip: 'NHS applications go through Trac. We filled in your jobs and qualifications from your CV. Trac forms also ask for your address, referees and a few declarations.', action: 'Check this page, add anything missing and click Save. Then sign in to Trac from the NHS agent card. Finished forms wait as "Ready to submit" unless you turn on Submit for me.' }] : []),
-  { view: 'dashboard', title: 'Control it from your phone', tip: 'Open tryjobai.com/app on your phone to start and stop your agents, get a notification for each application, submit NHS forms and change your job search.', action: 'On iPhone, add it to your Home Screen to get notifications. Keep this computer on and Chrome open while the agents work.' },
+  { view: 'dashboard', title: 'Start applying', tip: 'The Company Sites agent applies on employers\' own websites with a tailored CV. No accounts needed. It works in its own minimised Chrome window.', action: 'Leave those windows alone and keep this tab open. Closing it stops the agents.' },
+  { view: 'tracker', title: 'See every application', tip: 'Every job your agents found, and why any were skipped.', action: 'Check it any time. Anything that needs you shows at the top of the Dashboard.' },
+  { view: 'tailor', title: 'Found a job yourself? Tailor it', tip: 'Paste any advert, or a link, into Tailor. You get a tailored CV and cover letter, using only what is on your CV.', action: 'Download the CV, copy the letter and apply. Then press "I applied" to add it to your Tracker.' },
+  { view: 'earn', title: 'Earn more: check your pay', tip: 'See what jobs like yours pay near you. Happy where you are? Turn on "Only move for more money".', action: 'Add your job title and salary, then press Check my pay.' },
+  ...(nhs ? [{ view: 'trac-details', title: 'NHS jobs', tip: 'We filled in your jobs and qualifications from your CV. Trac also asks for your address, referees and a few declarations.', action: 'Check it, add anything missing and click Save. Then sign in to Trac from the NHS agent card.' }] : []),
+  { view: 'dashboard', title: 'Control it from your phone', tip: 'Open tryjobai.com/app on your phone to control your agents and get a ping for each application.', action: 'On iPhone, add it to your Home Screen for notifications. Keep this computer on while agents work.' },
 ];
 function startTour(steps = TOUR_STEPS_SETUP, onDone = null) {
   // No NHS page in the tour for people who didn't ask for NHS jobs.
@@ -2438,7 +2438,7 @@ async function initOnboarding() {
           ${CLEARANCE.map(([k, l, o]) => `<div class="field wc-clear" style="margin-bottom:10px${k === 'ukResidence' ? ';grid-column:1 / -1' : ''}"><label for="wc-${k}">${l}</label><select id="wc-${k}">${o.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></div>`).join('')}
         </div>
         <p class="wc-clear" style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:-4px 0 10px">Security clearance questions some UK employers ask. Leave as Not set to skip those jobs.</p>
-        <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:0 0 10px">Employers' forms ask for these. With them filled in, Job-AI can send your applications without stopping to ask you.</p>
+        <p style="font-size:12.5px;color:var(--text-muted,#4a453b);margin:0 0 10px">Employers ask for these. Fill them in and nothing stops to ask you.</p>
         <div class="field" style="margin-bottom:8px"><label for="wc-titles">Job titles to apply for, separated by commas</label><textarea id="wc-titles" rows="3" style="width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--border-strong,var(--border));border-radius:8px;background:var(--surface,#fff);color:var(--text);resize:vertical"></textarea></div>
         <div class="field" style="margin-bottom:10px"><label>Where you want to work</label><div class="tracd-sectors">${[['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site']].map(([v, l]) => `<label class="sector-chip"><input type="checkbox" class="wc-wt" value="${v}"><span>${l}</span></label>`).join('')}</div></div>        <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:4px 0 14px;cursor:pointer"><input type="checkbox" id="wc-sponsor" style="width:16px;height:16px;margin:0"> <span id="wc-sponsor-l">I need visa sponsorship to work in the UK</span></label>
         <label style="font-size:13.5px;display:flex;gap:8px;align-items:center;margin:-8px 0 14px;cursor:pointer"><input type="checkbox" id="wc-licence" style="width:16px;height:16px;margin:0"> <span>I have a full driving licence</span></label>
@@ -2544,7 +2544,7 @@ async function initOnboarding() {
         $('#wc-nhssub-row').style.display = r === 'uk' && $('#wc-nhs').checked ? 'flex' : 'none';
         $('#wc-mail-row').style.display = mailKeyOf(r) ? 'flex' : 'none';
         $('#wc-mail').checked = mailOn(r);
-        $('#wc-mail-l').textContent = ca ? 'Also apply by email to Job Bank jobs, sent from my Gmail (Job-AI can only send, never read)' : 'Also email my CV to recruiters (Recruiter Agent), sent from my Gmail (Job-AI can only send, never read)';
+        $('#wc-mail-l').textContent = ca ? 'Also apply to Job Bank jobs by email from my Gmail' : 'Also email my CV to recruiters from my Gmail';
         $('#wc-fed-row').style.display = us ? 'flex' : 'none'; fedQ();
         $('#wc-state-row').style.display = us ? '' : 'none';
         $('#wc-prov-row').style.display = ca ? '' : 'none';
@@ -2834,7 +2834,7 @@ async function remotePost(path, body, signal) {
   function addHint(text) { const el = document.createElement('div'); el.className = 'asst-hint'; el.textContent = text; log.appendChild(el); log.scrollTop = log.scrollHeight; }
   function openPanel() {
     panel.classList.add('open'); panel.setAttribute('aria-hidden', 'false'); fab.classList.add('hidden');
-    if (!greeted) { greeted = true; addHint('Hi! I can help you use Job-AI: why a job was skipped, search terms, CVs, limits and more. Ask me anything.'); }
+    if (!greeted) { greeted = true; addHint('Hi! Ask me anything about Job-AI: skipped jobs, search terms, CVs, limits.'); }
     setTimeout(() => input.focus(), 50);
   }
   function closePanel() { panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true'); fab.classList.remove('hidden'); }
