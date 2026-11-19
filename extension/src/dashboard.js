@@ -933,6 +933,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     const offerWider = tooFar.length >= 8 && profile.matchLevel !== 'wide' && !settings.widerOfferOff;
     // Ask for a Chrome Web Store review only once Job-AI has clearly helped: 10+ applications sent.
     // "Not now" asks again in 14 days, at most twice; a click on Leave a review never asks again.
+    const allSetup = setupDone.personal && setupDone.search && setupDone.cvs && hasLicence && (!(uk && wantsNhs) || setupDone.trac) && (!wantsFederal || !!fed.usCitizen);
     const askReview = hasLicence && applied.length >= 10 && !settings.reviewDone && !offerWider && !extraNotice
       && (!settings.reviewSnoozeUntil || Date.now() > Date.parse(settings.reviewSnoozeUntil));
 
@@ -1031,7 +1032,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         <button class="primary" id="fw-start">▶ Send my first application</button>
       </div>` : ''}
 
-      ${setupDone.cvs && setupDone.personal ? `<div class="card get-started-card gs-mini"><span class="gs-mini-tick">✓</span><span>${running ? 'You\'re set up. Job-AI is applying for you.' : 'You\'re set up. Press <strong>Start applying</strong> to go.'}</span><span class="status-msg" id="gs-cv-st"></span></div>` : `<div class="card get-started-card">
+      ${setupDone.cvs && setupDone.personal ? `<div class="card get-started-card gs-mini"><span class="gs-mini-tick">✓</span><span class="gs-mini-text">${running ? 'You\'re set up. Job-AI is applying for you.' : 'You\'re set up. Press <strong>Start applying</strong> to go.'}</span>${allSetup ? '<button class="jump-link gs-edit" id="gs-edit" type="button">Edit details</button>' : ''}<span class="status-msg" id="gs-cv-st"></span></div>` : `<div class="card get-started-card">
         <h3>How to start applying</h3>
         <ol class="get-started-steps">
           <li>${gsMark(setupDone.cvs, 1)}<span>Upload your CV. We fill in your details from it</span>${setupDone.cvs ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link cv-fill-btn">Upload CV →</button>'}</li>
@@ -1041,7 +1042,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         <span class="status-msg" id="gs-cv-st"></span>
       </div>`}
 
-      <div class="card setup-card">
+      ${allSetup ? '' : `<div class="card setup-card">
         <h3>Set up your details</h3>
         <p class="card-hint">Everything the agents use to apply. Fill these in once.</p>
         <div class="setup-quick">
@@ -1052,7 +1053,7 @@ VIEWS.dashboard = async function renderDashboardView() {
           ${wantsFederal ? `<button class="preflight-link${fed.usCitizen ? ' is-done' : ''}" data-view="federal-details">${fed.usCitizen ? '✓' : '🏛️'} Federal jobs details</button>` : ''}
           <button class="preflight-link${hasLicence ? ' is-done' : ''}" data-view="license">${hasLicence ? '✓' : '🔑'} License</button>
         </div>
-      </div>
+      </div>`}
 
       <div class="summary-grid">
         <div class="summary-card applied" data-jump="tracker:applied" role="button" tabindex="0" title="See them in the Tracker"><div class="num">${applied.length}</div><div class="label">Applied</div><div class="sub">${esc(bySource.map(([s, n]) => `${LABEL[s]} ${n}`).join(' · '))}</div></div>
@@ -1139,6 +1140,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     if (setupDone.search && !$('.welcome-overlay')) regionSitesPrompt(region, { newOnly: true });
     $('#dash-tailor')?.addEventListener('click', () => navigate('tailor'));
     $('#jump-agents')?.addEventListener('click', () => jumpTo($('#dash-agents')));
+    $('#gs-edit')?.addEventListener('click', (e) => { e.stopPropagation(); $('#setup-menu').classList.add('open'); });
     $$('.summary-card[data-jump]').forEach((c) => {
       const go = () => {
         const j = c.dataset.jump;
