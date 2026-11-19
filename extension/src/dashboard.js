@@ -1405,8 +1405,8 @@ VIEWS.analytics = async function renderAnalytics() {
     <div class="dash-col-title analytics-graph-title">Applications (last 30 days)</div>
     <div class="card card-wide">${buildApplicationsGraph(all, 30)}</div>
     <div class="analytics-grid">
-      <div class="card"><h3>By site</h3>${bars(bySource, '#2563eb')}</div>
-      <div class="card"><h3>By CV</h3>${bars(byCv, '#2563eb')}</div>
+      <div class="card"><h3>By site</h3>${bars(bySource, 'var(--primary)')}</div>
+      <div class="card"><h3>By CV</h3>${bars(byCv, 'var(--primary)')}</div>
       <div class="card"><h3>Why jobs were skipped</h3>${bars(skipReasons, '#94a3b8')}</div>
     </div>
     <div class="analytics-tables">
@@ -1932,7 +1932,7 @@ VIEWS.license = async function renderLicense() {
   const active = licenceActive(license);
   // The saved key is never written back into the page; only its last 4 characters are shown.
   content.innerHTML = `
-    <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence. The same key works in the desktop app.' : 'Set up Job-AI, or add the key from your Job-AI welcome email.'}</p></div>
+    <div class="page-header"><h2>License</h2><p>${active ? 'Your Job-AI licence.' : 'Set up Job-AI, or add the key from your Job-AI welcome email.'}</p></div>
     ${active ? '' : `<div class="card" id="trial-card">
       <h3 style="margin:0 0 6px">Set up Job-AI</h3>
       <p class="muted" style="margin:0">Takes 2 minutes: your email, your CV and a few details. At the end you get a 6-digit code to type here.</p>

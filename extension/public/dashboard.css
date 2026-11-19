@@ -55,3 +55,25 @@ main { min-width: 0; }
 .bot-card.uc-card, .bot-card.wsl-card { margin-bottom: 18px; }
 /* Tailor tab: buttons in one row line up (primary and secondary have different top margins). */
 .tl-actions button { margin: 0; }
+
+/* ── 2026-11 look, same as tryjobai.com: pale lavender, burnt orange, Bricolage Grotesque + DM Sans ──
+   Overrides app.css tokens here so the old desktop app keeps its own look. */
+@font-face { font-family: 'Bricolage'; src: url('fonts/bricolage-var.woff2') format('woff2'); font-weight: 600 800; font-display: swap; }
+@font-face { font-family: 'DM Sans'; src: url('fonts/dmsans-var.woff2') format('woff2'); font-weight: 400 700; font-display: swap; }
+:root {
+  --bg: #F7F6FF; --surface: #FFFFFF; --surface-alt: #FBFAFF; --border: #E4E0F0; --border-strong: #CFCBDD;
+  --text: #201E2B; --text-muted: #55526A; --text-faint: #6B6880;
+  --primary: #CF4F26; --primary-hover: #B3411D; --primary-soft: #FBE3D6; --accent: #CF4F26; --logo-blue: #CF4F26;
+  --success: #176B45; --success-soft: #DDF3E5; --check-green: #3FA06B;
+  --font-sans: 'DM Sans', 'Hanken Grotesk', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Bricolage', 'Hanken Grotesk', 'Segoe UI', system-ui, sans-serif;
+  --radius-sm: 10px; --radius: 14px;
+}
+.topnav { background: var(--bg); }
+.tn-badge { display: none; }
+.tn-name { font-family: 'Bricolage', var(--font-sans); font-weight: 800; font-size: 22px; }
+.tn-name b { background: var(--primary); color: #fff; padding: 1px 7px; border-radius: 9px; margin-left: 2px; font-weight: 800; }
+h1, h2 { font-family: 'Bricolage', var(--font-sans); }
+.app-footer { background: var(--primary-soft); border-top: 1px solid var(--border); color: var(--primary-hover); }
+#w-email { padding: 10px 12px; border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); font: inherit; font-size: 15px; background: var(--surface); color: var(--text); outline: none; }
+#w-email:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
