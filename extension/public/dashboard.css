@@ -136,3 +136,22 @@ tr.row-new td { animation: row-flash 1.6s ease-out; }
   #start-all:not(:disabled), .summary-card .num.pop, tr.row-new, tr.row-new td { animation: none; }
   .summary-card:hover, .bot-card:hover, .more-car:hover, button:not(:disabled):active, .preflight-link:active { transform: none; }
 }
+
+/* ── Jump links: clickable summary cards, "Your agents" shortcut, section bar on long forms ── */
+.summary-card[data-jump] { cursor: pointer; }
+.summary-card[data-jump]:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+#dash-agents, .sec-target, .nhs-apps-card, .draft-offer-card { scroll-margin-top: 70px; }
+.jump-flash { animation: jump-flash 1.4s ease-out; }
+@keyframes jump-flash { 0%, 30% { box-shadow: 0 0 0 3px var(--primary-soft), 0 0 0 5px var(--primary); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.sec-bar { position: sticky; top: 0; z-index: 20; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin: 0 0 16px; padding: 8px 6px 10px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.sec-bar::-webkit-scrollbar { display: none; }
+.sec-bar button { position: relative; flex: none; background: none; border: 0; padding: 6px 12px; border-radius: 999px; font: 600 13.5px var(--font-sans); color: var(--text-muted); cursor: pointer; }
+.sec-bar button:hover { color: var(--text); background: var(--surface); }
+.sec-bar button.on { color: var(--primary); }
+.sec-ink { position: absolute; left: 0; bottom: 4px; height: 2px; width: 0; border-radius: 2px; background: var(--primary); pointer-events: none; transition: transform .32s cubic-bezier(.3,1.4,.5,1), width .32s cubic-bezier(.3,1.4,.5,1); }
+.sec-bar { position: sticky; }
+@media (prefers-reduced-motion: reduce) { .jump-flash { animation: none; } .sec-ink { transition: none; } }
+/* Stick flush under the top bar: pull up by main's top padding so nothing shows above it. */
+.sec-bar { top: -34px; margin-top: -10px; padding-top: 18px; }
+@media (max-width: 900px) { .sec-bar { top: -24px; } }
+@media (max-width: 640px) { .sec-bar { top: -18px; } }

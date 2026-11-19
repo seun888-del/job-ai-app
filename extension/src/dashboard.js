@@ -663,6 +663,8 @@ async function attachAutofill() {
   for (const [id, kind] of Object.entries(SETUP_AUTOFILL)) { const el = document.getElementById(id); if (el) attach(el, kind, 'af-' + id); }
 }
 
+// Smooth jump to a part of the page, clear of the sticky section bar.
+function jumpTo(el) { if (!el) return; el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); el.classList.remove('jump-flash'); void el.offsetWidth; el.classList.add('jump-flash'); }
 function navigate(v) {
   if (!VIEWS[v]) v = 'dashboard';
   current = v;
@@ -701,7 +703,36 @@ $$('#nav .tab, #nav-setup .setup-item').forEach((b) => b.addEventListener('click
     car.addEventListener('focusin', () => { mcPaused = true; }); car.addEventListener('focusout', () => { mcPaused = false; });
   };
   if (!reduce) setInterval(() => { const car = $('.more-car'); if (!car || mcPaused || document.hidden) return; const k = car.querySelectorAll('.mc-slide').length; if (k > 1) mcGo(car, (mcCur + 1) % k); }, 4500);
+  // Section bar on long forms: one word per section, jumps there, underline follows as you scroll.
+  const SECTION_WORDS = { 'Fill this in from your CV': 'From your CV', 'About you': 'About you', 'Application answers': 'Answers', 'Security clearance': 'Clearance', 'Equality monitoring': 'Equality',
+    'Agent schedule': 'Schedule', 'Extra job sites': 'Extra sites', 'Review before applying': 'Review', 'Select sector': 'Sector', 'NHS search terms': 'Search terms', 'Personal details': 'Personal',
+    'Gaps in employment': 'Gaps', 'Education & qualifications': 'Education', 'Declarations & monitoring': 'Declarations' };
+  const sectionBar = () => {
+    if (!['personal', 'search', 'trac-details'].includes(current) || content.querySelector('.sec-bar')) return;
+    const cards = [...content.querySelectorAll(':scope > .card, :scope > form > .card, :scope > div > .card')].filter((c) => c.offsetParent);
+    const secs = cards.map((c, i) => { const h = c.querySelector('h3'); const t = h ? h.textContent.trim() : (i === 0 && current === 'search' ? 'Search' : ''); if (!t) return null; return [c, SECTION_WORDS[t] || (/upload/i.test(t) ? 'Upload' : t.length > 16 ? t.slice(0, 14) + '…' : t)]; }).filter(Boolean);
+    if (secs.length < 3) return;
+    const bar = document.createElement('nav'); bar.className = 'sec-bar'; bar.setAttribute('aria-label', 'Sections on this page');
+    let lock = null;
+    secs.forEach(([c, w], i) => { c.classList.add('sec-target'); const b = document.createElement('button'); b.type = 'button'; b.textContent = w; b.addEventListener('click', () => { lock = i; jumpTo(c); spy(); }); bar.appendChild(b); });
+    const ink2 = document.createElement('span'); ink2.className = 'sec-ink'; ink2.setAttribute('aria-hidden', 'true'); bar.appendChild(ink2);
+    const head = content.querySelector('.page-header'); (head ? head.after(bar) : content.prepend(bar));
+    const sc = content.closest('main') || document.scrollingElement;
+    const spy = () => {
+      if (!bar.isConnected) { sc.removeEventListener('scroll', spy); return; }
+      const top = bar.getBoundingClientRect().bottom + 24; let on = 0;
+      secs.forEach(([c], i) => { if (c.getBoundingClientRect().top <= top) on = i; });
+      if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4) on = secs.length - 1;
+      if (lock !== null) on = lock;
+      const btns = [...bar.querySelectorAll('button')]; btns.forEach((b, i) => b.classList.toggle('on', i === on));
+      const a = btns[on]; ink2.style.width = a.offsetWidth + 'px'; ink2.style.transform = `translateX(${a.offsetLeft}px)`;
+    };
+    const unlock = () => { lock = null; };
+    ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach((ev) => sc.addEventListener(ev, unlock, { passive: true }));
+    sc.addEventListener('scroll', spy, { passive: true }); setTimeout(spy, 30);
+  };
   const scan = () => {
+    sectionBar();
     const n = $('.summary-card.applied .num');
     if (n) { const v = Number(n.textContent) || 0; if (lastApplied !== null && v > lastApplied && !reduce) { n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop'); } lastApplied = v; }
     const rows = $$('tr[data-k]');
@@ -963,6 +994,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         </div>
         <div class="dash-cta">
           <span class="scorer-pill${tailoring ? ' scorer-pill-active' : ''}" title="The AI tailors your CV while the agents work, so you don't start it yourself.">${tailoring ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
+          <button class="secondary jump-agents" id="jump-agents" type="button">Your agents &darr;</button>
           <button class="secondary stop-all-btn" id="stop-all" ${running ? '' : 'disabled'}>Stop</button>
           <button class="primary start-applying-btn" id="start-all" ${Object.keys(canRun).some((k) => canRun[k] && enabled(k)) ? '' : 'disabled'}>▶ Start applying</button>
         </div>
@@ -988,7 +1020,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${ready.length + needs.length} NHS applications are waiting to be submitted</h3>
         <p class="card-hint" style="margin:0 0 12px">${ready.length ? `${ready.length} ${ready.length === 1 ? 'is' : 'are'} complete on Trac. ` : ''}The employer only gets an application once Submit is pressed. Turn on Submit for me and Job-AI submits these for you, plus every one it finishes from now on.${needs.length ? ` ${needs.length} still need an answer from you: add it once in your NHS details and Job-AI finishes and submits them on its next round.` : ''} Applications that ask about AI use are always left for you.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="so-yes" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Submit them for me</button><button class="secondary" id="so-no" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">I'll submit them myself</button></div></div>` : ''}
-      ${draftOffer ? `<div class="card" style="border:1.5px solid #d97706">
+      ${draftOffer ? `<div class="card draft-offer-card" style="border:1.5px solid #d97706">
         <h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)">${needs.length} NHS applications need one more answer from you</h3>
         <p class="card-hint" style="margin:0 0 12px">Job-AI filled in everything it could and saved each one as a draft on Trac. ${topMiss.length ? `Most of them still need: <strong>${esc(topMiss.join(', '))}</strong>. ` : ''}${submitOn.trac ? 'Add the missing answers once in your NHS details and Job-AI finishes and submits them all on its next round.' : 'Add the missing answers once in your NHS details and Job-AI finishes them on its next round, then you press Submit.'}</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="do-fix" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Add the missing answers</button><button class="secondary" id="do-show" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Open the first one on Trac</button><button class="secondary" id="do-list" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">See them all</button><button class="welcome-skip-link" id="do-no">Later</button></div></div>` : ''}
@@ -1023,10 +1055,10 @@ VIEWS.dashboard = async function renderDashboardView() {
       </div>
 
       <div class="summary-grid">
-        <div class="summary-card applied"><div class="num">${applied.length}</div><div class="label">Applied</div><div class="sub">${esc(bySource.map(([s, n]) => `${LABEL[s]} ${n}`).join(' · '))}</div></div>
-        <div class="summary-card pending"><div class="num">${inQueue.length}</div><div class="label">In queue</div></div>
-        ${ready.length + waiting.length + fedReady.length ? `<div class="summary-card ready"><div class="num">${ready.length + waiting.length + fedReady.length}</div><div class="label">Ready to submit</div></div>` : ''}
-        <div class="summary-card apply_failed"><div class="num">${needs.length + failed.length}</div><div class="label">Needs attention</div></div>
+        <div class="summary-card applied" data-jump="tracker:applied" role="button" tabindex="0" title="See them in the Tracker"><div class="num">${applied.length}</div><div class="label">Applied</div><div class="sub">${esc(bySource.map(([s, n]) => `${LABEL[s]} ${n}`).join(' · '))}</div></div>
+        <div class="summary-card pending" data-jump="tracker:open" role="button" tabindex="0" title="See them in the Tracker"><div class="num">${inQueue.length}</div><div class="label">In queue</div></div>
+        ${ready.length + waiting.length + fedReady.length ? `<div class="summary-card ready" data-jump="ready" role="button" tabindex="0" title="Go to them"><div class="num">${ready.length + waiting.length + fedReady.length}</div><div class="label">Ready to submit</div></div>` : ''}
+        <div class="summary-card apply_failed" data-jump="attention" role="button" tabindex="0" title="Go to them"><div class="num">${needs.length + failed.length}</div><div class="label">Needs attention</div></div>
       </div>
 
       ${waiting.length ? `<div class="card card-wide nhs-apps-card">
@@ -1047,7 +1079,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         ${apps.map((a, i) => appRow(a, i)).join('')}
       </div>` : ''}
 
-      <div class="dash-cols">
+      <div class="dash-cols" id="dash-agents">
         <div class="dash-col-main">
           <div class="dash-col-title">Your agents</div>
           <p class="bot-controls-hint">Tick the agents you want, then press <strong>Start applying</strong>. Or start one on its own card.</p>
@@ -1106,6 +1138,17 @@ VIEWS.dashboard = async function renderDashboardView() {
     // Set up before apply-by-email existed: offer it once, so nobody misses it.
     if (setupDone.search && !$('.welcome-overlay')) regionSitesPrompt(region, { newOnly: true });
     $('#dash-tailor')?.addEventListener('click', () => navigate('tailor'));
+    $('#jump-agents')?.addEventListener('click', () => jumpTo($('#dash-agents')));
+    $$('.summary-card[data-jump]').forEach((c) => {
+      const go = () => {
+        const j = c.dataset.jump;
+        if (j.startsWith('tracker:')) { trackerFilter = j.slice(8); navigate('tracker'); return; }
+        const t = j === 'ready' ? $('.nhs-apps-card') : ($('.draft-offer-card') || $('#nhs-list') || $('.nhs-apps-card'));
+        if (t) jumpTo(t); else { trackerFilter = 'all'; navigate('tracker'); }
+      };
+      c.addEventListener('click', go);
+      c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
     $('.mc-earn')?.addEventListener('click', () => navigate('earn'));
     // The new Tailor tab: tell people once (after any region pop-up has been answered).
     if (setupDone.search && !$('.welcome-overlay')) setTimeout(() => { if (current === 'dashboard') tailorNewPrompt(); }, 1500);
