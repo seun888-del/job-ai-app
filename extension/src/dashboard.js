@@ -2072,6 +2072,10 @@ async function claimPhoneSetup(raw, say) {
       for (const k of ['firstName', 'middleName', 'lastName', 'email', 'phone', 'location', 'linkedin', 'yearsExperience']) if (P[k]) out[k] = P[k];
       if ((P.searchTerms || []).length) out.searchTerms = P.searchTerms.slice(0, 40);
       if ((P.workTypePriority || []).length) out.workTypePriority = P.workTypePriority;
+      // Answers from the website quiz (they come before the full questions, so copy them on their own).
+      if ((P.employmentType || []).length) out.employmentType = P.employmentType;
+      for (const k of ['experienceLevel', 'rightToWorkCountries', 'salaryExpectation']) if (P[k]) out[k] = P[k];
+      for (const k of ['requiresSponsorship', 'openToLowerLevel']) if (typeof P[k] === 'boolean') out[k] = P[k];
       // The "Questions employers ask" answers (only once the phone setup asked them).
       if (P.answered) {
         const cap = { male: 'Male', female: 'Female', nonbinary: 'Non-binary', white: 'White', mixed: 'Mixed', asian: 'Asian', black: 'Black', arab: 'Arab', other: 'Other', no: 'No', yes: 'Yes' };
