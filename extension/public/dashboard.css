@@ -169,3 +169,6 @@ tr.row-new td { animation: row-flash 1.6s ease-out; }
 
 .gs-mini .gs-mini-text { flex: 1; }
 .gs-mini .gs-edit { margin: 0; }
+
+/* Tracker filter buttons: primary and secondary share one baseline */
+.trk-f { margin: 0 !important; height: 40px; padding: 0 16px; display: inline-flex; align-items: center; }

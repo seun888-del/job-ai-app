@@ -209,7 +209,7 @@ const RETIRED = new Set(['reed', 'linkedin', 'indeed', 'dice', 'wellfound', 'job
 // site each one needs to reach (asked for only when the user turns it on).
 const EMAIL_AGENTS = {
   jobbank: { origins: JOBBANK_ORIGINS, name: 'Job Bank Agent', who: 'employers on Job Bank', site: 'Job Bank', doc: 'resume', blurb: 'Emails your resume to Job Bank jobs from your Gmail. No Job Bank account needed.' },
-  workhub: { origins: WORKHUB_ORIGINS, name: 'Recruiter Agent', who: 'recruiters', site: 'the UK government job site', doc: 'CV', blurb: "Emails your tailored CV to recruiters on Find a Job. Sent from your Gmail." },
+  workhub: { origins: WORKHUB_ORIGINS, name: 'Recruiter Agent', who: 'recruiters', site: 'the UK government job site', doc: 'CV', blurb: "Emails your tailored CV to recruiters on Find a Job, from your Gmail." },
 };
 async function emailAgentState(key) {
   const perm = await chrome.permissions.contains({ origins: EMAIL_AGENTS[key].origins }).catch(() => false);
@@ -952,7 +952,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     const card = ([key, label, url, signLabel]) => {
       const on = agents[key].running;
       const es = emailState[key];
-      const toggle = EMAIL_AGENTS[key] ? `<div class="agent-submit-toggle" style="display:block"><small>${EMAIL_AGENTS[key].blurb} It can send, never read.</small>
+      const toggle = EMAIL_AGENTS[key] ? `<div class="agent-submit-toggle" style="display:block"><small>${EMAIL_AGENTS[key].blurb} Send only, it never reads your inbox.</small>
           ${es.perm && es.gmail ? `<div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="color:var(--success, #15803d);font-weight:600">✓ Sends from ${esc(es.email)}</span><button class="welcome-skip-link jb-disconnect" data-key="${key}">Disconnect</button><span class="status-msg" id="jb-st-${key}"></span></div>`
             : `<div style="margin-top:8px"><button class="btn-connect jb-connect" data-key="${key}">Connect Gmail</button><span class="status-msg" id="jb-st-${key}"></span></div>`}</div>` : key === 'usajobs' ? `<div class="agent-submit-toggle" style="display:block"><small>Writes a federal resume for each job. You apply on USAJOBS.</small></div>` : key === 'ats' ? `<div class="agent-submit-toggle" style="display:block">
           <strong style="display:block;margin-bottom:6px">Jobs that need a person</strong>
@@ -971,7 +971,7 @@ VIEWS.dashboard = async function renderDashboardView() {
           </label>
           <span class="bot-status bot-status-${on ? 'running' : 'stopped'}">${on ? 'running' : 'stopped'}</span>
         </div>
-        <div class="agent-run-state ${on ? 'on' : 'off'}">${on ? '✓ Working in a separate minimised Chrome window' : !canRun[key] ? '○ Finish setup to use this agent' : enabled(key) ? '✓ Included, runs when you press Start applying' : '○ Unticked, this agent will be skipped'}</div>
+        <div class="agent-run-state ${on ? 'on' : 'off'}">${on ? '✓ Working in a separate minimised Chrome window' : !canRun[key] ? '○ Finish setup first' : enabled(key) ? '✓ Runs with Start applying' : '○ Skipped'}</div>
         ${toggle}
         <div class="bot-card-actions">
           ${on ? `<button class="secondary stop" data-bot="${key}">Stop</button>` : `<button class="primary start" data-bot="${key}" ${canRun[key] ? '' : 'disabled'}>Start</button>`}
@@ -1083,7 +1083,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       <div class="dash-cols" id="dash-agents">
         <div class="dash-col-main">
           <div class="dash-col-title">Your agents</div>
-          <p class="bot-controls-hint">Tick the agents you want, then press <strong>Start applying</strong>. Or start one on its own card.</p>
+          <p class="bot-controls-hint">Tick the ones you want, then press <strong>Start applying</strong>.</p>
           <div class="bot-controls">${AGENTS.filter(([k]) => inRegion(k, region, wantsNhs, wantsFederal)).map(card).join('')}</div>
         </div>
         <div class="dash-col-side">
