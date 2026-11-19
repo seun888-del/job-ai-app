@@ -674,6 +674,43 @@ function navigate(v) {
   return Promise.resolve(VIEWS[v]()).then((r) => { attachAutofill().catch(() => {}); return r; });
 }
 $$('#nav .tab, #nav-setup .setup-item').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
+// A bit of bounce: sliding tab underline, Applied count pop, new rows slide in, the "More you can do" carousel.
+{
+  const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const tabs = $('#nav'); const ink = document.createElement('span'); ink.className = 'tab-ink'; ink.setAttribute('aria-hidden', 'true'); tabs.appendChild(ink);
+  const moveInk = () => { const a = $('#nav .tab.active'); if (!a) { ink.style.opacity = '0'; return; } ink.style.opacity = '1'; ink.style.width = a.offsetWidth + 'px'; ink.style.transform = `translateX(${a.offsetLeft}px)`; };
+  new MutationObserver(moveInk).observe(tabs, { subtree: true, attributes: true, attributeFilter: ['class'] });
+  window.addEventListener('resize', moveInk); setTimeout(moveInk, 50);
+  let lastApplied = null, primed = false; const seen = new Set();
+  // The dashboard redraws itself, so the slide we're on lives out here and one timer moves whichever carousel is showing.
+  let mcCur = 0, mcPaused = false;
+  const mcGo = (car, n) => {
+    const slides = [...car.querySelectorAll('.mc-slide')]; if (!slides[n] || n === mcCur) return;
+    const o = slides[mcCur]; if (o) { o.classList.replace('on', 'out'); setTimeout(() => o.classList.remove('out'), 460); }
+    slides[n].classList.add('on'); mcCur = n;
+    [...car.querySelectorAll('.mc-dots button')].forEach((b, i) => b.setAttribute('aria-current', i === n));
+  };
+  const carousel = (car) => {
+    if (car.dataset.ready) return; car.dataset.ready = '1';
+    const slides = [...car.querySelectorAll('.mc-slide')], dots = car.querySelector('.mc-dots');
+    if (mcCur >= slides.length) mcCur = 0;
+    slides.forEach((sl, i) => sl.classList.toggle('on', i === mcCur));
+    if (slides.length < 2) { dots.hidden = true; return; }
+    slides.forEach((_, i) => { const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', `Slide ${i + 1}`); b.setAttribute('aria-current', i === mcCur); b.addEventListener('click', () => mcGo(car, i)); dots.appendChild(b); });
+    car.addEventListener('mouseenter', () => { mcPaused = true; }); car.addEventListener('mouseleave', () => { mcPaused = false; });
+    car.addEventListener('focusin', () => { mcPaused = true; }); car.addEventListener('focusout', () => { mcPaused = false; });
+  };
+  if (!reduce) setInterval(() => { const car = $('.more-car'); if (!car || mcPaused || document.hidden) return; const k = car.querySelectorAll('.mc-slide').length; if (k > 1) mcGo(car, (mcCur + 1) % k); }, 4500);
+  const scan = () => {
+    const n = $('.summary-card.applied .num');
+    if (n) { const v = Number(n.textContent) || 0; if (lastApplied !== null && v > lastApplied && !reduce) { n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop'); } lastApplied = v; }
+    const rows = $$('tr[data-k]');
+    if (primed && !reduce) rows.forEach((r) => { if (!seen.has(r.dataset.k)) r.classList.add('row-new'); });
+    rows.forEach((r) => seen.add(r.dataset.k)); if (rows.length) primed = true;
+    $$('.more-car').forEach(carousel);
+  };
+  let st = null; new MutationObserver(() => { clearTimeout(st); st = setTimeout(scan, 30); }).observe(content, { childList: true, subtree: true });
+}
 $('#setup-label').addEventListener('click', (e) => { e.stopPropagation(); $('#setup-menu').classList.toggle('open'); });
 $('#setup-pop').addEventListener('click', () => $('#setup-menu').classList.remove('open'));
 document.addEventListener('click', () => $('#setup-menu').classList.remove('open'));
@@ -873,9 +910,9 @@ VIEWS.dashboard = async function renderDashboardView() {
     // until the user checks it (the old "Send for me" off).
     const atsMode = !submitOn.ats ? 'review' : settings.hardOnes ? 'assist' : 'auto';
     const ATS_MODES = [
-      ['auto', 'Fully automatic', "You only see Applied. Jobs it can't finish on its own are skipped."],
-      ['assist', 'Bring me the hard ones', 'Sends what it can. Ones that need you (a human check, an emailed code, a question) wait under Ready to send. Better odds, a few taps.'],
-      ['review', 'Check every application', 'Nothing is sent until you check it and press Submit.'],
+      ['auto', 'Fully automatic', "Skips jobs it can't finish."],
+      ['assist', 'Bring me the hard ones', 'Sends what it can. The rest wait for you.'],
+      ['review', 'Check every application', 'Nothing sends until you approve it.'],
     ];
     const siteAuth = await siteAuthState();
     const emailState = {};
@@ -944,7 +981,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. It takes a few minutes.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
       ${extraNotice ? `<div class="no-license-banner"><span><strong>New:</strong> Job-AI can now also apply on ${extraForRegion(region).map(([, l]) => l).join(us ? ', ' : ' and ').replace(/, ([^,]*)$/, ' and $1')} if you have an account there. It still applies on employers' own websites as well.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="extra-yes">Turn on</button><button class="welcome-skip-link" id="extra-no">No thanks</button></span></div>` : ''}
-      ${askReview ? `<div class="no-license-banner"><span>Job-AI has sent ${applied.length} applications for you. If it's helping, a quick review in the Chrome Web Store helps other job seekers find it.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="review-yes">Leave a review</button><button class="welcome-skip-link" id="review-no">Not now</button></span></div>` : ''}
+      ${askReview ? `<div class="no-license-banner"><span>${applied.length} sent. Enjoying it? Leave a quick review.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="review-yes">Leave a review</button><button class="welcome-skip-link" id="review-no">Not now</button></span></div>` : ''}
       ${offerWider ? `<div class="no-license-banner"><span>${tooFar.length} jobs this week were skipped as not a close enough match. Try a wider match?</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="wider-yes">Try Wider</button><button class="welcome-skip-link" id="wider-no">No thanks</button></span></div>` : ''}
 
       ${submitOffer ? `<div class="card" style="border:1.5px solid #16a34a">
@@ -962,15 +999,15 @@ VIEWS.dashboard = async function renderDashboardView() {
         <button class="primary" id="fw-start">▶ Send my first application</button>
       </div>` : ''}
 
-      <div class="card get-started-card">
+      ${setupDone.cvs && setupDone.personal ? `<div class="card get-started-card gs-mini"><span class="gs-mini-tick">✓</span><span>${running ? 'You\'re set up. Job-AI is applying for you.' : 'You\'re set up. Press <strong>Start applying</strong> to go.'}</span><span class="status-msg" id="gs-cv-st"></span></div>` : `<div class="card get-started-card">
         <h3>How to start applying</h3>
         <ol class="get-started-steps">
           <li>${gsMark(setupDone.cvs, 1)}<span>Upload your CV. We fill in your details from it</span>${setupDone.cvs ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link cv-fill-btn">Upload CV →</button>'}</li>
           <li>${gsMark(setupDone.personal, 2)}<span>Check your details</span>${setupDone.personal ? '<em class="gs-ok">Done</em>' : '<button class="preflight-link" data-view="personal">Check details →</button>'}</li>
-          <li>${gsMark(running, 3)}<span>Click <strong>Start applying</strong>. Job-AI applies on employers' own websites, so there are no job site accounts to sign in to</span>${running ? '<em class="gs-ok">Applying…</em>' : ''}</li>
+          <li>${gsMark(running, 3)}<span>Click <strong>Start applying</strong>. No job site accounts needed</span>${running ? '<em class="gs-ok">Applying…</em>' : ''}</li>
         </ol>
         <span class="status-msg" id="gs-cv-st"></span>
-      </div>
+      </div>`}
 
       <div class="card setup-card">
         <h3>Set up your details</h3>
@@ -1019,11 +1056,19 @@ VIEWS.dashboard = async function renderDashboardView() {
         <div class="dash-col-side">
           <div class="dash-col-title">Applications (last 14 days)</div>
           <div class="card dash-applications-card">${buildApplicationsGraph(all)}</div>
-          <div class="dash-col-title" style="margin-top:18px">Found a job yourself?</div>
-          <div class="card"><p class="card-hint" style="margin:0 0 12px">Paste the advert and Job-AI tailors your ${region === 'us' ? 'resume' : 'CV'} and writes a cover letter for it.</p><button class="secondary" id="dash-tailor">Tailor for a job</button></div>
+          <div class="dash-col-title" style="margin-top:18px">More you can do</div>
+          <div class="card more-car" id="more-car" aria-roledescription="carousel" aria-label="More you can do">
+            <div class="mc-slides" aria-live="polite">
+              <div class="mc-slide on"><strong>Found a job yourself?</strong><span>Paste the advert. Get a tailored ${region === 'us' ? 'resume' : 'CV'} and cover letter.</span><button class="secondary" id="dash-tailor">Tailor for a job</button></div>
+              ${ucOn ? `<div class="mc-slide"><strong>📋 Universal Credit journal</strong><span>A dated log of every application, ready for your UC journal. ${ucPending.length ? `<b>${ucPending.length}</b> ready to log.` : 'All up to date.'}</span><button class="secondary" id="uc-copy" ${ucPending.length ? '' : 'disabled'}>View my log</button></div>` : ''}
+              ${us ? `<div class="mc-slide"><strong>📋 Work search log</strong><span>Every real application, dated, ready for your weekly benefits form.</span><button class="secondary" id="wsl-open">View my log</button></div>` : ''}
+              <div class="mc-slide"><strong>Earn more</strong><span>See what jobs like yours pay, or only move for more money.</span><button class="secondary mc-earn" data-view="earn">Check my pay</button></div>
+            </div>
+            <div class="mc-dots" role="group" aria-label="Choose a slide"></div>
+          </div>
           <div class="dash-col-title" style="margin-top:18px">This computer</div>
           <div class="card computer-card">
-            <label class="checkbox-label" style="align-items:flex-start;margin:0 0 12px"><input type="checkbox" class="pc" data-k="keepAwake" ${settings.keepAwake !== false ? 'checked' : ''}><span><strong>Keep awake while agents run</strong><br><small class="muted">Your computer will not go to sleep mid-application. A closed laptop lid still sleeps.</small></span></label>
+            <label class="checkbox-label" style="align-items:flex-start;margin:0 0 12px"><input type="checkbox" class="pc" data-k="keepAwake" ${settings.keepAwake !== false ? 'checked' : ''}><span><strong>Keep awake while agents run</strong><br><small class="muted">Stops your computer sleeping mid-application.</small></span></label>
             <label class="checkbox-label" style="align-items:flex-start;margin:0"><input type="checkbox" class="pc" data-k="openOnStartup" ${settings.openOnStartup ? 'checked' : ''}><span><strong>Open when Chrome starts</strong><br><small class="muted">Job-AI opens in a pinned tab and carries on applying.</small></span></label>
           </div>
         </div>
@@ -1034,12 +1079,6 @@ VIEWS.dashboard = async function renderDashboardView() {
         ${reviewing.map((j) => `<tr><td>${esc(j.title)}</td><td>${esc(j.company || '')}</td><td>${esc(j.cvScore != null ? j.cvScore + '%' : '')}</td><td class="row-actions">${docButtons(j)}</td>
           <td><div class="ext-inline"><button class="primary rv-ok" data-id="${esc(j.jobId)}">Approve</button><button class="secondary rv-skip" data-id="${esc(j.jobId)}">Skip</button></div></td></tr>`).join('')}
         </tbody></table></div></div>` : ''}
-      ${ucOn ? `<div class="card bot-card uc-card"><div class="bot-card-header"><strong>📋 Universal Credit journal</strong></div>
-        <p style="font-size:13px;color:var(--text-muted);margin:6px 0 12px">Keeps a running log of every job Job-AI has applied to, each with the real date, ready to add to your Universal Credit "log your work search" journal. ${ucPending.length ? `<strong>${ucPending.length}</strong> application${ucPending.length === 1 ? '' : 's'} ready to log.` : 'Your journal is up to date.'}</p>
-        <div class="bot-card-actions"><button class="primary" id="uc-copy" ${ucPending.length ? '' : 'disabled'}>View / copy my work search log</button></div></div>` : ''}
-      ${us ? `<div class="card bot-card wsl-card"><div class="bot-card-header"><strong>📋 Work search log</strong></div>
-        <p style="font-size:13px;color:var(--text-muted);margin:6px 0 12px">Unemployment benefits ask for work search contacts each week. Job-AI logs every job it really applied to, with the real date, ready for your state's weekly form. <strong>${wslByWeek(all.filter((j) => j.status === 'applied')).filter((w) => w.start === wslWeekStart(new Date()).getTime()).reduce((n, w) => n + w.rows.length, 0)}</strong> this week.</p>
-        <div class="bot-card-actions"><button class="primary" id="wsl-open">View my work search log</button></div></div>` : ''}
       ${recentHtml(all, settings.recentClearedAt)}`;
 
     $$('.start').forEach((b) => b.addEventListener('click', () => startAgent(b.dataset.bot)));
@@ -1067,6 +1106,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     // Set up before apply-by-email existed: offer it once, so nobody misses it.
     if (setupDone.search && !$('.welcome-overlay')) regionSitesPrompt(region, { newOnly: true });
     $('#dash-tailor')?.addEventListener('click', () => navigate('tailor'));
+    $('.mc-earn')?.addEventListener('click', () => navigate('earn'));
     // The new Tailor tab: tell people once (after any region pop-up has been answered).
     if (setupDone.search && !$('.welcome-overlay')) setTimeout(() => { if (current === 'dashboard') tailorNewPrompt(); }, 1500);
     $$('.preflight-link[data-view]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.view)));
@@ -1183,7 +1223,7 @@ function recentHtml(all, clearedAt) {
   const rows = all.filter((j) => RECENT.includes(j.status) && (!clearedAt || String(j.appliedAt || j.updatedAt) > clearedAt)).sort((a, b) => String(b.appliedAt || b.updatedAt).localeCompare(String(a.appliedAt || a.updatedAt))).slice(0, 15);
   return `<div class="card card-wide"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px"><h3 style="margin:0">Recent activity</h3><button id="recent-clear" class="secondary" style="font-size:12px;padding:5px 12px" ${rows.length ? '' : 'disabled'}>Clear</button></div>
     ${rows.length ? `<div class="table-scroll"><table class="data-table"><thead><tr><th>Title</th><th>Company</th><th>Status</th><th>CV used</th><th>Updated</th><th></th></tr></thead><tbody>
-    ${rows.map((j) => { const [l, c] = STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.url); return `<tr>
+    ${rows.map((j) => { const [l, c] = STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.url); return `<tr data-k="${esc(j.jobId + ':' + j.status)}">
       <td>${u ? `<a class="tracker-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>` : esc(j.title)}</td><td>${esc(j.company || '')}</td>
       <td><span class="badge ${c}" title="${esc(j.reason || '')}">${esc(l)}</span></td><td class="cv-name-cell">${esc(j.cvName || '-')}</td>
       <td>${esc(j.appliedAt || j.updatedAt ? new Date(j.appliedAt || j.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '')}</td>
@@ -1505,7 +1545,7 @@ VIEWS.tracker = async function renderTracker() {
     const q = trackerQuery.trim();
     $('#trk-rows').innerHTML = shown.length ? `${q ? `<p class="muted" style="margin:0 0 8px">${shown.length} job${shown.length === 1 ? '' : 's'} match "${esc(q)}"</p>` : ''}<div class="card card-wide"><div class="table-scroll"><table class="data-table tracker-table">
       <thead><tr><th>Job</th><th>Company</th><th>Site</th><th>Status</th><th>Notes</th><th>Updated</th><th></th></tr></thead>
-      <tbody>${shown.slice(0, 300).map((j) => { const [l, c] = (j.status === 'applied' && STAGE[j.stage]) || STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.draftUrl || j.url); return `<tr>
+      <tbody>${shown.slice(0, 300).map((j) => { const [l, c] = (j.status === 'applied' && STAGE[j.stage]) || STATUS[j.status] || [j.status, 'badge-info']; const u = safeUrl(j.draftUrl || j.url); return `<tr data-k="${esc(j.jobId + ':' + j.status)}">
         <td class="tracker-title" title="${esc(j.title)}">${u ? `<a class="tracker-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(j.title)}</a>` : esc(j.title)}</td>
         <td>${esc(j.company || '')}</td><td>${esc(SOURCE[j.source] || j.source || '')}</td>
         <td>${j.status === 'applied' ? `<select class="tracker-stage-select trk-stage" data-id="${esc(j.jobId)}" aria-label="Stage">${STAGE_LIST.map(([v, t]) => `<option value="${v}" ${(j.stage || 'applied') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : `<span class="badge ${c}" title="${esc(j.reason || '')}">${esc(l)}</span>`}</td>
@@ -1788,7 +1828,7 @@ VIEWS.search = async function renderSearch() {
     <div class="page-header"><h2>Search Preferences</h2><p>Used by the agents to find jobs that fit.</p></div>
     <div class="card"><div class="tracd-grid">
       <div class="field"><label>Job titles to search (one per line)</label><textarea id="s-terms" class="tracd" rows="5" placeholder="e.g. IT Support Analyst">${esc((profile.searchTerms || []).join('\n'))}</textarea></div>
-      <div class="field"><label>Skip jobs with these words in the title (one per line)</label><textarea id="s-exclude" class="tracd" rows="5" placeholder="e.g. Senior">${esc((profile.excludeKeywords || []).join('\n'))}</textarea></div>
+      <div class="field"><label>Skip titles with these words</label><textarea id="s-exclude" class="tracd" rows="5" placeholder="e.g. Senior">${esc((profile.excludeKeywords || []).join('\n'))}</textarea></div>
       <div class="field"><label>Blocked companies (one per line)</label><textarea id="s-block" class="tracd" rows="5" placeholder="e.g. Agency name">${esc((profile.blockedCompanies || []).join('\n'))}</textarea></div>
       <div class="field"><label>Search location</label><input id="s-where" type="text" value="${esc(profile.searchLocation || REGION_COUNTRY[regionOf(settings)])}"></div>
       <div class="field"><label>Maximum job posting age</label><select id="s-age">${[['r86400', 'Past 24 hours'], ['r604800', 'Past week'], ['r1209600', 'Past 2 weeks'], ['r2592000', 'Past month']].map(([v, l]) => `<option value="${v}" ${(profile.jobAge || 'r1209600') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -1872,7 +1912,7 @@ VIEWS.earn = async function renderEarn() {
       <div id="em-result" style="margin-top:14px"></div>
     </div>
     <div class="card"><h3>Only move for more money</h3>
-      <p class="muted" style="margin-top:0">Happy where you are? Job-AI then only applies to jobs whose advert shows a salary well above yours, never to your employer, and only a few a month.</p>
+      <p class="muted" style="margin-top:0">Happy where you are? It only applies to jobs paying well above yours. Never your employer.</p>
       <label class="checkbox-label"><input type="checkbox" id="mv-on" ${mv.on ? 'checked' : ''}> Turn on</label>
       <div class="tracd-grid" style="margin-top:10px">
         <div class="field"><label>Only apply if it pays at least</label><select id="mv-up">${[10, 15, 20, 25, 30].map((n) => `<option value="${n}" ${Number(mv.uplift || 15) === n ? 'selected' : ''}>${n}% more</option>`).join('')}</select></div>

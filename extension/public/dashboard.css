@@ -95,3 +95,44 @@ h1, h2 { font-family: 'Bricolage', var(--font-sans); }
 @media (prefers-reduced-motion: reduce) { .w-car-slide, .w-car-dots button { transition: none; } }
 textarea { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 10px 12px; font: inherit; background: var(--surface); color: var(--text); }
 textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+
+/* ── A bit of bounce (all of it off for people who turn off animations) ── */
+#nav { position: relative; }
+#nav .tab.active { border-bottom-color: transparent; }
+.tab-ink { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; border-radius: 2px; background: var(--primary); pointer-events: none; transition: transform .32s cubic-bezier(.3,1.4,.5,1), width .32s cubic-bezier(.3,1.4,.5,1), opacity .2s; }
+button, .preflight-link { transition: transform .12s ease, background var(--transition), border-color var(--transition), color var(--transition); }
+button:not(:disabled):active, .preflight-link:active { transform: scale(.96); }
+.summary-card, .bot-card, .more-car { transition: transform .18s ease, box-shadow .18s ease; }
+.summary-card:hover, .bot-card:hover, .more-car:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(32, 30, 43, .08); }
+.summary-card .num.pop { animation: num-pop .55s cubic-bezier(.3,1.6,.5,1); }
+@keyframes num-pop { 0% { transform: scale(1); } 35% { transform: scale(1.28); color: var(--primary); } 100% { transform: scale(1); } }
+tr.row-new { animation: row-in .5s ease-out; }
+tr.row-new td { animation: row-flash 1.6s ease-out; }
+@keyframes row-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes row-flash { from { background: var(--primary-soft); } to { background: transparent; } }
+#start-all:not(:disabled) { animation: start-pulse 2.4s ease-in-out infinite; }
+#start-all:not(:disabled):hover { animation: none; }
+@keyframes start-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(207, 79, 38, .35); } 50% { box-shadow: 0 0 0 8px rgba(207, 79, 38, 0); } }
+
+/* "How to start applying" collapses to one line once set up */
+.get-started-card.gs-mini { display: flex; align-items: center; gap: 10px; padding: 12px 18px; font-size: 14px; }
+.gs-mini-tick { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--success-soft); color: var(--success); font-weight: 700; font-size: 13px; flex: none; }
+
+/* "More you can do" carousel */
+.more-car { padding: 16px 18px 12px; }
+.mc-slides { position: relative; height: 128px; overflow: hidden; }
+.mc-slide { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; opacity: 0; transform: translateX(40px); transition: transform .45s cubic-bezier(.2,.8,.2,1), opacity .45s; pointer-events: none; }
+.mc-slide.on { opacity: 1; transform: none; pointer-events: auto; }
+.mc-slide.out { opacity: 0; transform: translateX(-40px); }
+.mc-slide strong { font-family: 'Bricolage', var(--font-sans); font-size: 16px; color: var(--text); }
+.mc-slide span { font-size: 13.5px; color: var(--text-muted); line-height: 1.4; }
+.mc-slide button { margin: auto 0 0; }
+.mc-dots { display: flex; gap: 7px; margin-top: 10px; }
+.mc-dots button { width: 20px; height: 8px; border-radius: 999px; border: 1.5px solid var(--text); background: var(--surface); padding: 0; cursor: pointer; transition: width .25s, background .25s; }
+.mc-dots button[aria-current="true"] { width: 32px; background: var(--primary); border-color: var(--primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-ink, button, .preflight-link, .summary-card, .bot-card, .more-car, .mc-slide, .mc-dots button { transition: none; }
+  #start-all:not(:disabled), .summary-card .num.pop, tr.row-new, tr.row-new td { animation: none; }
+  .summary-card:hover, .bot-card:hover, .more-car:hover, button:not(:disabled):active, .preflight-link:active { transform: none; }
+}
