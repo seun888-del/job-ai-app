@@ -2308,12 +2308,15 @@ async function initOnboarding() {
   overlay.className = 'welcome-overlay';
   overlay.innerHTML = `<div class="welcome-modal"><div class="welcome-logo"></div>
     <h2>Welcome to Job-AI</h2>
-    <p>Your automated job application assistant, right inside Chrome. Set it up once and the agents search, tailor your CV, and apply to jobs for you.</p>
-    <div class="welcome-features">
-      <div class="welcome-feature"><strong>Company Sites</strong><span>Applies on employers' own career pages. No job site accounts needed</span></div>
-      <div class="welcome-feature"><strong>AI CV Tailoring</strong><span>Every CV is rewritten to match the job before it is sent</span></div>
-      <div class="welcome-feature"><strong>Private</strong><span>Your details and CV stay in this browser, on this device</span></div>
-      <div class="welcome-feature"><strong>Auto Apply</strong><span>Fills the forms, attaches your tailored CV, and submits for you</span></div>
+    <p>Set it up once. It applies for you.</p>
+    <div class="welcome-features w-car" id="w-car" aria-roledescription="carousel" aria-label="What Job-AI does">
+      <div class="w-car-slides" aria-live="polite">
+        <div class="w-car-slide on"><span class="w-car-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4h2a2 2 0 0 1 2 2v10h-6v-4h-4v4H4Zm4-14v2h2V7H8Zm4 0v2h2V7h-2Zm-4 4v2h2v-2H8Zm4 0v2h2v-2h-2Z"/></svg></span><div><strong>Company sites</strong><span>Applies on employers' own career pages. No job site accounts.</span></div></div>
+        <div class="w-car-slide"><span class="w-car-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V9h5.5L13 3.5ZM8 13v2h8v-2H8Zm0 4v2h5v-2H8Z"/></svg></span><div><strong>A tailored CV every time</strong><span>Rewrites your CV for each job before it's sent.</span></div></div>
+        <div class="w-car-slide"><span class="w-car-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg></span><div><strong>Applies for you</strong><span>Fills the forms and submits while you get on with life.</span></div></div>
+        <div class="w-car-slide"><span class="w-car-ic ok"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5Zm-3 8V7a3 3 0 0 1 6 0v3H9Z"/></svg></span><div><strong>Private</strong><span>Your CV and details stay on this device.</span></div></div>
+      </div>
+      <div class="w-car-dots" role="group" aria-label="Choose a slide"></div>
     </div>
     ${globalThis.__jobaiClient === 'android' ? '' : `<div class="welcome-phone" id="w-setup-box" style="text-align:left;background:var(--surface-alt,#fbf9f4);border:1px solid var(--border,#e6e1d6);border-radius:9px;padding:16px;margin:18px 0 6px">
       <div id="ws-n" style="font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted,#4a453b)">Step 1 of 4</div>
@@ -2370,6 +2373,23 @@ async function initOnboarding() {
       <p style="margin:14px 0 8px;font-size:14px;color:var(--text-muted,#4a453b)">Or look around first:</p>`}
     <div class="welcome-actions"><button class="${globalThis.__jobaiClient === 'android' ? 'primary' : 'secondary'}" id="w-tour">Take the setup tour &rarr;</button><button class="welcome-skip-link" id="w-skip">I&rsquo;ll set up myself</button></div></div>`;
   document.body.appendChild(overlay);
+  // Feature carousel: one short line at a time instead of four boxes of text.
+  {
+    const car = overlay.querySelector('#w-car');
+    const slides = [...car.querySelectorAll('.w-car-slide')], dots = car.querySelector('.w-car-dots');
+    let cur = 0, paused = false, tm = null;
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const go = (n) => {
+      if (n === cur) return;
+      const old = slides[cur]; old.classList.remove('on'); old.classList.add('out'); setTimeout(() => old.classList.remove('out'), 460);
+      slides[n].classList.add('on'); cur = n;
+      [...dots.children].forEach((b, i) => b.setAttribute('aria-current', i === n));
+    };
+    const start = () => { clearInterval(tm); if (!reduce) tm = setInterval(() => { if (!overlay.isConnected) return clearInterval(tm); if (!paused) go((cur + 1) % slides.length); }, 3000); };
+    slides.forEach((_, i) => { const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', `Slide ${i + 1}`); b.setAttribute('aria-current', i === 0); b.addEventListener('click', () => { go(i); start(); }); dots.appendChild(b); });
+    car.addEventListener('mouseenter', () => { paused = true; }); car.addEventListener('mouseleave', () => { paused = false; });
+    start();
+  }
   const dismiss = () => { overlay.remove(); store.patch('settings', { welcomeSeen: true }); };
   $('#w-tour').addEventListener('click', () => {
     dismiss();

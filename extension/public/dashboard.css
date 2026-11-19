@@ -77,3 +77,19 @@ h1, h2 { font-family: 'Bricolage', var(--font-sans); }
 .app-footer { background: var(--primary-soft); border-top: 1px solid var(--border); color: var(--primary-hover); }
 #w-email { padding: 10px 12px; border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); font: inherit; font-size: 15px; background: var(--surface); color: var(--text); outline: none; }
 #w-email:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+
+/* Welcome carousel: one feature at a time instead of four text boxes. */
+.welcome-features.w-car { display: block; margin: 16px 0 4px; }
+.w-car-slides { position: relative; height: 78px; overflow: hidden; }
+.w-car-slide { position: absolute; inset: 0; display: flex; align-items: center; gap: 14px; text-align: left; padding: 12px 16px; background: var(--surface-alt); border: 1.5px solid var(--border); border-radius: var(--radius); opacity: 0; transform: translateY(100%); transition: transform .45s cubic-bezier(.2,.8,.2,1), opacity .45s; }
+.w-car-slide.on { opacity: 1; transform: none; }
+.w-car-slide.out { opacity: 0; transform: translateY(-100%); }
+.w-car-slide strong { display: block; font-family: 'Bricolage', var(--font-sans); font-size: 16px; color: var(--text); }
+.w-car-slide span:not(.w-car-ic) { display: block; font-size: 13.5px; color: var(--text-muted); line-height: 1.4; }
+.w-car-ic { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
+.w-car-ic.ok { background: var(--success-soft); color: var(--success); }
+.w-car-ic svg { width: 22px; height: 22px; }
+.w-car-dots { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.w-car-dots button { width: 22px; height: 8px; border-radius: 999px; border: 1.5px solid var(--text); background: var(--surface); padding: 0; cursor: pointer; transition: width .25s, background .25s; }
+.w-car-dots button[aria-current="true"] { width: 36px; background: var(--primary); border-color: var(--primary); }
+@media (prefers-reduced-motion: reduce) { .w-car-slide, .w-car-dots button { transition: none; } }
