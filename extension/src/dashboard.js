@@ -2534,6 +2534,18 @@ async function initOnboarding() {
     $('#w-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     $('#w-cv').addEventListener('click', () => pickCv('#w-st', () => showCheck()));
     $('#w-done').addEventListener('click', finish);
+    // Came from the setup quiz? That page already emailed a code and marks its tab #code-sent,
+    // so skip the email step and ask for the code straight away.
+    const SENT = /^https:\/\/(?:www\.)?tryjobai\.com\/start[^#]*#code-sent|^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/start[^#]*#code-sent/;
+    const fromQuiz = async () => {
+      if ($('#ws-email').hidden) return;
+      let tabs = []; try { tabs = await chrome.tabs.query({}); } catch (_) {}
+      if (!tabs.some((t) => SENT.test(t.url || ''))) return;
+      $('#ws-code-sub').textContent = "We've emailed you a 6-digit code. It's in the subject line. Not there? Check spam or junk.";
+      $('#w-code').value = ''; step('ws-code');
+    };
+    fromQuiz();
+    window.addEventListener('focus', fromQuiz);
   }
 }
 
