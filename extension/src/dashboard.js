@@ -983,20 +983,20 @@ VIEWS.dashboard = async function renderDashboardView() {
       <div class="dash-head">
         <div>
           <h2 class="dash-greeting">Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}${name ? ', ' + esc(name) : ''}</h2>
-          <p class="dash-sub">${running && !applied.length ? 'Sending your first application. Keep this tab open.' : running ? 'Your agents are working. Keep this tab open.' : hasLicence ? 'Your agents are ready. Press Start applying.' : 'Track your agents and applications.'}</p>
-          <div class="region-row"><span class="region-label">Find jobs in:</span>
+          <div class="dash-subrow"><p class="dash-sub">${running && !applied.length ? 'Sending your first one. Keep this tab open.' : running ? 'Applying now. Keep this tab open.' : hasLicence ? 'Ready when you are.' : 'Track your agents and applications.'}</p>
+          <div class="region-row"><span class="region-label">Jobs in</span>
             <div class="region-switch" role="group" aria-label="Find jobs in">
               <button class="region-opt${uk ? ' active' : ''}" data-region="uk">UK</button>
               <button class="region-opt${us ? ' active' : ''}" data-region="us">USA</button>
               <button class="region-opt${region === 'ca' ? ' active' : ''}" data-region="ca">Canada</button>
             </div>
-          </div>
+          </div></div>
+          <button class="jump-link" id="jump-agents" type="button">Your agents &darr;</button>
         </div>
         <div class="dash-cta">
-          <span class="scorer-pill${tailoring ? ' scorer-pill-active' : ''}" title="The AI tailors your CV while the agents work, so you don't start it yourself.">${tailoring ? '✨ AI tailoring active' : 'AI tailoring: idle'}</span>
-          <button class="secondary jump-agents" id="jump-agents" type="button">Your agents &darr;</button>
-          <button class="secondary stop-all-btn" id="stop-all" ${running ? '' : 'disabled'}>Stop</button>
-          <button class="primary start-applying-btn" id="start-all" ${Object.keys(canRun).some((k) => canRun[k] && enabled(k)) ? '' : 'disabled'}>▶ Start applying</button>
+          ${tailoring ? '<span class="scorer-pill scorer-pill-active" title="The AI tailors your CV while the agents work.">✨ Tailoring</span>' : ''}
+          <button class="secondary stop-all-btn" id="stop-all" ${running ? '' : 'disabled hidden'}>■ Stop</button>
+          <button class="primary start-applying-btn" id="start-all" ${running ? 'hidden' : ''} ${Object.keys(canRun).some((k) => canRun[k] && enabled(k)) ? '' : 'disabled'}>▶ Start applying</button>
         </div>
       </div>
 

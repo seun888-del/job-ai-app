@@ -155,3 +155,14 @@ tr.row-new td { animation: row-flash 1.6s ease-out; }
 .sec-bar { top: -34px; margin-top: -10px; padding-top: 18px; }
 @media (max-width: 900px) { .sec-bar { top: -24px; } }
 @media (max-width: 640px) { .sec-bar { top: -18px; } }
+
+/* Calmer dashboard header: one line under the greeting, one main button, a small link to the agents */
+.dash-subrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; }
+.dash-subrow .dash-sub { margin: 0; }
+.dash-subrow .region-row { margin: 0; display: flex; align-items: center; gap: 6px; }
+.dash-subrow .region-label { font-size: 13px; color: var(--text-faint); font-weight: 500; }
+.dash-subrow .region-switch { padding: 2px; }
+.dash-subrow .region-opt { font-size: 12.5px; padding: 3px 10px; }
+.jump-link { background: none; border: 0; padding: 4px 0; margin-top: 6px; font: 600 13.5px var(--font-sans); color: var(--primary); cursor: pointer; }
+.jump-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.dash-cta [hidden] { display: none !important; }
