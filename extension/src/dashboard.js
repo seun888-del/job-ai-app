@@ -869,23 +869,19 @@ const cvToPersonal = (msg) => navigate('personal').then(() => {
 // ── Dashboard ────────────────────────────────────────────────────────────────
 function gsMark(ok, n) { return ok ? '<span class="gs-step gs-step-done">✓</span>' : `<span class="gs-step gs-step-num">${n}</span>`; }
 function buildApplicationsGraph(all, N = 14) {
+  // Plain HTML bars, not a stretched SVG: the numbers and dates stay a real, readable size at any width.
   const applied = all.filter((j) => j.status === 'applied' && j.appliedAt);
   if (!applied.length) return '<div class="graph-empty">No applications recorded yet</div>';
-  const W = 560, H = 80, PAD = 4, LABEL_TOP = 12, AXIS_BOTTOM = 16;
   const days = [];
   for (let i = N - 1; i >= 0; i--) {
     const d = new Date(Date.now() - i * 86400000); const key = d.toISOString().slice(0, 10);
     days.push({ key, count: applied.filter((j) => String(j.appliedAt).startsWith(key)).length, label: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) });
   }
   const maxCount = Math.max(...days.map((d) => d.count), 1);
-  const barW = Math.floor((W - PAD * 2) / N);
-  const bars = days.map((d, i) => {
-    const barH = Math.max(2, Math.round((d.count / maxCount) * (H - LABEL_TOP - AXIS_BOTTOM)));
-    const x = PAD + i * barW; const y = H - AXIS_BOTTOM - barH;
-    return `<rect x="${x}" y="${y}" width="${barW - 2}" height="${barH}" class="graph-bar${i === N - 1 ? ' graph-bar-today' : ''}" rx="2"><title>${d.label}: ${d.count} application${d.count !== 1 ? 's' : ''}</title></rect>${d.count > 0 ? `<text x="${x + (barW - 2) / 2}" y="${y - 2}" class="graph-label" text-anchor="middle">${d.count}</text>` : ''}`;
-  });
-  const labels = [0, Math.floor((N - 1) / 2), N - 1].map((i) => `<text x="${PAD + i * barW + (barW - 2) / 2}" y="${H}" class="graph-date" text-anchor="middle">${days[i].label}</text>`);
-  return `<svg viewBox="0 0 ${W} ${H + 4}" class="applications-graph" xmlns="http://www.w3.org/2000/svg">${bars.join('')}${labels.join('')}</svg>`;
+  const mid = Math.floor((N - 1) / 2);
+  const cols = days.map((d, i) => `<div class="ag-col${i === N - 1 ? ' today' : ''}" title="${d.label}: ${d.count} application${d.count !== 1 ? 's' : ''}">${d.count ? `<span class="ag-n">${d.count}</span>` : ''}<i style="height:${d.count ? Math.max(6, Math.round((d.count / maxCount) * 100)) : 0}%"></i></div>`).join('');
+  const axis = `<span style="grid-column:1;text-align:left">${days[0].label}</span><span style="grid-column:${mid + 1};text-align:center">${days[mid].label}</span><span style="grid-column:${N};text-align:right">${days[N - 1].label}</span>`;
+  return `<div class="ag${N > 14 ? ' ag-tall' : ''}" style="--n:${N}" role="img" aria-label="Applications per day, last ${N} days"><div class="ag-bars">${cols}</div><div class="ag-axis">${axis}</div></div>`;
 }
 
 let dashBusy = false, dashAgain = false;

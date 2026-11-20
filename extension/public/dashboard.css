@@ -191,3 +191,18 @@ tr.row-new td { animation: row-flash 1.6s ease-out; }
 @keyframes nt-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes nt-pop { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .notice-overlay, .notice-overlay.out, .notice-modal { animation: none; } }
+
+/* Applications graph: HTML bars so numbers and dates keep a real size */
+.ag { --h: 96px; }
+.ag.ag-tall { --h: 150px; }
+.ag-bars { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 4px; align-items: end; height: calc(var(--h) + 18px); }
+.ag-col { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; min-width: 0; }
+.ag-col i { display: block; width: 100%; max-width: 44px; border-radius: 5px 5px 2px 2px; background: color-mix(in srgb, var(--primary) 80%, white); transition: height .4s cubic-bezier(.3,1.3,.5,1); max-height: var(--h); }
+.ag-col.today i { background: var(--primary); }
+.ag-col:hover i { background: var(--primary-hover); }
+.ag-col:not(:has(.ag-n)) i { height: 3px !important; background: var(--border-strong); }
+.ag-n { font: 600 12px/1 var(--font-sans); color: var(--text-muted); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.ag-axis { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 4px; margin-top: 8px; font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+.ag-axis span:first-child { justify-self: start; } .ag-axis span:nth-child(2) { justify-self: center; } .ag-axis span:last-child { justify-self: end; }
+@media (max-width: 640px) { .ag:not(.ag-tall) .ag-n, .ag.ag-tall .ag-n { font-size: 10px; } }
+@media (prefers-reduced-motion: reduce) { .ag-col i { transition: none; } }
