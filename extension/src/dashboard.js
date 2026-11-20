@@ -663,6 +663,41 @@ async function attachAutofill() {
   for (const [id, kind] of Object.entries(SETUP_AUTOFILL)) { const el = document.getElementById(id); if (el) attach(el, kind, 'af-' + id); }
 }
 
+// One-time pop-ups on the Dashboard, one at a time: the new look (people updating from before it),
+// then "your NHS forms are ready" for anyone who never chose Submit for me.
+let noticeOpen = false;
+async function popNotices({ nhsReady }) {
+  if (noticeOpen || document.querySelector('.welcome-overlay')) return;
+  const look = (await chrome.storage.local.get('lookNotice')).lookNotice === 'show';
+  if (!look && !nhsReady) return;
+  noticeOpen = true;
+  const o = document.createElement('div'); o.className = 'notice-overlay';
+  o.innerHTML = look ? `<div class="notice-modal" role="dialog" aria-labelledby="nt-h">
+      <div class="notice-badge">New</div>
+      <h2 id="nt-h">Fresh look, same Job-AI ✨</h2>
+      <ul class="notice-list">
+        <li><span>🎨</span>New colours, cleaner pages</li>
+        <li><span>✂️</span>Less reading, more applying</li>
+        <li><span>👆</span>Tap a number to jump straight to it</li>
+      </ul>
+      <button class="primary" id="nt-ok">Let's go</button></div>`
+    : `<div class="notice-modal" role="dialog" aria-labelledby="nt-h">
+      <div class="notice-badge ok">NHS</div>
+      <h2 id="nt-h">Your NHS forms are ready 🎉</h2>
+      <p>${nhsReady} finished, just waiting on Submit. Want Job-AI to send finished ones for you?</p>
+      <p class="notice-small">Only complete forms. Never ones that ask about AI use.</p>
+      <div class="notice-actions"><button class="primary" id="nt-yes">Yes, send them</button><button class="secondary" id="nt-no">I'll do it myself</button></div></div>`;
+  document.body.appendChild(o);
+  const close = () => { o.classList.add('out'); setTimeout(() => { o.remove(); noticeOpen = false; }, 220); };
+  if (look) {
+    $('#nt-ok').addEventListener('click', async () => { await chrome.storage.local.set({ lookNotice: 'done' }); close(); });
+  } else {
+    $('#nt-yes').addEventListener('click', async () => { const st = await store.get('settings'); await store.patch('settings', { autoSubmit: { ...(st.autoSubmit || {}), trac: true }, tracSubmitChosen: true, nhsAskDone: true }); store.log('Submit for me is on for NHS: finished applications go out on the next round.'); close(); VIEWS.dashboard(); });
+    $('#nt-no').addEventListener('click', async () => { await store.patch('settings', { nhsAskDone: true }); close(); });
+  }
+  setTimeout(() => o.querySelector('button')?.focus(), 50);
+}
+
 // Smooth jump to a part of the page, clear of the sticky section bar.
 function jumpTo(el) { if (!el) return; el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); el.classList.remove('jump-flash'); void el.offsetWidth; el.classList.add('jump-flash'); }
 function navigate(v) {
@@ -1140,6 +1175,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     if (setupDone.search && !$('.welcome-overlay')) regionSitesPrompt(region, { newOnly: true });
     $('#dash-tailor')?.addEventListener('click', () => navigate('tailor'));
     $('#jump-agents')?.addEventListener('click', () => jumpTo($('#dash-agents')));
+    popNotices({ nhsReady: uk && wantsNhs && !submitOn.trac && !settings.tracSubmitChosen && !settings.nhsAskDone ? ready.length : 0 });
     $('#gs-edit')?.addEventListener('click', (e) => { e.stopPropagation(); $('#setup-menu').classList.add('open'); });
     $$('.summary-card[data-jump]').forEach((c) => {
       const go = () => {

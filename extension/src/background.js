@@ -23,6 +23,9 @@ chrome.runtime.onInstalled.addListener(async (d) => {
     const [a, b, c] = d.previousVersion.split('.').map(Number);
     const before = a < 0 || (a === 0 && (b < 5 || (b === 5 && c < 41)));
     if (before && !(await chrome.storage.local.get('extraNotice')).extraNotice) await chrome.storage.local.set({ extraNotice: 'show' });
+    // Had Job-AI before the new look (0.5.92 is the first build that can announce it): one "fresh look" pop-up.
+    const beforeLook = a < 0 || (a === 0 && (b < 5 || (b === 5 && c < 92)));
+    if (beforeLook && !(await chrome.storage.local.get('lookNotice')).lookNotice) await chrome.storage.local.set({ lookNotice: 'show' });
   }
   // Back after an update the dashboard asked for: reopen it so the agents pick up again.
   if (d.reason === 'update' && (await chrome.storage.local.get('resumeAfterUpdate')).resumeAfterUpdate) openDashboard();

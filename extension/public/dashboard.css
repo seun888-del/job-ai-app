@@ -172,3 +172,22 @@ tr.row-new td { animation: row-flash 1.6s ease-out; }
 
 /* Tracker filter buttons: primary and secondary share one baseline */
 .trk-f { margin: 0 !important; height: 40px; padding: 0 16px; display: inline-flex; align-items: center; }
+
+/* One-time pop-ups (new look, NHS submit ask) */
+.notice-overlay { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; padding: 16px; background: rgba(32, 30, 43, .35); animation: nt-fade .2s ease-out; }
+.notice-overlay.out { animation: nt-fade .2s ease-in reverse forwards; }
+.notice-modal { width: min(400px, 100%); background: var(--surface); border: 2px solid var(--text); border-radius: 22px; padding: 26px 24px 22px; text-align: left; animation: nt-pop .38s cubic-bezier(.3,1.5,.5,1); }
+.notice-modal h2 { margin: 10px 0 12px; font: 800 24px/1.1 'Bricolage', var(--font-sans); letter-spacing: -.02em; }
+.notice-modal p { margin: 0 0 10px; color: var(--text-muted); font-size: 15px; line-height: 1.45; }
+.notice-modal .notice-small { font-size: 13px; color: var(--text-faint); }
+.notice-badge { display: inline-block; font: 700 11px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--primary-hover); background: var(--primary-soft); border-radius: 999px; padding: 3px 10px; }
+.notice-badge.ok { color: var(--success); background: var(--success-soft); }
+.notice-list { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 10px; }
+.notice-list li { display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 600; color: var(--text); }
+.notice-list span { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 10px; background: var(--bg); font-size: 17px; }
+.notice-modal > .primary { width: 100%; margin: 4px 0 0; }
+.notice-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.notice-actions button { flex: 1 1 140px; margin: 0; }
+@keyframes nt-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes nt-pop { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .notice-overlay, .notice-overlay.out, .notice-modal { animation: none; } }
