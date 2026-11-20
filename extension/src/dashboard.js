@@ -1193,6 +1193,7 @@ VIEWS.dashboard = async function renderDashboardView() {
       if (on && key === 'trac' && !confirm('Let the NHS agent submit for you?\n\nOnly complete forms, and never ones that ask about AI use.')) { e.target.checked = false; return; }
       const s = await store.get('settings');
       s.autoSubmit = { ...(s.autoSubmit || {}), [key]: on };
+      if (key === 'trac') s.tracSubmitChosen = true;
       await store.set('settings', s); renderDashboard();
     }));
     $$('.pc').forEach((el) => el.addEventListener('change', async (e) => { await store.patch('settings', { [e.target.dataset.k]: e.target.checked }); computerSync(); remoteNudge(); }));
@@ -1226,7 +1227,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     $('#fh-hide')?.addEventListener('click', async () => { await store.patch('settings', { filterHintHiddenAt: new Date().toISOString() }); VIEWS.dashboard(); });
     $('#so-yes')?.addEventListener('click', async () => {
       const s = await store.get('settings');
-      await store.patch('settings', { autoSubmit: { ...(s.autoSubmit || {}), trac: true } });
+      await store.patch('settings', { autoSubmit: { ...(s.autoSubmit || {}), trac: true }, tracSubmitChosen: true });
       store.log('Submit for me is on for NHS: finished applications are submitted on the next round.');
       VIEWS.dashboard();
     });
@@ -1913,7 +1914,8 @@ VIEWS.search = async function renderSearch() {
       schedule: { enabled: $('#s-sched').checked, start: Number($('#s-from').value), end: Number($('#s-to').value), days: $$('.s-day:checked').map((c) => c.value) } });
     const nhsBox = $('#s-nhs');
     if (nhsBox && nhsBox.checked !== nhsOn) {
-      await store.patch('settings', { wantsNhs: nhsBox.checked, nhsOff: !nhsBox.checked });
+      const st0 = await store.get('settings');
+      await store.patch('settings', { wantsNhs: nhsBox.checked, nhsOff: !nhsBox.checked, ...(nhsBox.checked && !st0.tracSubmitChosen ? { autoSubmit: { ...(st0.autoSubmit || {}), trac: true } } : {}) });
       if (!nhsBox.checked && agents.trac.running) agents.trac.stop();
     }
     await loadConfig();
@@ -2182,7 +2184,8 @@ async function claimPhoneSetup(raw, say) {
         }
         if (!(t.searchTerms || []).length && (P.searchTerms || []).length) t.searchTerms = P.searchTerms.slice(0, 40);
         await store.set('trac', t);
-        await store.patch('settings', { wantsNhs: true });
+        const st0 = await store.get('settings');
+        await store.patch('settings', { wantsNhs: true, ...(!st0.tracSubmitChosen ? { autoSubmit: { ...(st0.autoSubmit || {}), trac: true } } : {}) });
       }
       // Federal jobs chosen on the phone (USA): the two answers the federal resume uses.
       if (P.wantsFederal) await store.patch('settings', { wantsFederal: true, federal: { usCitizen: P.federal && P.federal.usCitizen || '', hoursPerWeek: (P.federal && P.federal.hoursPerWeek) || 40 } });
@@ -2606,7 +2609,7 @@ async function initOnboarding() {
       await setRegion(region);
       const nhs = region === 'uk' && $('#wc-nhs').checked;
       const nhsSubmit = nhs && $('#wc-nhssub').checked;
-      await store.patch('settings', { wantsNhs: nhs, ...(nhs ? { autoSubmit: { ...((await store.get('settings')).autoSubmit || {}), trac: nhsSubmit } } : {}), wantsFederal: fedOn, ...(fedOn ? { federal: { ...((await store.get('settings')).federal || {}), usCitizen: $('#wc-fed-cit').value, hoursPerWeek: Math.min(80, Math.max(1, parseInt($('#wc-fed-hrs').value, 10) || 40)) } } : {}) });
+      await store.patch('settings', { wantsNhs: nhs, ...(nhs ? { autoSubmit: { ...((await store.get('settings')).autoSubmit || {}), trac: nhsSubmit }, tracSubmitChosen: true } : {}), wantsFederal: fedOn, ...(fedOn ? { federal: { ...((await store.get('settings')).federal || {}), usCitizen: $('#wc-fed-cit').value, hoursPerWeek: Math.min(80, Math.max(1, parseInt($('#wc-fed-hrs').value, 10) || 40)) } } : {}) });
       if (nhs) {
         // Start their Trac details from what they just checked. Only fills blanks.
         const t = { ...((await store.get('trac')) || {}) };
@@ -2756,7 +2759,7 @@ async function remoteRun(c) {
     if (!terms.length) return { ok: false, message: 'Add at least one job title.' };
     const wt = (p.work_types || []).filter((w) => ['remote', 'hybrid', 'onsite'].includes(w));
     await store.patch('profile', { searchTerms: terms, ...(wt.length ? { workTypePriority: wt } : {}), ...(p.location ? { searchLocation: String(p.location).slice(0, 80) } : {}) });
-    if (typeof p.nhs_submit === 'boolean') { const s = await store.get('settings'); await store.patch('settings', { autoSubmit: { ...(s.autoSubmit || {}), trac: p.nhs_submit } }); }
+    if (typeof p.nhs_submit === 'boolean') { const s = await store.get('settings'); await store.patch('settings', { autoSubmit: { ...(s.autoSubmit || {}), trac: p.nhs_submit }, tracSubmitChosen: true }); }
     await loadConfig(); remoteRefreshView();
     return { ok: true };
   }

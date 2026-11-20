@@ -11,7 +11,7 @@ const DEFAULTS = {
   profile: {},            // name, email, phone, location, salary, work types (the app's "Profile")
   trac: {},               // NHS / Trac details (same fields as the app's NHS / Trac page)
   cv: null,               // { name, text, type, dataB64 }
-  settings: { agents: { trac: true }, autoSubmit: { trac: false }, dailyCap: 25 },
+  settings: { agents: { trac: true }, autoSubmit: { trac: true }, dailyCap: 25 },
   jobs: [],               // the queue: one entry per job found
   log: [],
 };
