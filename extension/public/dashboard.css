@@ -206,3 +206,12 @@ tr.row-new td { animation: row-flash 1.6s ease-out; }
 .ag-axis span:first-child { justify-self: start; } .ag-axis span:nth-child(2) { justify-self: center; } .ag-axis span:last-child { justify-self: end; }
 @media (max-width: 640px) { .ag:not(.ag-tall) .ag-n, .ag.ag-tall .ag-n { font-size: 10px; } }
 @media (prefers-reduced-motion: reduce) { .ag-col i { transition: none; } }
+
+/* One-off message from Job-AI for this user (set from the admin panel) */
+.user-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; border: 2px solid var(--primary); background: var(--primary-soft); animation: nt-pop .38s cubic-bezier(.3,1.5,.5,1); }
+.user-notice .un-text { display: grid; gap: 4px; min-width: 0; flex: 1 1 300px; }
+.user-notice strong { font-family: 'Bricolage', var(--font-sans); font-size: 17px; color: var(--text); }
+.user-notice span { font-size: 14px; color: var(--text-muted); line-height: 1.45; }
+.user-notice .un-actions { display: flex; gap: 10px; align-items: center; }
+.user-notice .un-actions .primary { margin: 0; }
+@media (prefers-reduced-motion: reduce) { .user-notice { animation: none; } }

@@ -147,7 +147,7 @@ async function recheckLicence() {
   if (!l.key) return false;
   try {
     const r = await checkLicense(l.key);
-    if (r.ok) await store.patch('license', { status: r.licenseStatus || 'active', expiresAt: r.expires_at, trialApps: r.trial_apps, trialAppsSent: r.trial_apps_sent, checkedAt: Date.now() });
+    if (r.ok) await store.patch('license', { status: r.licenseStatus || 'active', expiresAt: r.expires_at, trialApps: r.trial_apps, trialAppsSent: r.trial_apps_sent, notice: r.notice || null, checkedAt: Date.now() });
     else if (r.http === 401 || r.http === 403) await store.patch('license', { status: r.error === 'device_trial_used' ? 'device_trial_used' : 'expired', checkedAt: Date.now() });
   } catch (_) { /* offline: fall back to the last known status and expiry */ }
   return licenceActive(await store.get('license'));
@@ -884,10 +884,12 @@ function buildApplicationsGraph(all, N = 14) {
   return `<div class="ag${N > 14 ? ' ag-tall' : ''}" style="--n:${N}" role="img" aria-label="Applications per day, last ${N} days"><div class="ag-bars">${cols}</div><div class="ag-axis">${axis}</div></div>`;
 }
 
-let dashBusy = false, dashAgain = false;
+let dashBusy = false, dashAgain = false, noticeCheckAt = 0;
+const NOTICE_BTN = { nhs_submit: 'Turn on Submit for me', open_search: 'Open Search preferences', open_trac: 'Open NHS details', start: 'Start applying' };
 VIEWS.dashboard = async function renderDashboardView() {
   // A redraw asked for mid-redraw runs once more afterwards, so a change is never left unshown.
   if (dashBusy) { dashAgain = true; return; } dashBusy = true;
+  if (Date.now() - noticeCheckAt > 3 * 3600e3) { noticeCheckAt = Date.now(); store.get('license').then((l) => { if (l && l.key && Date.now() - (l.checkedAt || 0) > 3 * 3600e3) recheckLicence().then(() => VIEWS.dashboard()).catch(() => {}); }); }
   try {
     const { license, profile, trac, settings } = await loadConfig();
     const cv = await store.get('cv');
@@ -964,6 +966,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     const offerWider = tooFar.length >= 8 && profile.matchLevel !== 'wide' && !settings.widerOfferOff;
     // Ask for a Chrome Web Store review only once Job-AI has clearly helped: 10+ applications sent.
     // "Not now" asks again in 14 days, at most twice; a click on Leave a review never asks again.
+    const userNotice = license.notice && license.notice.id && !(settings.noticeDone || {})[license.notice.id] ? license.notice : null;
     const allSetup = setupDone.personal && setupDone.search && setupDone.cvs && hasLicence && (!(uk && wantsNhs) || setupDone.trac) && (!wantsFederal || !!fed.usCitizen);
     const askReview = hasLicence && applied.length >= 10 && !settings.reviewDone && !offerWider && !extraNotice
       && (!settings.reviewSnoozeUntil || Date.now() > Date.parse(settings.reviewSnoozeUntil));
@@ -1044,6 +1047,7 @@ VIEWS.dashboard = async function renderDashboardView() {
           <button class="primary" id="keep-jobai">Keep Job-AI</button></div>`
         : `<div class="no-license-banner"><span>Set up Job-AI to run the Agents. It takes a few minutes.</span><button class="no-license-cta" id="nl-setup">Set up Job-AI →</button></div>`}
 
+      ${userNotice ? `<div class="card user-notice" id="user-notice"><div class="un-text"><strong>${esc(userNotice.title)}</strong><span>${esc(userNotice.body)}</span></div><div class="un-actions">${userNotice.action !== 'none' ? `<button class="primary" id="un-go">${esc(userNotice.button || NOTICE_BTN[userNotice.action] || 'Go')}</button>` : ''}<button class="welcome-skip-link" id="un-no">${userNotice.action === 'none' ? 'Got it' : 'Not now'}</button></div></div>` : ''}
       ${extraNotice ? `<div class="no-license-banner"><span><strong>New:</strong> Job-AI can now also apply on ${extraForRegion(region).map(([, l]) => l).join(us ? ', ' : ' and ').replace(/, ([^,]*)$/, ' and $1')} if you have an account there. It still applies on employers' own websites as well.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="extra-yes">Turn on</button><button class="welcome-skip-link" id="extra-no">No thanks</button></span></div>` : ''}
       ${askReview ? `<div class="no-license-banner"><span>${applied.length} sent. Enjoying it? Leave a quick review.</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="review-yes">Leave a review</button><button class="welcome-skip-link" id="review-no">Not now</button></span></div>` : ''}
       ${offerWider ? `<div class="no-license-banner"><span>${tooFar.length} jobs this week were skipped as not a close enough match. Try a wider match?</span><span style="display:flex;gap:8px"><button class="no-license-cta" id="wider-yes">Try Wider</button><button class="welcome-skip-link" id="wider-no">No thanks</button></span></div>` : ''}
@@ -1171,6 +1175,19 @@ VIEWS.dashboard = async function renderDashboardView() {
     if (setupDone.search && !$('.welcome-overlay')) regionSitesPrompt(region, { newOnly: true });
     $('#dash-tailor')?.addEventListener('click', () => navigate('tailor'));
     $('#jump-agents')?.addEventListener('click', () => jumpTo($('#dash-agents')));
+    if (userNotice) {
+      const done = async () => { const st = await store.get('settings'); await store.patch('settings', { noticeDone: { ...(st.noticeDone || {}), [userNotice.id]: true } }); };
+      $('#un-no')?.addEventListener('click', async () => { await done(); VIEWS.dashboard(); });
+      $('#un-go')?.addEventListener('click', async () => {
+        await done();
+        const a = userNotice.action;
+        if (a === 'nhs_submit') { const st = await store.get('settings'); await store.patch('settings', { autoSubmit: { ...(st.autoSubmit || {}), trac: true }, tracSubmitChosen: true, nhsAskDone: true }); store.log('Submit for me is on for NHS: finished applications go out on the next round.'); VIEWS.dashboard(); }
+        else if (a === 'open_search') navigate('search');
+        else if (a === 'open_trac') navigate('trac-details');
+        else if (a === 'start') { VIEWS.dashboard(); setTimeout(() => $('#start-all')?.click(), 300); }
+        else VIEWS.dashboard();
+      });
+    }
     popNotices({ nhsReady: uk && wantsNhs && !submitOn.trac && !settings.tracSubmitChosen && !settings.nhsAskDone ? ready.length : 0 });
     $('#gs-edit')?.addEventListener('click', (e) => { e.stopPropagation(); $('#setup-menu').classList.add('open'); });
     $$('.summary-card[data-jump]').forEach((c) => {
