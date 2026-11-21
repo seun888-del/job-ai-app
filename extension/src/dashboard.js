@@ -915,6 +915,10 @@ VIEWS.dashboard = async function renderDashboardView() {
     const ucOn = uk && (profile.country || 'United Kingdom') === 'United Kingdom';
     const ucPending = all.filter((j) => j.status === 'applied' && !j.ucLoggedAt);
     const hasLicence = licenceActive(license);
+    const weekAgoF = Date.now() - 7 * 864e5;
+    const foundWeek = all.filter((j) => Date.parse(j.updatedAt || j.appliedAt || 0) >= weekAgoF).length;
+    const fewJobs = !fh && hasLicence && region !== 'ca' && all.length > 0 && foundWeek < 20 && (profile.searchTerms || []).length > 0
+      && (!settings.fewJobsSnoozeUntil || Date.now() > Date.parse(settings.fewJobsSnoozeUntil));
     // Trial days left (null when not on a trial), and a trial or plan that has run out.
     const trialLeft = hasLicence && license.status === 'trial' && license.expiresAt ? Math.max(0, Math.ceil((new Date(license.expiresAt) - Date.now()) / 86400000)) : null;
     const ended = !hasLicence && !!license.key && license.status !== 'device_trial_used';
@@ -1061,6 +1065,9 @@ VIEWS.dashboard = async function renderDashboardView() {
         <p class="card-hint" style="margin:0 0 12px">Job-AI filled in everything it could and saved each one as a draft on Trac. ${topMiss.length ? `Most of them still need: <strong>${esc(topMiss.join(', '))}</strong>. ` : ''}${submitOn.trac ? 'Add the missing answers once and Job-AI finishes and submits them.' : 'Add the missing answers once and Job-AI finishes them. Then you press Submit.'}</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="primary" id="do-fix" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Add the missing answers</button><button class="secondary" id="do-show" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">Open the first one on Trac</button><button class="secondary" id="do-list" style="margin:0;padding:10px 18px;font-size:14px;line-height:1.2;height:auto">See them all</button><button class="welcome-skip-link" id="do-no">Later</button></div></div>` : ''}
       ${filterHintHtml(fh)}
+      ${fewJobs ? `<div class="card few-jobs-card" id="few-jobs"><div class="fj-top"><div><strong>Only ${foundWeek} job${foundWeek === 1 ? '' : 's'} found this week</strong><span>Add a few related titles and Job-AI can find far more to apply for.</span></div><button class="welcome-skip-link" id="fj-no">Not now</button></div>
+        <div class="fj-chips" id="fj-chips"><span class="fj-load">Finding related titles…</span></div>
+        <div class="fj-actions"><button class="primary" id="fj-add" disabled>Add titles</button>${profile.matchLevel !== 'wide' ? '<button class="secondary" id="fj-wide">Use a wider match</button>' : ''}<span class="status-msg" id="fj-st"></span></div></div>` : ''}
       ${canRun.ats && !applied.length && !running ? `<div class="card first-win-card" style="border:1.5px solid var(--accent, #2563eb);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
         <div><h3 style="margin:0 0 4px;font-size:20px;text-transform:none;letter-spacing:-0.01em;color:var(--text, inherit)" id="fw-count">Checking live jobs for you...</h3>
         <p class="card-hint" style="margin:0">Press start. Your first application usually goes out in minutes.</p></div>
@@ -1175,6 +1182,26 @@ VIEWS.dashboard = async function renderDashboardView() {
     if (setupDone.search && !$('.welcome-overlay')) regionSitesPrompt(region, { newOnly: true });
     $('#dash-tailor')?.addEventListener('click', () => navigate('tailor'));
     $('#jump-agents')?.addEventListener('click', () => jumpTo($('#dash-agents')));
+    if (fewJobs) {
+      const have = new Set((profile.searchTerms || []).map((t) => t.toLowerCase()));
+      const picked = new Set();
+      const cc = region === 'us' ? 'US' : 'GB';
+      Promise.all((profile.searchTerms || []).slice(0, 3).map((t) => fetch(`${BACKEND}/jobs/titles.json?country=${cc}&q=${encodeURIComponent(t)}`, { signal: AbortSignal.timeout(10000) }).then((r) => r.json()).catch(() => ({ titles: [] }))))
+        .then((res) => {
+          const box = $('#fj-chips'); if (!box) return;
+          const titles = [...new Set(res.flatMap((r) => r.titles || []))].filter((t) => !have.has(t.toLowerCase())).slice(0, 8);
+          if (!titles.length) { box.innerHTML = '<span class="fj-load">No related titles found. Try adding one yourself in Search preferences.</span>'; return; }
+          box.innerHTML = titles.map((t) => `<button type="button" class="fj-chip" aria-pressed="false">${esc(t)}</button>`).join('');
+          box.addEventListener('click', (e) => { const c = e.target.closest('.fj-chip'); if (!c) return; const on = c.getAttribute('aria-pressed') !== 'true'; c.setAttribute('aria-pressed', on); if (on) picked.add(c.textContent); else picked.delete(c.textContent); $('#fj-add').disabled = !picked.size; });
+        });
+      $('#fj-add')?.addEventListener('click', async () => {
+        const p = await store.get('profile'); const terms = [...(p.searchTerms || []), ...picked].slice(0, 40);
+        await store.patch('profile', { searchTerms: terms }); await store.patch('settings', { fewJobsSnoozeUntil: new Date(Date.now() + 7 * 864e5).toISOString() });
+        store.log(`Added ${picked.size} job title${picked.size === 1 ? '' : 's'}: ${[...picked].join(', ')}`); VIEWS.dashboard();
+      });
+      $('#fj-wide')?.addEventListener('click', async () => { await store.patch('profile', { matchLevel: 'wide', minScore: null }); setSt('#fj-st', 'Wider match is on.'); $('#fj-wide').remove(); });
+      $('#fj-no')?.addEventListener('click', async () => { await store.patch('settings', { fewJobsSnoozeUntil: new Date(Date.now() + 7 * 864e5).toISOString() }); VIEWS.dashboard(); });
+    }
     if (userNotice) {
       const done = async () => { const st = await store.get('settings'); await store.patch('settings', { noticeDone: { ...(st.noticeDone || {}), [userNotice.id]: true } }); };
       $('#un-no')?.addEventListener('click', async () => { await done(); VIEWS.dashboard(); });

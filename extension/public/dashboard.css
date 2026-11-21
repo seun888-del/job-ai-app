@@ -215,3 +215,15 @@ tr.row-new td { animation: row-flash 1.6s ease-out; }
 .user-notice .un-actions { display: flex; gap: 10px; align-items: center; }
 .user-notice .un-actions .primary { margin: 0; }
 @media (prefers-reduced-motion: reduce) { .user-notice { animation: none; } }
+
+/* Few jobs found: related title chips */
+.few-jobs-card { border: 2px solid var(--primary); }
+.fj-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.fj-top strong { display: block; font-family: 'Bricolage', var(--font-sans); font-size: 17px; color: var(--text); }
+.fj-top span { font-size: 14px; color: var(--text-muted); }
+.fj-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.fj-chip { border: 2px solid var(--text); background: var(--surface); color: var(--text); border-radius: 999px; padding: 6px 14px; font: 600 13.5px var(--font-sans); cursor: pointer; margin: 0; }
+.fj-chip[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: #fff; }
+.fj-load { font-size: 13.5px; color: var(--text-faint); }
+.fj-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.fj-actions button { margin: 0; }
