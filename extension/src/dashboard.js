@@ -10,7 +10,7 @@ import { LinkedInAgent } from './agents/linkedin.js';
 import { IndeedAgent } from './agents/indeed.js';
 import { DiceAgent } from './agents/dice.js';
 import { WellfoundAgent } from './agents/wellfound.js';
-import { AtsAgent, feedJobs, fetchJD, fillAndOpen, releaseHeld } from './agents/ats.js';
+import { AtsAgent, feedJobs, fetchJD, fillAndOpen, releaseHeld, answerHeld, skipHeld } from './agents/ats.js';
 import { UsajobsAgent, federalQuestionnaire } from './agents/usajobs.js';
 import { JobBankAgent, jobBankReady, JOBBANK_ORIGINS } from './agents/jobbank.js';
 import { WorkHubAgent, WORKHUB_ORIGINS } from './agents/workhub.js';
@@ -2808,7 +2808,12 @@ async function remoteExtra() {
   for (const j of all.filter((x) => x.source === 'usajobs' && x.status === 'ready_to_submit').sort(newest)) {
     inbox.push({ id: j.jobId, kind: 'waiting', title: j.title || '', company: j.company || '', note: `Federal job${j.closes ? `, closes ${j.closes}` : ''}. Your federal resume is in Job-AI on your computer: download it there, then apply on USAJOBS.`, url: safeUrl(j.url) || '', at: j.updatedAt || '' });
   }
-  for (const j of all.filter((x) => x.status === 'ready').sort(newest)) {
+  // Questions held for the phone: the filled form waits in a kept tab until they're answered.
+  for (const j of all.filter((x) => x.status === 'ready' && x.phoneQs && x.phoneQs.length).sort(newest)) {
+    inbox.push({ id: j.jobId, kind: 'question', title: j.title || '', company: j.company || '', note: 'Answer these and Job-AI sends the application from your computer.', url: safeUrl(j.url) || '', at: j.updatedAt || '',
+      questions: j.phoneQs.map((q) => ({ key: q.key, label: q.label, type: q.type, options: q.options || [] })) });
+  }
+  for (const j of all.filter((x) => x.status === 'ready' && !(x.phoneQs && x.phoneQs.length)).sort(newest)) {
     inbox.push({ id: j.jobId, kind: 'waiting', title: j.title || '', company: j.company || '', note: 'Ready to send. On your computer, press Fill and open in Job-AI, check it and press Submit.', url: safeUrl(j.url) || '', at: j.updatedAt || '' });
   }
   const tracker = all.filter((j) => j.status === 'applied').sort((a, b) => String(b.appliedAt || b.updatedAt).localeCompare(String(a.appliedAt || a.updatedAt))).slice(0, 150)
@@ -2852,6 +2857,12 @@ async function remoteRun(c) {
     await store.updateJob(p.job_id, { stage: p.stage }); remoteRefreshView();
     return { ok: true };
   }
+  if (c.cmd === 'answer_questions') {
+    if (!(await recheckLicence())) return { ok: false, message: 'Your Job-AI access has ended. Subscribe to keep applying.' };
+    if ((await store.capUsed()) >= cfg.MAX_APPLICATIONS_PER_DAY) return { ok: false, message: `Today's limit of ${cfg.MAX_APPLICATIONS_PER_DAY} applications is reached. Try again tomorrow.` };
+    return answerHeld(String(p.job_id || ''), p.answers || {}, () => renderDashboard());
+  }
+  if (c.cmd === 'skip_question') return skipHeld(String(p.job_id || ''), 'Skipped on your phone.', () => renderDashboard());
   if (c.cmd === 'submit_nhs') {
     const j = (await store.jobs()).find((x) => x.jobId === p.job_id);
     if (!j || j.source !== 'trac' || j.status !== 'ready_to_submit' || /asks about AI use/.test(j.reason || '')) return { ok: false, message: 'That application is no longer ready to submit.' };
@@ -2874,6 +2885,16 @@ async function remoteRun(c) {
   setTimeout(renderDashboard, 300);
   return { ok: true };
 }
+// Questions not answered within a day: skip the job and close its kept tab.
+let heldSweepAt = 0;
+async function expireHeldQuestions() {
+  if (Date.now() - heldSweepAt < 10 * 60 * 1000) return;
+  heldSweepAt = Date.now();
+  const old = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  for (const j of (await store.jobs()).filter((x) => x.status === 'ready' && x.phoneQs && String(x.heldAt || x.updatedAt) < old)) {
+    await skipHeld(j.jobId, 'no answer on your phone within a day.');
+  }
+}
 async function remotePost(path, body, signal) {
   const r = await fetch(BACKEND + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...apiHeaders() }, body: JSON.stringify(body), signal: signal || AbortSignal.timeout(15000) });
   return r.ok ? r.json() : null;
@@ -2893,6 +2914,9 @@ async function remotePost(path, body, signal) {
     catch (_) { r = ctl.signal.aborted ? {} : null; }
     finally { clearTimeout(t); }
     if (!r) { await pause(15000); continue; }
+    // A phone is linked to this licence: forms stopped by a question wait for it instead of being skipped.
+    if (typeof r.phone === 'boolean') globalThis.__jobaiPhone = r.phone;
+    await expireHeldQuestions().catch(() => {});
     for (const c of r.commands || []) {
       let out; try { out = await remoteRun(c); } catch (e) { out = { ok: false, message: e.message }; }
       await remotePost('/v1/remote/ack', { id: c.id, ok: out.ok, message: out.message || '' }).catch(() => {});

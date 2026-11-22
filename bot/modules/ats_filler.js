@@ -1517,6 +1517,133 @@ Answer truthfully. For a willingness, availability or commitment question the ca
 
 // Greenhouse's embedded form always shows the application, even for companies whose
 // hosted job page redirects to their own careers site (Coinbase, Stripe...).
+// ── Questions answered on the phone ────────────────────────────────────────
+// When a form stops on a required question the profile can't answer, the filled tab is kept
+// and the questions go to the user's phone (tryjobai.com/app). listOpenQuestions reads them
+// (text, choices) and tags each field with data-jai-q so answerQuestions can find it again in
+// the same tab. answerQuestions fills the user's answers, re-checks and submits. Never guesses:
+// a question the user didn't answer stops the submit.
+async function listOpenQuestions(page) {
+  const qs = await page.evaluate(() => {
+    const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
+    const clean = (t) => String(t || '').replace(/\s+/g, ' ').replace(/\s*\*\s*$/, '').trim().slice(0, 200);
+    const textOf = (e) => {
+      const l = (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label');
+      const alb = e.getAttribute('aria-labelledby');
+      const al = alb && document.getElementById(alb.split(' ')[0]);
+      const w = e.closest('fieldset, [class*="field"], [class*="question"], [class*="Question"]');
+      const wl = w && w.querySelector('legend, label, [class*="label"]');
+      return clean((wl && wl.innerText) || (l && l.innerText) || (al && al.innerText) || e.getAttribute('aria-label') || e.placeholder || e.name || '');
+    };
+    const labelOfChoice = (e) => clean(((e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label') || {}).innerText || e.value);
+    const pickedNear = (e) => {
+      let box = e.parentElement;
+      for (let i = 0; i < 5 && box && box.parentElement && box.parentElement.querySelectorAll('input[role="combobox"]').length <= 1; i++) box = box.parentElement;
+      const v = box && box.querySelector('[class*="single-value"],[class*="singleValue"],[class*="multi-value"],[class*="multiValue"]');
+      return !!(v && v.textContent.trim());
+    };
+    const out = [], seen = new Set();
+    let n = 0;
+    for (const e of document.querySelectorAll('input, textarea, select')) {
+      if (['hidden', 'file', 'submit', 'button'].includes(e.type) || /recaptcha|captcha/i.test(e.name || '') || !shown(e)) continue;
+      if (!(e.required || e.getAttribute('aria-required') === 'true')) continue;
+      if (e.type === 'radio' || e.type === 'checkbox') {
+        const key = e.name || e.id; if (seen.has(key)) continue; seen.add(key);
+        const group = e.name ? [...document.querySelectorAll(`input[name="${CSS.escape(e.name)}"]`)] : [e];
+        if (group.some(r => r.checked || (r.closest('[role="radio"],[role="checkbox"]') || { getAttribute: () => '' }).getAttribute('aria-checked') === 'true')) continue;
+        const k = 'q' + (n++); e.setAttribute('data-jai-q', k);
+        if (e.type === 'checkbox' && group.length === 1) out.push({ key: k, label: textOf(e) || labelOfChoice(e), type: 'confirm', options: ['Yes', 'No'] });
+        else out.push({ key: k, label: textOf(e), type: e.type === 'radio' ? 'radio' : 'checks', options: group.map(labelOfChoice).filter(Boolean).slice(0, 30) });
+        continue;
+      }
+      if (String(e.value || '').trim() || pickedNear(e)) continue;
+      const k = 'q' + (n++); e.setAttribute('data-jai-q', k);
+      if (e.tagName === 'SELECT') out.push({ key: k, label: textOf(e), type: 'select', options: [...e.options].map(o => clean(o.text)).filter((t, i) => t && !(i === 0 && /select|choose|please/i.test(t))).slice(0, 60) });
+      else if (e.getAttribute('role') === 'combobox') out.push({ key: k, label: textOf(e), type: 'combobox', options: [] });
+      else out.push({ key: k, label: textOf(e), type: e.tagName === 'TEXTAREA' ? 'textarea' : (['number', 'date', 'email', 'tel', 'url'].includes(e.type) ? e.type : 'text'), options: [] });
+    }
+    return out;
+  }).catch(() => []);
+  // Dropdowns built from a text box (react-select): open each one to read its choices.
+  for (const q of qs.filter((x) => x.type === 'combobox')) {
+    const box = await page.$(`[data-jai-q="${q.key}"]`).catch(() => null);
+    if (!box) continue;
+    q.options = await _comboOptions(box);
+    await box.press('Escape').catch(() => {});
+    if (!q.options.length) q.type = 'text';
+  }
+  return qs.filter((q) => q.label);
+}
+
+async function _comboOptions(box) {
+  await box.evaluate(el => {
+    el.focus();
+    const ctl = el.closest('[class*="control"]') || el.parentElement;
+    for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const E = t.startsWith('pointer') && typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+      ctl.dispatchEvent(new E(t, { bubbles: true, cancelable: true, button: 0, view: window, pointerType: 'mouse' }));
+    }
+  }).catch(() => {});
+  await J(600, 900);
+  return box.evaluate(el => {
+    const id = el.getAttribute('aria-controls');
+    const menu = id && document.getElementById(id);
+    return Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent)
+      .map(o => (o.innerText || o.textContent || '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 60);
+  }).catch(() => []);
+}
+
+// answers: { key: text }. Returns { ok:true } when the site confirms the application, else
+// { ok:false, reason } ('missing' with the questions still blank, or the submit outcome).
+async function answerQuestions(page, questions, answers, ats) {
+  for (const q of questions || []) {
+    const v = String((answers || {})[q.key] == null ? '' : answers[q.key]).trim();
+    if (!v) continue;
+    const sel = `[data-jai-q="${q.key}"]`;
+    try {
+      if (q.type === 'select') await page.locator(sel).first().selectOption(v);
+      else if (q.type === 'confirm') { if (/^yes$/i.test(v)) await page.locator(sel).first().check(); }
+      else if (q.type === 'radio' || q.type === 'checks') {
+        await page.evaluate(([s, want]) => {
+          const first = document.querySelector(s); if (!first) return false;
+          const group = first.name ? [...document.querySelectorAll(`input[name="${CSS.escape(first.name)}"]`)] : [first];
+          const norm = (t) => String(t || '').replace(/\s+/g, ' ').replace(/\s*\*\s*$/, '').trim();
+          const lab = (e) => norm(((e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label') || {}).innerText || e.value);
+          const hit = group.find((e) => lab(e) === norm(want)) || group.find((e) => lab(e).toLowerCase() === norm(want).toLowerCase());
+          if (!hit) return false;
+          ((hit.id && document.querySelector(`label[for="${CSS.escape(hit.id)}"]`)) || hit).click();
+          return true;
+        }, [sel, v]);
+      } else if (q.type === 'combobox') {
+        const box = await page.$(sel);
+        if (!box) continue;
+        await _comboOptions(box);
+        let ok = await box.evaluate((el, want) => {
+          const id = el.getAttribute('aria-controls');
+          const menu = id && document.getElementById(id);
+          const opt = Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent)
+            .find(o => (o.innerText || o.textContent || '').replace(/\s+/g, ' ').trim() === want);
+          if (!opt) return false;
+          for (const t of ['pointermove', 'mousemove', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+            const E = t.startsWith('pointer') && typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+            opt.dispatchEvent(new E(t, { bubbles: true, cancelable: true, button: 0, view: window, pointerType: 'mouse' }));
+          }
+          return true;
+        }, v).catch(() => false);
+        if (!ok) { await box.fill(v).catch(() => {}); await J(1200, 1800); await box.press('Enter').catch(() => {}); }
+      } else {
+        await page.locator(sel).first().fill(v);
+      }
+      await J(250, 500);
+    } catch (e) { console.log(`  [ATS] ⚠ Could not put the answer in "${String(q.label).slice(0, 40)}": ${e.message}`); }
+  }
+  await J(800, 1200);
+  const still = await _findEmptyRequired(page);
+  if (still.length) { lastOutcome = 'empty'; return { ok: false, reason: 'missing', still }; }
+  const sent = await _trySubmit(page, ats);
+  return sent === true ? { ok: true } : { ok: false, reason: lastOutcome };
+}
+
 function formUrl(url) {
   const m = String(url || '').match(/greenhouse\.io\/([^/?#]+)\/jobs\/(\d+)/i);
   if (m) return `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}`;
@@ -1525,4 +1652,4 @@ function formUrl(url) {
   return p ? `${p[1]}/applications/new` : url;
 }
 
-module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, submitEmailCode, formUrl, lastSubmitOutcome: () => lastOutcome, _yesNoForQuestion, _pickRadioOption, _pickDropdownOption };
+module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, submitEmailCode, listOpenQuestions, answerQuestions, formUrl, lastSubmitOutcome: () => lastOutcome, _yesNoForQuestion, _pickRadioOption, _pickDropdownOption };

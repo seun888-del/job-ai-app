@@ -152,7 +152,14 @@ export class AtsAgent extends SiteAgent {
   async park(job, why, kind = 'form', { hold = false } = {}) {
     const st = (await store.get('settings')) || {};
     // "Fully automatic": skip it. "Bring me the hard ones" or "Check every application": it waits.
-    const skip = (await this.submitOn()) && !st.hardOnes;
+    let skip = (await this.submitOn()) && !st.hardOnes;
+    // A question only the user can answer, with their phone linked to Job-AI: keep the filled
+    // form and send the questions to the phone instead of skipping (answered there, then sent).
+    let phoneQs = null;
+    if (kind === 'question' && hold && globalThis.__jobaiPhone && this.page && !this.page.isClosed()) {
+      phoneQs = await atsFiller.listOpenQuestions(this.page).catch(() => []);
+      if (phoneQs.length && phoneQs.length <= 8) skip = false; else phoneQs = null;
+    }
     outcome(job, (skip ? 'skip_' : 'wait_') + kind);
     if (skip) {
       await store.updateJob(job.jobId, { status: 'skipped', reason: 'Skipped: ' + (why || 'needs a person to send it.') });
@@ -160,7 +167,14 @@ export class AtsAgent extends SiteAgent {
     } else {
       // The form is already filled in this tab: keep it, so Open shows it ready for the last step.
       const heldTabId = hold ? await this.holdTab() : null;
-      await store.updateJob(job.jobId, { status: 'ready', waitKind: kind, heldTabId, reason: (why ? why + ' ' : '') + (heldTabId ? HELD : READY) });
+      // Phone questions need the kept tab; without one the job is skipped as before.
+      if (phoneQs && !heldTabId && (await this.submitOn()) && !st.hardOnes) {
+        await store.updateJob(job.jobId, { status: 'skipped', reason: 'Skipped: ' + (why || 'needs a person to send it.') });
+        this.onChange();
+        return 'ready';
+      }
+      await store.updateJob(job.jobId, { status: 'ready', waitKind: kind, heldTabId, phoneQs: heldTabId ? phoneQs : null, heldAt: new Date().toISOString(),
+        reason: (why ? why + ' ' : '') + (heldTabId && phoneQs ? 'Answer it on your phone, or press Open here.' : heldTabId ? HELD : READY) });
       this.log(`Ready for you to send: ${job.title} @ ${job.company}${why ? ' (' + why.replace(/\.$/, '') + ')' : ''}`);
     }
     this.onChange();
@@ -261,6 +275,41 @@ const LAST_STEP = {
 export function releaseHeld(job) {
   if (job && job.heldTabId) chrome.tabs.remove(job.heldTabId).catch(() => {});
 }
+// The user answered a held job's questions on their phone: fill them in the kept tab and send.
+export async function answerHeld(jobId, answers, onChange = () => {}) {
+  const job = (await store.jobs()).find((j) => j.jobId === jobId && j.status === 'ready' && j.phoneQs);
+  if (!job) return { ok: false, message: 'That application is no longer waiting.' };
+  const kept = job.heldTabId ? await chrome.tabs.get(job.heldTabId).catch(() => null) : null;
+  if (!kept) {
+    await store.updateJob(jobId, { status: 'skipped', phoneQs: null, reason: 'Skipped: the form was closed before it could be sent.' });
+    onChange();
+    return { ok: false, message: 'The form was closed on your computer, so this job was skipped.' };
+  }
+  const tab = new Page(kept.id, kept.windowId);
+  const r = await atsFiller.answerQuestions(tab, job.phoneQs, answers || {}, atsFiller.detectATS(job.url) || job.ats);
+  outcome(job, r.ok ? 'sent' : 'skip_question');
+  if (r.ok) {
+    await store.updateJob(jobId, { status: 'applied', appliedAt: new Date().toISOString(), phoneQs: null, reason: 'Sent with your answers' });
+    store.log(`✓ Sent with your answers: ${job.title} @ ${job.company}`);
+    releaseHeld(job);
+    onChange();
+    return { ok: true };
+  }
+  if (r.reason === 'missing') return { ok: false, message: 'The form still has a question left blank. Open it on your computer to finish.' };
+  const why = { captcha: 'The site asked for a human check. Open it on your computer to finish.', email_code: 'The site emailed you a code. Enter it in Needs you.', validation: 'The site did not accept an answer. Open it on your computer to check.' }[r.reason] || 'The site did not confirm it. Open it on your computer to check.';
+  await store.updateJob(jobId, { phoneQs: null, reason: why });
+  onChange();
+  return { ok: false, message: why };
+}
+export async function skipHeld(jobId, why = 'Skipped on your phone.', onChange = () => {}) {
+  const job = (await store.jobs()).find((j) => j.jobId === jobId && j.status === 'ready');
+  if (!job) return { ok: true };
+  await store.updateJob(jobId, { status: 'skipped', phoneQs: null, reason: 'Skipped: ' + why });
+  releaseHeld(job);
+  onChange();
+  return { ok: true };
+}
+
 // One anonymous count per finished job (see __jobaiOutcome in dashboard.js).
 function outcome(job, kind) {
   if (globalThis.__jobaiOutcome) globalThis.__jobaiOutcome(atsFiller.detectATS(job.url) || job.ats || '', kind);

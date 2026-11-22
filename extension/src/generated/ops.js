@@ -314,6 +314,82 @@ module.exports = {
         }
         return true;
       },
+  "fdb607594a464": () => {
+    const shown = (e) => !!(e.offsetParent || (e.labels && [...e.labels].some(l => l.offsetParent)));
+    const clean = (t) => String(t || '').replace(/\s+/g, ' ').replace(/\s*\*\s*$/, '').trim().slice(0, 200);
+    const textOf = (e) => {
+      const l = (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label');
+      const alb = e.getAttribute('aria-labelledby');
+      const al = alb && document.getElementById(alb.split(' ')[0]);
+      const w = e.closest('fieldset, [class*="field"], [class*="question"], [class*="Question"]');
+      const wl = w && w.querySelector('legend, label, [class*="label"]');
+      return clean((wl && wl.innerText) || (l && l.innerText) || (al && al.innerText) || e.getAttribute('aria-label') || e.placeholder || e.name || '');
+    };
+    const labelOfChoice = (e) => clean(((e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label') || {}).innerText || e.value);
+    const pickedNear = (e) => {
+      let box = e.parentElement;
+      for (let i = 0; i < 5 && box && box.parentElement && box.parentElement.querySelectorAll('input[role="combobox"]').length <= 1; i++) box = box.parentElement;
+      const v = box && box.querySelector('[class*="single-value"],[class*="singleValue"],[class*="multi-value"],[class*="multiValue"]');
+      return !!(v && v.textContent.trim());
+    };
+    const out = [], seen = new Set();
+    let n = 0;
+    for (const e of document.querySelectorAll('input, textarea, select')) {
+      if (['hidden', 'file', 'submit', 'button'].includes(e.type) || /recaptcha|captcha/i.test(e.name || '') || !shown(e)) continue;
+      if (!(e.required || e.getAttribute('aria-required') === 'true')) continue;
+      if (e.type === 'radio' || e.type === 'checkbox') {
+        const key = e.name || e.id; if (seen.has(key)) continue; seen.add(key);
+        const group = e.name ? [...document.querySelectorAll(`input[name="${CSS.escape(e.name)}"]`)] : [e];
+        if (group.some(r => r.checked || (r.closest('[role="radio"],[role="checkbox"]') || { getAttribute: () => '' }).getAttribute('aria-checked') === 'true')) continue;
+        const k = 'q' + (n++); e.setAttribute('data-jai-q', k);
+        if (e.type === 'checkbox' && group.length === 1) out.push({ key: k, label: textOf(e) || labelOfChoice(e), type: 'confirm', options: ['Yes', 'No'] });
+        else out.push({ key: k, label: textOf(e), type: e.type === 'radio' ? 'radio' : 'checks', options: group.map(labelOfChoice).filter(Boolean).slice(0, 30) });
+        continue;
+      }
+      if (String(e.value || '').trim() || pickedNear(e)) continue;
+      const k = 'q' + (n++); e.setAttribute('data-jai-q', k);
+      if (e.tagName === 'SELECT') out.push({ key: k, label: textOf(e), type: 'select', options: [...e.options].map(o => clean(o.text)).filter((t, i) => t && !(i === 0 && /select|choose|please/i.test(t))).slice(0, 60) });
+      else if (e.getAttribute('role') === 'combobox') out.push({ key: k, label: textOf(e), type: 'combobox', options: [] });
+      else out.push({ key: k, label: textOf(e), type: e.tagName === 'TEXTAREA' ? 'textarea' : (['number', 'date', 'email', 'tel', 'url'].includes(e.type) ? e.type : 'text'), options: [] });
+    }
+    return out;
+  },
+  "f5e491878c646": el => {
+    el.focus();
+    const ctl = el.closest('[class*="control"]') || el.parentElement;
+    for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const E = t.startsWith('pointer') && typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+      ctl.dispatchEvent(new E(t, { bubbles: true, cancelable: true, button: 0, view: window, pointerType: 'mouse' }));
+    }
+  },
+  "fc487fc7ed4f3": el => {
+    const id = el.getAttribute('aria-controls');
+    const menu = id && document.getElementById(id);
+    return Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent)
+      .map(o => (o.innerText || o.textContent || '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 60);
+  },
+  "f85ec68435950": ([s, want]) => {
+          const first = document.querySelector(s); if (!first) return false;
+          const group = first.name ? [...document.querySelectorAll(`input[name="${CSS.escape(first.name)}"]`)] : [first];
+          const norm = (t) => String(t || '').replace(/\s+/g, ' ').replace(/\s*\*\s*$/, '').trim();
+          const lab = (e) => norm(((e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label') || {}).innerText || e.value);
+          const hit = group.find((e) => lab(e) === norm(want)) || group.find((e) => lab(e).toLowerCase() === norm(want).toLowerCase());
+          if (!hit) return false;
+          ((hit.id && document.querySelector(`label[for="${CSS.escape(hit.id)}"]`)) || hit).click();
+          return true;
+        },
+  "fa81345fab521": (el, want) => {
+          const id = el.getAttribute('aria-controls');
+          const menu = id && document.getElementById(id);
+          const opt = Array.from((menu || document).querySelectorAll('[role="option"], [class*="select__option"]')).filter(o => o.offsetParent)
+            .find(o => (o.innerText || o.textContent || '').replace(/\s+/g, ' ').trim() === want);
+          if (!opt) return false;
+          for (const t of ['pointermove', 'mousemove', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+            const E = t.startsWith('pointer') && typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+            opt.dispatchEvent(new E(t, { bubbles: true, cancelable: true, button: 0, view: window, pointerType: 'mouse' }));
+          }
+          return true;
+        },
   "f466e4cd1d27d": () => {
     const t = (document.title || '').toLowerCase();
     const b = (document.body?.innerText || '').substring(0, 1200).toLowerCase();
