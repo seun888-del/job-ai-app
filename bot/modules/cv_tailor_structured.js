@@ -60,7 +60,27 @@ const numbersIn = (t) => (String(t).match(/\d[\d,]*\.?\d*%?/g) || []).map((n) =>
 const REFUSAL_RE = /\b(cannot|can't|i'm sorry|i am sorry|unable to|not able to|as an ai)\b/i;
 
 // Empty CV clichés that read as filler to a recruiter — banned from every rewrite.
-const CLICHE_BAN = 'Never use empty CV clichés such as "hardworking", "team player", "results-driven", "detail-oriented", "go-getter", "passionate", "self-starter", "dynamic", "proactive", "synergy", "proven ability", "proven track record" or "thought leader".';
+const CLICHE_BAN = 'Never use empty CV clichés such as "hardworking", "team player", "results-driven", "detail-oriented", "go-getter", "passionate", "self-starter", "dynamic", "proactive", "synergy", "proven ability", "proven track record" or "thought leader". Never use words that make a CV read as AI-written: "skilled in", "proficient in", "demonstrated", "leveraged", "spearheaded", "seamless", "robust", "fostered", "adept", "well-versed", "honed", "showcasing", "a wealth of", "extensive experience", "instrumental in", "pivotal", "meticulous", "orchestrated", "elevated", "empowered" or "cutting-edge". Write plainly, the way the candidate would, keeping their own phrasing where it already works. Vary how sentences start and how long they are: not every line should be "verb, task, result", and only mention a number where the CV gives that number. Use commas, never long dashes.';
+
+// Stock AI phrasing and skill-level claims. A rewrite that uses one the candidate's own CV doesn't
+// is rejected (their own words are always allowed). Same list as the website copy.
+const AI_PHRASES = ['skilled in', 'skilled at', 'highly skilled', 'proficient', 'proficiency', 'demonstrated',
+  'demonstrating', 'leverage', 'leveraged', 'leveraging', 'spearhead', 'spearheaded', 'spearheading', 'seamless',
+  'seamlessly', 'robust', 'foster', 'fostered', 'fostering', 'adept', 'well-versed', 'well versed', 'honed',
+  'showcase', 'showcasing', 'a wealth of', 'extensive experience', 'extensive knowledge', 'instrumental in',
+  'pivotal', 'meticulous', 'orchestrated', 'elevated', 'empowered', 'cutting-edge', 'cutting edge', 'adept at',
+  'expert in', 'expertise in', 'advanced knowledge', 'in-depth knowledge', 'deep knowledge', 'strong background',
+  'keen eye', 'thrives', 'thrive', 'delve', 'navigate', 'navigating', 'tapestry', 'excels', 'excel at'];
+function aiPhrasesIn(corpus, text) { return AI_PHRASES.filter((ph) => hasPhrase(text, ph, 'i') && !hasPhrase(corpus, ph, 'i')); }
+// "PowerShell basics" in the CV must not become plain "PowerShell" skill in the rewrite.
+function upgradedBasics(corpus, text) {
+  const basic = new Set();
+  for (const m of String(corpus).matchAll(/([A-Za-z0-9+#.]+(?: [A-Za-z0-9+#.]+)?) basics?\b/gi)) basic.add(m[1].split(' ').pop());
+  for (const m of String(corpus).matchAll(/\bbasic (?:knowledge of |understanding of )?([A-Za-z0-9+#.]+)/gi)) basic.add(m[1]);
+  if (/\bbasic/i.test(text)) return [];
+  return [...basic].filter((x) => x.length > 2 && hasPhrase(text, x, 'i'));
+}
+const noLongDashes = (x) => String(x || '').replace(/\s*[\u2012-\u2015]\s*/g, ', ').replace(/,\s*,/g, ',');
 
 
 // ── Subtitle ────────────────────────────────────────────────────────────────
@@ -135,7 +155,7 @@ ${String(corpus).slice(0, 6000)}`;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const raw = (await llmChat(prompt + retryNote, 30000)) || '';
-      const para = matchCVCapitals(raw.replace(/^\s*(summary|profile)\s*[:\-]\s*/i, '').replace(/\s*\n+\s*/g, ' ').replace(/^["']+|["']+$/g, '').trim(), corpus);
+      const para = matchCVCapitals(noLongDashes(raw).replace(/^\s*(summary|profile)\s*[:\-]\s*/i, '').replace(/\s*\n+\s*/g, ' ').replace(/^["']+|["']+$/g, '').trim(), corpus);
       const words = para.split(/\s+/).length;
       // A sentence naming two of their employers is mixing facts from different jobs.
       const mixed = (para.match(/[^.!?]+[.!?]*/g) || []).find((sen) => employers.filter((c) => c && c.length > 2 && sen.toLowerCase().includes(c.toLowerCase())).length > 1);
@@ -143,7 +163,7 @@ ${String(corpus).slice(0, 6000)}`;
       // One or two stray advert words ("skilled") get a retry; the last attempt may keep them.
       // Three or more is the summary being written from the advert, never accepted.
       const tooMuchAdvert = borrowed.length >= 3 || (borrowed.length && attempt < 2);
-      const why = mixed ? 'mixes two jobs in one sentence' : words < 45 || words > 110 ? `${words} words` : REFUSAL_RE.test(para.slice(0, 120)) ? 'refusal' : introducesNewFacts(corpus, para) ? `new claim (${newFactsIn(corpus, para).join(', ')})` : tooMuchAdvert ? `advert wording (${borrowed.join(', ')})` : '';
+      const why = mixed ? 'mixes two jobs in one sentence' : words < 45 || words > 110 ? `${words} words` : REFUSAL_RE.test(para.slice(0, 120)) ? 'refusal' : introducesNewFacts(corpus, para) ? `new claim (${newFactsIn(corpus, para).join(', ')})` : aiPhrasesIn(corpus, para).length ? `AI-sounding (${aiPhrasesIn(corpus, para).join(', ')})` : upgradedBasics(corpus, para).length ? `raised skill level (${upgradedBasics(corpus, para).join(', ')})` : tooMuchAdvert ? `advert wording (${borrowed.join(', ')})` : '';
       if (!why) return para;
       console.log(`  [Tailor] Summary rewrite rejected: ${why}`);
       if (borrowed.length) retryNote = `\n\nYour last attempt copied these words from the advert that the CV never uses: ${borrowed.join(', ')}. Do not use them. Use the CV's own words.`;
@@ -379,6 +399,10 @@ function unsafeRewrite(orig, rw, matched, jd = '', cvCorpus = '') {
   if (pasted) return `pasted advert phrase (${pasted})`;
   const added = newFactsIn(bulletCorpus(orig, matched), rw);
   if (added.length) return `new claim (${added.join(', ')})`;
+  const ai = aiPhrasesIn(bulletCorpus(orig, matched) + '  ' + cvCorpus, rw);
+  if (ai.length) return `AI-sounding (${ai.join(', ')})`;
+  const up = upgradedBasics(bulletCorpus(orig, matched) + '  ' + cvCorpus, rw);
+  if (up.length) return `raised skill level (${up.join(', ')})`;
   // Words from anywhere in their CV are theirs; only words the whole CV never uses count as borrowed.
   const borrowed = jd ? borrowedAdvertWords(rw, jd, bulletCorpus(orig, matched) + '  ' + cvCorpus) : [];
   return borrowed.length ? `advert wording (${borrowed.join(', ')})` : '';

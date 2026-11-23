@@ -203,7 +203,9 @@ async function scoreCV(cvText, jdText, opts = {}) {
 // reaches "any", OR the CV covers at least "ess" percent of the advert's must-haves: missing
 // nice-to-haves alone never skip a job (tailoring brings them forward). Meeting none of two or
 // more must-haves always skips. Checked on the CV as written, before any keyword addendum.
-const MATCH_LEVELS = { wide: { any: 35, ess: 30 }, balanced: { any: 45, ess: 40 }, strict: { any: 70, ess: 70 } };
+// 2026-11-23: balanced eased (was 45/40) so more real fits get through; tailoring then brings
+// the matching experience forward. Real mismatches still fail the must-have rule above.
+const MATCH_LEVELS = { wide: { any: 35, ess: 30 }, balanced: { any: 40, ess: 34 }, strict: { any: 70, ess: 70 } };
 function matchFit(cvText, allKeywords, level) {
   const L = MATCH_LEVELS[level] || MATCH_LEVELS.balanced;
   const kws = !allKeywords || !allKeywords.length ? [] : typeof allKeywords[0] === 'string' ? normaliseKeywords(allKeywords) : allKeywords;
@@ -233,7 +235,9 @@ function rescoreCV(cvText, allKeywords) {
 // The tailored CV that is actually sent must match at least this share of the advert's keywords.
 // Below it the application rarely gets a call, so the job is skipped (and the daily cap kept for
 // better fits). Follows the user's "How close a match" setting.
-const SENT_FLOOR = { wide: 50, balanced: 60, strict: 75 };
+// 2026-11-23: lowered (was 50/60/75). Tailoring reshapes the CV, it doesn't gatekeep: a job that
+// passed the match check above is only dropped here when the tailored CV is still far off.
+const SENT_FLOOR = { wide: 35, balanced: 45, strict: 70 };
 const sentFloor = (level) => SENT_FLOOR[level] || SENT_FLOOR.balanced;
 
 module.exports = { scoreCV, rescoreCV, extractJDKeywords, computeScore, hasTerm, matchFit, MATCH_LEVELS, SENT_FLOOR, sentFloor };
