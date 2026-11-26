@@ -522,6 +522,16 @@ async function firstWinCount(region) {
     return n;
   } catch (_) { return 0; }
 }
+// Company sites on Manatal (careers-page.com) need one extra site permission. Chrome only lets us ask
+// during a click, so the first Start asks once (never again if they say no); more jobs if they allow it.
+function askExtraSites() {
+  try {
+    if (localStorage.getItem('jobai_manatal_asked')) return;
+    localStorage.setItem('jobai_manatal_asked', '1');
+    chrome.permissions.request({ origins: ['https://www.careers-page.com/*'] }).catch(() => {});
+  } catch (_) {}
+}
+
 async function startAgent(key) {
   if (!(await recheckLicence())) { navigate('license'); return; }
   runAgent(key);
@@ -1156,7 +1166,7 @@ VIEWS.dashboard = async function renderDashboardView() {
         </tbody></table></div></div>` : ''}
       ${recentHtml(all, settings.recentClearedAt)}`;
 
-    $$('.start').forEach((b) => b.addEventListener('click', () => startAgent(b.dataset.bot)));
+    $$('.start').forEach((b) => b.addEventListener('click', () => { if (b.dataset.bot === 'ats') askExtraSites(); startAgent(b.dataset.bot); }));
     $$('.rv-ok').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'cv_ready' }); renderDashboard(); }));
     $$('.rv-skip').forEach((b) => b.addEventListener('click', async () => { await store.updateJob(b.dataset.id, { status: 'skipped', reason: 'Skipped in review' }); renderDashboard(); }));
     $('#uc-copy')?.addEventListener('click', () => showUcLog(ucPending));
@@ -1164,6 +1174,7 @@ VIEWS.dashboard = async function renderDashboardView() {
     $('#recent-clear')?.addEventListener('click', async () => { await store.patch('settings', { recentClearedAt: new Date().toISOString() }); renderDashboard(); });
     $$('.stop').forEach((b) => b.addEventListener('click', () => { agents[b.dataset.bot].stop(); renderDashboard(); }));
     $('#start-all').addEventListener('click', async () => {
+      askExtraSites(); // must be asked inside the click, before anything waits
       if (!(await recheckLicence())) { navigate('license'); return; }
       for (const k of Object.keys(agents)) if (canRun[k] && enabled(k) && !agents[k].running) runAgent(k);
       setTimeout(renderDashboard, 300);

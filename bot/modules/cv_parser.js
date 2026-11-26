@@ -80,9 +80,14 @@ const HEAD = {
   strengths:  /\b(CORE STRENGTHS|KEY STRENGTHS|STRENGTHS|CAREER HIGHLIGHTS|HIGHLIGHTS|KEY ACHIEVEMENTS|SELECTED ACHIEVEMENTS|ACHIEVEMENTS)\b/i,
 };
 
-// A line is a section heading when it is essentially all-caps with no lowercase.
+// The same heading names as a whole line, any case ("Profile", "Work Experience:").
+const HEAD_EXACT = Object.values(HEAD).map((re) => new RegExp(`^${re.source.replace(/\\b/g, '')}:?$`, 'i'));
+
+// A line is a section heading when it is essentially all-caps with no lowercase, or when the
+// whole line is a known heading name in any case (Word CVs usually write "Profile", "Experience").
 function isHeadingLine(line) {
   const t = line.trim();
+  if (t.length >= 5 && t.length <= 40 && /^[A-Z]/.test(t) && HEAD_EXACT.some((re) => re.test(t))) return true;
   if (t.length < 4 || t.length > 65) return false;
   if (/^\d/.test(t)) return false;
   if (t.includes('@') || t.includes('•')) return false;
@@ -211,9 +216,11 @@ function parseCV(cvText, opts = {}) {
 
   // ── Experience ───────────────────────────────────────────────────────────
   const experience = [];
+  let afterBlank = false; // Word CVs: each bullet is its own paragraph, with a blank line between
   for (const raw of (sections.experience || [])) {
     const line = raw.trim();
-    if (!line) continue;
+    if (!line) { afterBlank = true; continue; }
+    const newPara = afterBlank; afterBlank = false;
     if (isBullet(line)) {
       if (experience.length) experience[experience.length - 1].bullets.push(stripBullet(line));
       continue;
@@ -231,7 +238,8 @@ function parseCV(cvText, opts = {}) {
     if (last) {
       const prev = last.bullets[last.bullets.length - 1];
       const endsSentence = prev && /[.!?]["'’)\]]?\s*$/.test(prev);
-      if (!last.bullets.length || endsSentence) {
+      // A new paragraph starting with a capital is a new bullet; a lowercase start is a wrapped line.
+      if (!last.bullets.length || endsSentence || (newPara && /^[A-Z0-9]/.test(line))) {
         last.bullets.push(line);
       } else {
         last.bullets[last.bullets.length - 1] += ' ' + line;

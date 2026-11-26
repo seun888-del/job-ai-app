@@ -19,6 +19,7 @@ function detectATS(url) {
   if (u.includes('teamtailor.com'))                                      return 'teamtailor';
   if (u.includes('recruitee.com'))                                       return 'recruitee';
   if (u.includes('pinpointhq.com'))                                      return 'pinpoint';
+  if (u.includes('careers-page.com'))                                    return 'manatal';
   if (u.includes('bamboohr.com'))                                        return 'bamboohr';
   if (u.includes('jobvite.com') || u.includes('hire.jobvite'))          return 'jobvite';
   if (u.includes('jazz.co') || u.includes('hire.jazz'))                 return 'jazz';
@@ -35,7 +36,7 @@ function detectATS(url) {
 // ATS we can fill without a pre-existing account
 const SUPPORTED_ATS = new Set([
   'greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable',
-  'breezy', 'teamtailor', 'recruitee', 'pinpoint', 'bamboohr', 'jobvite', 'jazz',
+  'breezy', 'teamtailor', 'recruitee', 'pinpoint', 'bamboohr', 'jobvite', 'jazz', 'manatal',
 ]);
 
 // ATS that require the candidate to already have an account — skip these
@@ -78,7 +79,9 @@ async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
   // Most ATSes show a job-info page first with an "Apply" / "I'm interested"
   // button that opens (or navigates to) the actual form. Click it, then wait for
   // a form field to render (SPA apply pages, e.g. SmartRecruiters, load async).
-  if (['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'breezy', 'teamtailor', 'recruitee'].includes(ats)) {
+  // The form already on screen (Breezy and Manatal open straight on it): no Apply button to press.
+  const formShown = await page.evaluate(() => [...document.querySelectorAll('input[type="email"], input[name*="email" i], input[placeholder*="email" i]')].some((e) => e.offsetParent)).catch(() => false);
+  if (!formShown && ['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'breezy', 'teamtailor', 'recruitee', 'manatal'].includes(ats)) {
     for (const sel of [
       'button:has-text("I\'m interested")', 'a:has-text("I\'m interested")',
       'a:has-text("Apply for this job")', 'button:has-text("Apply for this job")',
@@ -89,6 +92,9 @@ async function fillExternalForm(page, job, resumePath, ats, opts = {}) {
     ]) {
       try {
         const btn = await page.$(sel);
+        // "Apply using LinkedIn / Indeed / Google" signs in somewhere else: never press those.
+        const label = btn ? String(await btn.evaluate((e) => e.innerText || e.getAttribute('aria-label') || '').catch(() => '')) : '';
+        if (/linkedin|indeed|google|facebook|seek|sign ?in|log ?in/i.test(label)) continue;
         if (btn && await btn.isVisible()) {
           await Promise.all([page.waitForLoadState('domcontentloaded').catch(() => {}), btn.click()]);
           await J(1500, 2500);
@@ -725,12 +731,15 @@ async function _fillStep(page, job) {
     try {
       if (await cb.isChecked().catch(() => false)) continue;
       const info = await cb.evaluate(el => {
-        const lab = document.querySelector(`label[for="${el.id}"]`) || el.closest('label') || el.parentElement;
+        // An empty id would match label[for=""] (Manatal puts that on every field label): skip it.
+        const lab = (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)) || el.closest('label') || el.parentElement;
         return { text: (lab?.innerText || '').toLowerCase(), id: el.id || '' };
       }).catch(() => ({ text: '', id: '' }));
       if (!/agree|consent|terms|accept|gdpr|privacy|data protection|process (your|my) personal (information|data)|i have read|^\s*i understand|acknowledge/i.test(info.text)) continue;
       // A future-jobs mailing list is the applicant's choice, not part of applying.
       if (/future (job|role|opportunit|career)|marketing|newsletter|talent (pool|community)|contact me about/i.test(info.text)) continue;
+      // Agreeing to text messages (Breezy's "receive informational text messages") is the applicant's choice too.
+      if (/text messages?|\bsms\b|whatsapp|receive (texts|messages|calls)|message (&|and) data rates|reply stop/i.test(info.text)) continue;
       await J(200, 500);
       let done = false;
       try { await cb.check({ timeout: 2000 }); done = await cb.isChecked().catch(() => false); } catch (_) {}
@@ -1649,7 +1658,10 @@ function formUrl(url) {
   if (m) return `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}`;
   // Pinpoint: the advert's own application form, not the advert.
   const p = String(url || '').match(/^(https:\/\/[a-z0-9-]+\.pinpointhq\.com\/[a-z-]+\/postings\/[0-9a-f-]+)\/?(?:[?#].*)?$/i);
-  return p ? `${p[1]}/applications/new` : url;
+  if (p) return `${p[1]}/applications/new`;
+  // Breezy and Manatal: the form lives at the advert's address + /apply.
+  const ba = String(url || '').match(/^(https:\/\/(?:[a-z0-9-]+\.breezy\.hr\/p\/[^/?#]+|(?:www\.)?careers-page\.com\/[^/?#]+\/job\/[^/?#]+))\/?(?:[?#].*)?$/i);
+  return ba ? `${ba[1]}/apply` : url;
 }
 
 module.exports = { detectATS, SUPPORTED_ATS, ACCOUNT_REQUIRED_ATS, fillExternalForm, submitEmailCode, listOpenQuestions, answerQuestions, formUrl, lastSubmitOutcome: () => lastOutcome, _yesNoForQuestion, _pickRadioOption, _pickDropdownOption };
